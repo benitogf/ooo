@@ -1,0 +1,12 @@
+/data
+/test
+/fuzz
+cover.out
+trace.out
+cover.html
+debug.test
+.vscode
+ooo-fuzz.zip
+cpu.prof
+mem.prof
+ooo.test.exe
