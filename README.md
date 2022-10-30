@@ -2,8 +2,6 @@
 
 [![Test](https://github.com/benitogf/ooo/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/benitogf/ooo/actions/workflows/tests.yml)
 
-![ooo](ooo.jpg)
-
 Zero configuration data persistence and communication layer.
 
 Dynamic websocket and restful http service to quickly prototype realtime applications.
