@@ -51,6 +51,7 @@ type Stream struct {
 	OnSubscribe   Subscribe
 	OnUnsubscribe Unsubscribe
 	ForcePatch    bool
+	NoPatch       bool
 	pools         []*Pool
 	Console       *coat.Console
 }
@@ -200,6 +201,11 @@ func (sm *Stream) broadcast(poolIndex int, data []byte, snapshot bool, version i
 //
 // snapshot, true (snapshot)
 func (sm *Stream) Patch(poolIndex int, data []byte) ([]byte, bool, int64) {
+	// no patch, only snapshot
+	if sm.NoPatch {
+		version := sm._setCache(poolIndex, data)
+		return data, true, version
+	}
 	patch, err := jsonpatch.CreatePatch(sm.pools[poolIndex].cache.Data, data)
 	if err != nil {
 		sm.Console.Err("patch create failed", err)
