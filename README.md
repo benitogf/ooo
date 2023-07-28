@@ -38,7 +38,7 @@ import "github.com/benitogf/ooo"
 
 func main() {
   app := ooo.Server{}
-  app.Start("localhost:8800")
+  app.Start("0.0.0.0:8800")
   app.WaitClose()
 }
 ```
@@ -129,5 +129,70 @@ app.Router.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
   w.Header().Set("Content-Type", "application/json")
   fmt.Fprintf(w, "{}")
 })
-app.Start("localhost:8800")
+app.Start("0.0.0.0:8800")
+```
+
+
+### write/read storage api
+
+```golang
+package main
+
+import (
+	"encoding/json"
+	"log"
+	"strconv"
+	"time"
+
+	"github.com/benitogf/ooo"
+	"github.com/benitogf/ooo/meta"
+)
+
+type Game struct {
+	Started int64 `json:"started"`
+}
+
+// not good practice, just for illustration purposes only
+// handle errors responsably :)
+func panicHandle(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func main() {
+	// create a static server
+	server := ooo.Server{
+		Static: true,
+	}
+	// define the path so it's available throug http/ws
+	server.OpenFilter("game")
+
+	// start the server/storage (default to memory storage)
+	server.Start("0.0.0.0:8800")
+
+	// write
+	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	index, err := server.Storage.Set("game", json.RawMessage(`{"started": `+timestamp+`}`))
+	panicHandle(err)
+	log.Println("stored in", index)
+
+	// read
+	data, err := server.Storage.Get("game")
+	panicHandle(err)
+	dataObject, err := meta.Decode(data)
+	panicHandle(err)
+	log.Println("created", dataObject.Created)
+	log.Println("updated", dataObject.Updated)
+	log.Println("data", string(dataObject.Data))
+
+	// parse json to struct
+	game := Game{}
+	err = json.Unmarshal(dataObject.Data, &game)
+	panicHandle(err)
+	log.Println("started", game.Started)
+
+	// close server handler
+	server.WaitClose()
+}
 ```
