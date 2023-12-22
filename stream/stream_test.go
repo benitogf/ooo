@@ -16,7 +16,7 @@ func makeStreamRequestMock(url string) (*http.Request, *hjhttptest.HijackableRes
 	req := httptest.NewRequest("GET", url, nil)
 	req.Header.Add("Connection", "upgrade")
 	req.Header.Add("Sec-Websocket-Version", "13")
-	req.Header.Add("Sec-Websocket-Key", "alo")
+	req.Header.Add("Sec-Websocket-Key", "4aRdFZG5uYrEUw8dsNLW6g==")
 	req.Header.Add("Upgrade", "websocket")
 	w := hjhttptest.NewRecorder(nil)
 
