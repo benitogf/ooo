@@ -1,6 +1,6 @@
 # ooo
 
-[![Test](https://github.com/benitogf/ooo/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/benitogf/ooo/actions/workflows/tests.yml)
+[![Test](https://github.com/benitogf/ooo/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/benitogf/ooo/actions/workflows/tests.yml)
 
 Zero configuration data persistence and communication layer.
 
