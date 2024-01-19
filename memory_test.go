@@ -35,6 +35,16 @@ func TestStreamGlobBroadcastMemory(t *testing.T) {
 	StreamGlobBroadcastTest(t, &app, 3)
 }
 
+func TestStreamGlobBroadcastConcurrentMemory(t *testing.T) {
+	// t.Parallel()
+	app := Server{}
+	app.Silence = true
+	app.ForcePatch = true
+	app.Start("localhost:0")
+	defer app.Close(os.Interrupt)
+	StreamGlobBroadcastConcurretTest(t, &app, 3)
+}
+
 func TestStreamBroadcastFilter(t *testing.T) {
 	// t.Parallel()
 	app := Server{}

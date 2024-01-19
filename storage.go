@@ -39,6 +39,10 @@ type StorageOpt struct {
 //
 // SetForce(key, data, created, updated): store data by manually providing created/updated time values
 //
+// GetAndLock(key): same as get but will lock the key mutex until SetAndUnlock is called for the same key
+//
+// SetAndUnlock(key, data): same as set but will unlock the key mutex
+//
 // Del(key): Delete a key from the storage
 //
 // Clear: will clear all keys from the storage
@@ -55,6 +59,8 @@ type Database interface {
 	GetNRange(path string, limit int, from, to int64) ([]meta.Object, error)
 	Set(key string, data json.RawMessage) (string, error)
 	SetForce(key string, data json.RawMessage, created, updated int64) (string, error)
+	GetAndLock(key string) ([]byte, error)
+	SetAndUnlock(key string, data json.RawMessage) (string, error)
 	Del(key string) error
 	Clear()
 	Watch() StorageChan
