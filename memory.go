@@ -17,6 +17,7 @@ import (
 type MemoryStorage struct {
 	mem             sync.Map
 	mutex           sync.RWMutex
+	memMutex        sync.Map
 	noBroadcastKeys []string
 	watcher         StorageChan
 	storage         *Storage
@@ -136,6 +137,23 @@ func (db *MemoryStorage) Get(path string) ([]byte, error) {
 	sort.Slice(res, meta.Sort(res))
 
 	return meta.Encode(res)
+}
+
+func (db *MemoryStorage) GetAndLock(path string) ([]byte, error) {
+	newLock := sync.Mutex{}
+	lock, _ := db.memMutex.LoadOrStore(path, &newLock)
+	lock.(*sync.Mutex).Lock()
+	return db.Get(path)
+}
+
+func (db *MemoryStorage) SetAndUnlock(path string, data json.RawMessage) (string, error) {
+	lock, found := db.memMutex.Load(path)
+	if !found {
+		return "", errors.New("ooo: lock not found can't unlock")
+	}
+	res, err := db.Set(path, data)
+	lock.(*sync.Mutex).Unlock()
+	return res, err
 }
 
 // GetN get last N elements of a path related value(s)
