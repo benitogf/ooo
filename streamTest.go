@@ -627,11 +627,11 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 	}
 	wg.Wait() // updated
 
-	wsKeys := []string{}
-	for _, obj := range wsObjects {
-		wsKeys = append(wsKeys, obj.Index)
-	}
-	app.Console.Log("after", keys, wsKeys)
+	// wsKeys := []string{}
+	// for _, obj := range wsObjects {
+	// 	wsKeys = append(wsKeys, obj.Index)
+	// }
+	// app.Console.Log("after", keys, wsKeys)
 	require.Equal(t, len(keys), len(wsObjects))
 	for _, obj := range wsObjects {
 		currentRaw := gjson.Get(string(obj.Data), "search_metadata.count")
