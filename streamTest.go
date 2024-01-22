@@ -16,7 +16,6 @@ import (
 
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/jsonpatch"
-	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
 	"github.com/gorilla/mux"
@@ -563,17 +562,20 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 		}
 	}()
 	wg.Wait() // first read
+	require.Zero(t, len(wsObjects))
 
 	app.Console.Log("post data")
 	keys := []string{}
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		_key := key.Build("test/*")
+		// _key := key.Build("test/*")
+		_key := "test/" + strconv.Itoa(i)
 		app.Storage.Set(_key, TEST_DATA)
 		keys = append(keys, _key)
 	}
 
 	wg.Wait() // created
+	require.Equal(t, len(keys), len(wsObjects))
 	same, _ := jsondiff.Compare(wsObjects[0].Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 
@@ -625,6 +627,11 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 	}
 	wg.Wait() // updated
 
+	wsKeys := []string{}
+	for _, obj := range wsObjects {
+		wsKeys = append(wsKeys, obj.Index)
+	}
+	app.Console.Log("after", keys, wsKeys)
 	require.Equal(t, len(keys), len(wsObjects))
 	for _, obj := range wsObjects {
 		currentRaw := gjson.Get(string(obj.Data), "search_metadata.count")

@@ -38,7 +38,7 @@ func TestStreamGlobBroadcastMemory(t *testing.T) {
 func TestStreamGlobBroadcastConcurrentMemory(t *testing.T) {
 	// t.Parallel()
 	app := Server{}
-	app.Silence = true
+	app.Silence = false
 	app.ForcePatch = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
