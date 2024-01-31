@@ -108,8 +108,8 @@ func (db *MemoryStorage) KeysRange(path string, from, to int64) ([]string, error
 	return keys, nil
 }
 
-// Get a key/pattern related value(s)
-func (db *MemoryStorage) Get(path string) ([]byte, error) {
+// get a key/pattern related value(s)
+func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
 	if !strings.Contains(path, "*") {
 		data, found := db.mem.Load(path)
 		if !found {
@@ -134,9 +134,23 @@ func (db *MemoryStorage) Get(path string) ([]byte, error) {
 		return true
 	})
 
-	sort.Slice(res, meta.Sort(res))
+	if order == "desc" {
+		sort.Slice(res, meta.SortDesc(res))
+	} else {
+		sort.Slice(res, meta.SortAsc(res))
+	}
 
 	return meta.Encode(res)
+}
+
+// Get a key/pattern related value(s)
+func (db *MemoryStorage) Get(path string) ([]byte, error) {
+	return db.get(path, "asc")
+}
+
+// Get a key/pattern related value(s)
+func (db *MemoryStorage) GetDescending(path string) ([]byte, error) {
+	return db.get(path, "desc")
 }
 
 func (db *MemoryStorage) GetAndLock(path string) ([]byte, error) {
@@ -156,8 +170,16 @@ func (db *MemoryStorage) SetAndUnlock(path string, data json.RawMessage) (string
 	return res, err
 }
 
-// GetN get last N elements of a path related value(s)
-func (db *MemoryStorage) GetN(path string, limit int) ([]meta.Object, error) {
+func (db *MemoryStorage) Unlock(path string) error {
+	lock, found := db.memMutex.Load(path)
+	if !found {
+		return errors.New("ooo: lock not found can't unlock")
+	}
+	lock.(*sync.Mutex).Unlock()
+	return nil
+}
+
+func (db *MemoryStorage) getN(path string, limit int, order string) ([]meta.Object, error) {
 	res := []meta.Object{}
 	if !strings.Contains(path, "*") {
 		return res, errors.New("ooo: invalid pattern")
@@ -181,13 +203,27 @@ func (db *MemoryStorage) GetN(path string, limit int) ([]meta.Object, error) {
 		return true
 	})
 
-	sort.Slice(res, meta.Sort(res))
+	if order == "desc" {
+		sort.Slice(res, meta.SortDesc(res))
+	} else {
+		sort.Slice(res, meta.SortAsc(res))
+	}
 
 	if len(res) > limit {
 		return res[:limit], nil
 	}
 
 	return res, nil
+}
+
+// GetN get last N elements of a path related value(s)
+func (db *MemoryStorage) GetN(path string, limit int) ([]meta.Object, error) {
+	return db.getN(path, limit, "desc")
+}
+
+// GetN get last N elements of a path related value(s)
+func (db *MemoryStorage) GetNAscending(path string, limit int) ([]meta.Object, error) {
+	return db.getN(path, limit, "asc")
 }
 
 // GetNRange get last N elements of a path related value(s)
@@ -225,7 +261,7 @@ func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]me
 		return true
 	})
 
-	sort.Slice(res, meta.Sort(res))
+	sort.Slice(res, meta.SortDesc(res))
 
 	if len(res) > limit {
 		return res[:limit], nil

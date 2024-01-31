@@ -197,7 +197,7 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
 	var lk sync.Mutex
 	var postObject meta.Object
-	var wsObject []meta.Object
+	var wsObjects []meta.Object
 	var wsEvent messages.Message
 	var wsCache json.RawMessage
 	wsURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/*"}
@@ -243,15 +243,15 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 		require.NoError(t, err)
 		modified, err := patch.Apply([]byte(wsCache))
 		require.NoError(t, err)
-		err = json.Unmarshal(modified, &wsObject)
+		err = json.Unmarshal(modified, &wsObjects)
 		require.NoError(t, err)
 		wsCache = modified
 		lk.Unlock()
 		keys = append(keys, postObject.Index)
 	}
 
-	require.Equal(t, wsObject[0].Index, postObject.Index)
-	same, _ := jsondiff.Compare(wsObject[0].Data, TEST_DATA, &jsondiff.Options{})
+	require.Equal(t, wsObjects[len(wsObjects)-1].Index, postObject.Index)
+	same, _ := jsondiff.Compare(wsObjects[len(wsObjects)-1].Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 
 	app.Console.Log("post update data")
@@ -261,7 +261,7 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 		for _, key := range keys {
 			wg.Add(1)
 			found := meta.Object{}
-			for _, obj := range wsObject {
+			for _, obj := range wsObjects {
 				if obj.Index == key {
 					found = obj
 					break
@@ -291,10 +291,10 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 			require.NoError(t, err)
 			modified, err := patch.Apply([]byte(wsCache))
 			require.NoError(t, err)
-			err = json.Unmarshal(modified, &wsObject)
+			err = json.Unmarshal(modified, &wsObjects)
 			require.NoError(t, err)
 			found = meta.Object{}
-			for _, obj := range wsObject {
+			for _, obj := range wsObjects {
 				if obj.Index == key {
 					found = obj
 					break
@@ -325,13 +325,13 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 	require.NoError(t, err)
 	modified, err := patch.Apply([]byte(wsCache))
 	require.NoError(t, err)
-	err = json.Unmarshal(modified, &wsObject)
+	err = json.Unmarshal(modified, &wsObjects)
 	require.NoError(t, err)
 	lk.Unlock()
 
 	wsClient.Close()
 
-	require.Equal(t, len(wsObject), 0)
+	require.Equal(t, len(wsObjects), 0)
 }
 
 // StreamBroadcastFilterTest testing stream function

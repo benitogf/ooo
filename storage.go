@@ -31,9 +31,15 @@ type StorageOpt struct {
 //
 // Keys: returns a list with existing keys in the storage
 //
-// Get(key): retrieve a value or list of values, the key can include a glob pattern
+// Get(key): retrieve a value or list of values, the key can include a glob pattern (ascending created time order)
 //
-// GetN(path, N): retrieve N list of values matching a glob pattern
+// GetDescending(key): retrieve a value or list of values, the key can include a glob pattern (descending created time order)
+//
+// GetN(path, N): retrieve N list of values matching a glob pattern (descending created time order)
+//
+// GetNAscending(path, N): retrieve N list of values matching a glob pattern (ascending created time order)
+//
+// GetNRange(path, N, from, to): retrieve N list of values matching a glob pattern path created in the time from-to time range (descending created time order)
 //
 // Set(key, data): store data under the provided key, key cannot not include glob pattern
 //
@@ -43,9 +49,11 @@ type StorageOpt struct {
 //
 // SetAndUnlock(key, data): same as set but will unlock the key mutex
 //
+// Unlock(key): unlock key mutex
+//
 // Del(key): Delete a key from the storage
 //
-// Clear: will clear all keys from the storage
+// Clear: will clear all data from the storage
 //
 // Watch: returns a channel that will receive any set or del operation
 type Database interface {
@@ -55,12 +63,15 @@ type Database interface {
 	Keys() ([]byte, error)
 	KeysRange(path string, from, to int64) ([]string, error)
 	Get(key string) ([]byte, error)
+	GetDescending(key string) ([]byte, error)
 	GetN(path string, limit int) ([]meta.Object, error)
+	GetNAscending(path string, limit int) ([]meta.Object, error)
 	GetNRange(path string, limit int, from, to int64) ([]meta.Object, error)
 	Set(key string, data json.RawMessage) (string, error)
 	SetForce(key string, data json.RawMessage, created, updated int64) (string, error)
 	GetAndLock(key string) ([]byte, error)
 	SetAndUnlock(key string, data json.RawMessage) (string, error)
+	Unlock(key string) error
 	Del(key string) error
 	Clear()
 	Watch() StorageChan
