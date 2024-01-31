@@ -1030,8 +1030,32 @@ func StorageGetNTest(app *Server, t *testing.T, n int) {
 	testObjects, err := app.Storage.GetN("test/*", limit)
 	require.NoError(t, err)
 	require.Equal(t, limit, len(testObjects))
-	require.Equal(t, strconv.Itoa(n-1), testObjects[0].Index)
+	require.Equal(t, strconv.Itoa(n-1), testObjects[len(testObjects)-1].Index)
 	require.Equal(t, "test/"+strconv.Itoa(n-1), testObjects[0].Path)
+
+	testObjects, err = app.Storage.GetNAscending("test/*", limit)
+	require.NoError(t, err)
+	require.Equal(t, limit, len(testObjects))
+	require.Equal(t, "0", testObjects[len(testObjects)-1].Index)
+	require.Equal(t, "test/0", testObjects[0].Path)
+
+	testObjectsRawDefaultSort, err := app.Storage.Get("test/*")
+	require.NoError(t, err)
+	testObjectsDefaultSort, err := meta.DecodeList(testObjectsRawDefaultSort)
+	require.NoError(t, err)
+	require.Equal(t, "0", testObjectsDefaultSort[0].Index)
+
+	testObjectsRawSort, err := app.Storage.Get("test/*")
+	require.NoError(t, err)
+	testObjectsSort, err := meta.DecodeList(testObjectsRawSort)
+	require.NoError(t, err)
+	require.Equal(t, "0", testObjectsSort[0].Index)
+
+	testObjectsRawSort, err = app.Storage.GetDescending("test/*")
+	require.NoError(t, err)
+	testObjectsSort, err = meta.DecodeList(testObjectsRawSort)
+	require.NoError(t, err)
+	require.Equal(t, strconv.Itoa(n-1), testObjectsSort[0].Index)
 }
 
 // StorageGetNRangeTest testing storage GetN function

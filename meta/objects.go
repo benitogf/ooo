@@ -19,19 +19,16 @@ type Object struct {
 // Empty meta object byte array value
 var EmptyObject = []byte(`{ "created": 0, "updated": 0, "index": "", "data": {} }`)
 
-func max(a, b int64) int64 {
-	if a > b {
-		return a
+// SortDesc by created
+func SortDesc(obj []Object) func(i, j int) bool {
+	return func(i, j int) bool {
+		return obj[i].Created > obj[j].Created
 	}
-	return b
 }
 
-// Sort by created/updated
-func Sort(obj []Object) func(i, j int) bool {
+func SortAsc(obj []Object) func(i, j int) bool {
 	return func(i, j int) bool {
-		maxi := max(obj[i].Updated, obj[i].Created)
-		maxj := max(obj[j].Updated, obj[j].Created)
-		return maxi > maxj
+		return obj[i].Created < obj[j].Created
 	}
 }
 
