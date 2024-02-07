@@ -45,9 +45,9 @@ type StorageOpt struct {
 //
 // SetForce(key, data, created, updated): store data by manually providing created/updated time values
 //
-// GetAndLock(key): same as get but will lock the key mutex until SetAndUnlock is called for the same key
+// GetAndLock(key): same as get but will lock the key mutex until SetAndUnlock is called for the same key (non glob key only)
 //
-// SetAndUnlock(key, data): same as set but will unlock the key mutex
+// SetAndUnlock(key, data): same as set but will unlock the key mutex (non glob key only)
 //
 // Unlock(key): unlock key mutex
 //
