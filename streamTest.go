@@ -579,7 +579,7 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 	same, _ := jsondiff.Compare(wsObjects[0].Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 
-	app.Console.Log("post update data")
+	app.Console.Log("post update data", len(keys))
 	Q := 6
 	for _, _key := range keys {
 		wg.Add(Q)
@@ -587,17 +587,17 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 			for i := 0; i < Q; i++ {
 				currentObj := meta.Object{}
 				rawCurrent, err := app.Storage.GetAndLock(__key)
-				require.NoError(t, err)
+				expect.Nil(err)
 				err = json.Unmarshal(rawCurrent, &currentObj)
-				require.NoError(t, err)
+				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
 				nextSet := current + 1
-				// app.Console.Log("up", __key, nextSet)
+				app.Console.Log("up", __key, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.count", nextSet)
-				require.NoError(t, err)
+				expect.Nil(err)
 				_, err = app.Storage.SetAndUnlock(__key, json.RawMessage(newData))
-				require.NoError(t, err)
+				expect.Nil(err)
 			}
 		}(_key)
 	}
@@ -608,23 +608,25 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 			for i := 0; i < Q; i++ {
 				currentObj := meta.Object{}
 				rawCurrent, err := app.Storage.GetAndLock(__key)
-				require.NoError(t, err)
+				expect.Nil(err)
 				err = json.Unmarshal(rawCurrent, &currentObj)
-				require.NoError(t, err)
+				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.something")
 				current := currentRaw.Value().(string)
 				nextSet := "popo"
 				if current == "popo" {
 					nextSet = "nopo"
 				}
-				// app.Console.Log("up", __key, nextSet)
+				app.Console.Log("up", __key, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.something", nextSet)
-				require.NoError(t, err)
+				expect.Nil(err)
 				_, err = app.Storage.SetAndUnlock(__key, json.RawMessage(newData))
-				require.NoError(t, err)
+				expect.Nil(err)
 			}
 		}(_key)
 	}
+
+	app.Console.Log("wait update data")
 	wg.Wait() // updated
 
 	// wsKeys := []string{}
@@ -638,6 +640,11 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 		current := currentRaw.Value().(float64)
 		require.Equal(t, float64(4+Q), current)
 	}
+
+	_, err = app.Storage.GetAndLock("test/*")
+	require.Error(t, err)
+	_, err = app.Storage.SetAndUnlock("test/*", TEST_DATA)
+	require.Error(t, err)
 
 	wsClient.Close()
 }
