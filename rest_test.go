@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/benitogf/ooo"
+	"github.com/benitogf/ooo/meta"
 	"github.com/stretchr/testify/require"
 )
 
@@ -19,7 +20,7 @@ func TestRestPostNonObject(t *testing.T) {
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
 	var jsonStr = []byte(`non object`)
-	req := httptest.NewRequest("POST", "/test", bytes.NewBuffer(jsonStr))
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBuffer(jsonStr))
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -33,7 +34,7 @@ func TestRestPostEmptyData(t *testing.T) {
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
 	var jsonStr = []byte(``)
-	req := httptest.NewRequest("POST", "/test", bytes.NewBuffer(jsonStr))
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBuffer(jsonStr))
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -47,7 +48,7 @@ func TestRestPostInvalidData(t *testing.T) {
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
 	var jsonStr = []byte(`oldkoskdasoejd`)
-	req := httptest.NewRequest("POST", "/test", bytes.NewBuffer(jsonStr))
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewBuffer(jsonStr))
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -61,7 +62,7 @@ func TestRestPostKey(t *testing.T) {
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
 	var jsonStr = []byte(`{"data":"test"}`)
-	req := httptest.NewRequest("POST", "/test//a", bytes.NewBuffer(jsonStr))
+	req := httptest.NewRequest(http.MethodPost, "/test//a", bytes.NewBuffer(jsonStr))
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -129,7 +130,7 @@ func TestRestGet(t *testing.T) {
 	data, _ := app.Storage.Get("test")
 	dataSources, _ := app.Storage.Get("sources")
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -139,7 +140,7 @@ func TestRestGet(t *testing.T) {
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 	require.Equal(t, string(data), string(body))
 
-	req = httptest.NewRequest("GET", "/sources", nil)
+	req = httptest.NewRequest(http.MethodGet, "/sources", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
@@ -149,7 +150,7 @@ func TestRestGet(t *testing.T) {
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
 	require.Equal(t, string(dataSources), string(body))
 
-	req = httptest.NewRequest("GET", "/test/notest", nil)
+	req = httptest.NewRequest(http.MethodGet, "/test/notest", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
@@ -167,7 +168,7 @@ func TestRestStats(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -179,7 +180,7 @@ func TestRestStats(t *testing.T) {
 
 	_ = app.Storage.Del("test/1")
 
-	req = httptest.NewRequest("GET", "/", nil)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
@@ -205,41 +206,47 @@ func TestRestResponseCode(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	req = httptest.NewRequest("GET", "/test", nil)
+	req = httptest.NewRequest(http.MethodGet, "/test", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	req = httptest.NewRequest("GET", "/*", nil)
+	req = httptest.NewRequest(http.MethodGet, "/*", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	req = httptest.NewRequest("DELETE", "/test", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/test", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
-	req = httptest.NewRequest("DELETE", "/test/1", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/test/1", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
 
-	req = httptest.NewRequest("GET", "/", nil)
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	req = httptest.NewRequest(http.MethodPatch, "/none/*", nil)
+	w = httptest.NewRecorder()
+	app.Router.ServeHTTP(w, req)
+	resp = w.Result()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
 func TestRestGetBadRequest(t *testing.T) {
@@ -248,7 +255,7 @@ func TestRestGetBadRequest(t *testing.T) {
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	req := httptest.NewRequest("GET", "//test", nil)
+	req := httptest.NewRequest(http.MethodGet, "//test", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -262,7 +269,7 @@ func TestRestPostInvalidKey(t *testing.T) {
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	req := httptest.NewRequest("POST", "/test/*/*", nil)
+	req := httptest.NewRequest(http.MethodPost, "/test/*/*", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -276,7 +283,7 @@ func TestRestGetInvalidKey(t *testing.T) {
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	req := httptest.NewRequest("GET", "/test/*/**", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test/*/**", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -290,10 +297,38 @@ func TestRestDeleteInvalidKey(t *testing.T) {
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	req := httptest.NewRequest("DELETE", "/test/*/**", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/test/*/**", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
 
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestPatch(t *testing.T) {
+	app := ooo.Server{}
+	app.Silence = true
+	app.Start("localhost:0")
+	defer app.Close(os.Interrupt)
+
+	var testInput = []byte(`{"one":"test"}`)
+	var testUpdate = []byte(`{"two":"testing"}`)
+	var testOutput = []byte(`{"one":"test","two":"testing"}`)
+	index, err := app.Storage.Set("test/1", testInput)
+	require.NoError(t, err)
+	require.NotEmpty(t, index)
+
+	req := httptest.NewRequest(http.MethodPatch, "/test/*", bytes.NewBuffer(testUpdate))
+	w := httptest.NewRecorder()
+	app.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	raw, err := app.Storage.Get("test/1")
+	require.NoError(t, err)
+
+	obj, err := meta.Decode(raw)
+	require.NoError(t, err)
+
+	require.Equal(t, string(testOutput), string(obj.Data))
 }

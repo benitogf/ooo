@@ -1,6 +1,6 @@
 module github.com/benitogf/ooo
 
-go 1.19
+go 1.22
 
 require (
 	github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec

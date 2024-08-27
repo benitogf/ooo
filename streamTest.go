@@ -44,7 +44,7 @@ func StreamBroadcastTest(t *testing.T, app *Server) {
 				break
 			}
 			lk.Lock()
-			wsEvent, err = messages.DecodeTest(message)
+			wsEvent, err = messages.DecodeBuffer(message)
 			lk.Unlock()
 			expect.Nil(err)
 			app.Console.Log("read wsClient", wsEvent.Data)
@@ -136,7 +136,7 @@ func StreamItemGlobBroadcastTest(t *testing.T, app *Server) {
 				break
 			}
 			lk.Lock()
-			wsEvent, err = messages.DecodeTest(message)
+			wsEvent, err = messages.DecodeBuffer(message)
 			lk.Unlock()
 			expect.Nil(err)
 			app.Console.Log("read wsClient", wsEvent.Data)
@@ -211,7 +211,7 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 				break
 			}
 			lk.Lock()
-			wsEvent, err = messages.DecodeTest(message)
+			wsEvent, err = messages.DecodeBuffer(message)
 			lk.Unlock()
 			expect.Nil(err)
 			// app.Console.Log("read wsClient", wsEvent.Data)
@@ -357,7 +357,7 @@ func StreamBroadcastFilterTest(t *testing.T, app *Server) {
 			if err != nil {
 				break
 			}
-			wsExtraEvent, err = messages.DecodeTest(message)
+			wsExtraEvent, err = messages.DecodeBuffer(message)
 			expect.Nil(err)
 			app.Console.Log("read wsClient", string(message))
 			wg.Done()
@@ -404,7 +404,7 @@ func StreamBroadcastForcePatchTest(t *testing.T, app *Server) {
 			if err != nil {
 				break
 			}
-			wsExtraEvent, err = messages.DecodeTest(message)
+			wsExtraEvent, err = messages.DecodeBuffer(message)
 			expect.Nil(err)
 			if !firstMessage {
 				expect.True(!wsExtraEvent.Snapshot)
@@ -490,7 +490,7 @@ func StreamBroadcastNoPatchTest(t *testing.T, app *Server) {
 			if err != nil {
 				break
 			}
-			wsExtraEvent, err = messages.DecodeTest(message)
+			wsExtraEvent, err = messages.DecodeBuffer(message)
 			expect.Nil(err)
 			expect.True(wsExtraEvent.Snapshot)
 			app.Console.Log("read wsClient", string(message))
@@ -543,7 +543,7 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 			if err != nil {
 				break
 			}
-			wsEvent, err = messages.DecodeTest(message)
+			wsEvent, err = messages.DecodeBuffer(message)
 			expect.Nil(err)
 			if !wsEvent.Snapshot {
 				patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))

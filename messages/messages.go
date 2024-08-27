@@ -4,6 +4,8 @@ import (
 	"errors"
 	"io"
 
+	"github.com/benitogf/jsonpatch"
+	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 )
 
@@ -15,7 +17,7 @@ type Message struct {
 }
 
 // DecodeTest data (testing function)
-func DecodeTest(data []byte) (Message, error) {
+func DecodeBuffer(data []byte) (Message, error) {
 	var wsEvent Message
 	err := json.Unmarshal(data, &wsEvent)
 	if len(wsEvent.Data) == 0 {
@@ -29,7 +31,7 @@ func DecodeTest(data []byte) (Message, error) {
 }
 
 // Decode message
-func Decode(r io.Reader) (json.RawMessage, error) {
+func DecodeReader(r io.Reader) (json.RawMessage, error) {
 	var httpEvent json.RawMessage
 	decoder := json.NewDecoder(r)
 	err := decoder.Decode(&httpEvent)
@@ -41,4 +43,58 @@ func Decode(r io.Reader) (json.RawMessage, error) {
 	}
 
 	return httpEvent, nil
+}
+
+func PatchCache(data []byte, cache json.RawMessage) (json.RawMessage, error) {
+	message, err := DecodeBuffer(data)
+	if err != nil {
+		return cache, err
+	}
+
+	if message.Snapshot {
+		cache = message.Data
+		return cache, nil
+	}
+	if string(message.Data) == "[]" {
+		return cache, nil
+	}
+
+	patch, err := jsonpatch.DecodePatch([]byte(message.Data))
+	if err != nil || patch == nil {
+		return cache, err
+	}
+	modifiedBytes, err := patch.Apply([]byte(cache))
+	if err != nil || modifiedBytes == nil {
+		return cache, err
+	}
+
+	return modifiedBytes, nil
+}
+
+func Patch(data []byte, cache json.RawMessage) (json.RawMessage, meta.Object, error) {
+	cache, err := PatchCache(data, cache)
+	if err != nil {
+		return cache, meta.Object{}, err
+	}
+
+	result, err := meta.Decode([]byte(cache))
+	if err != nil {
+		return cache, result, err
+	}
+
+	return cache, result, nil
+}
+
+func PatchList(data []byte, cache json.RawMessage) (json.RawMessage, []meta.Object, error) {
+	cache, err := PatchCache(data, cache)
+	if err != nil {
+		return cache, []meta.Object{}, err
+	}
+
+	result, err := meta.DecodeList([]byte(cache))
+	if err != nil {
+		return cache, result, err
+	}
+
+	return cache, result, nil
 }

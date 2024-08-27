@@ -1063,12 +1063,12 @@ func StorageGetNRangeTest(app *Server, t *testing.T, n int) {
 	app.Storage.Clear()
 	for i := 1; i < n; i++ {
 		value := strconv.Itoa(i)
-		key, err := app.Storage.SetForce("test/"+value, TEST_DATA, int64(i), 0)
+		key, err := app.Storage.SetWithMeta("test/"+value, TEST_DATA, int64(i), 0)
 		require.NoError(t, err)
 		require.Equal(t, value, key)
 	}
 
-	_, err := app.Storage.SetForce("test/0", TEST_DATA, 0, 0)
+	_, err := app.Storage.SetWithMeta("test/0", TEST_DATA, 0, 0)
 	require.NoError(t, err)
 
 	limit := 1
@@ -1083,11 +1083,10 @@ func StorageGetNRangeTest(app *Server, t *testing.T, n int) {
 // StorageKeysRangeTest testing storage GetN function
 func StorageKeysRangeTest(app *Server, t *testing.T, n int) {
 	app.Storage.Clear()
-	testData := TEST_DATA
 	first := ""
 	for i := 0; i < n; i++ {
 		path := key.Build("test/*")
-		key, err := app.Storage.Set(path, testData)
+		key, err := app.Storage.Set(path, TEST_DATA)
 		if first == "" {
 			first = key
 		}
@@ -1099,4 +1098,39 @@ func StorageKeysRangeTest(app *Server, t *testing.T, n int) {
 	require.NoError(t, err)
 	require.Equal(t, 1, len(keys))
 	require.Equal(t, "test/"+first, keys[0])
+}
+
+func StorageBatchSetTest(app *Server, t *testing.T, n int) {
+	app.Storage.Clear()
+	testData := json.RawMessage(`{"test":"123"}`)
+	for i := 1; i < n; i++ {
+		_key := strconv.Itoa(i)
+		key, err := app.Storage.SetWithMeta("test/"+_key, testData, int64(i), 0)
+		require.NoError(t, err)
+		require.Equal(t, _key, key)
+	}
+
+	for i := 1; i < n; i++ {
+		_key := strconv.Itoa(i)
+		raw, err := app.Storage.Get("test/" + _key)
+		require.NoError(t, err)
+		obj, err := meta.Decode(raw)
+		require.NoError(t, err)
+		require.Equal(t, testData, json.RawMessage(string(obj.Data)))
+	}
+
+	// test data merge
+	testUpdateData := json.RawMessage(`{"another":"1234","newKey":"new"}`)
+	expectedNewData := json.RawMessage(`{"another":"1234","newKey":"new","test":"123"}`)
+	_, err := app.Storage.Patch("test/*", testUpdateData)
+	require.NoError(t, err)
+
+	for i := 1; i < n; i++ {
+		_key := strconv.Itoa(i)
+		raw, err := app.Storage.Get("test/" + _key)
+		require.NoError(t, err)
+		obj, err := meta.Decode(raw)
+		require.NoError(t, err)
+		require.Equal(t, expectedNewData, json.RawMessage(string(obj.Data)))
+	}
 }
