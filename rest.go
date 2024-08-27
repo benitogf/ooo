@@ -13,6 +13,10 @@ import (
 	"github.com/gorilla/mux"
 )
 
+var (
+	ErrNotAuthorized = errors.New("ooo: pathKeyError key is not valid")
+)
+
 func (app *Server) getStats(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Upgrade") == "websocket" {
 		app.clock(w, r)
@@ -20,7 +24,7 @@ func (app *Server) getStats(w http.ResponseWriter, r *http.Request) {
 	}
 	if !app.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", errors.New("ooo: this request is not authorized"))
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
 	}
 
@@ -36,32 +40,80 @@ func (app *Server) getStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
-	vkey := mux.Vars(r)["key"]
-	count := strings.Count(vkey, "*")
-	where := strings.Index(vkey, "*")
-	event, err := messages.Decode(r.Body)
-	if !key.IsValid(vkey) || count > 1 || (count == 1 && where != len(vkey)-1) {
+	if !app.Audit(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
+		return
+	}
+
+	_key := mux.Vars(r)["key"]
+	countGlob := strings.Count(_key, "*")
+	where := strings.Index(_key, "*")
+	invalidGlobCount := countGlob > 1
+	globNotAtTheEndOfPath := countGlob == 1 && where != len(_key)-1
+	if !key.IsValid(_key) || invalidGlobCount || globNotAtTheEndOfPath {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
 		return
 	}
 
-	if !app.Audit(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", errors.New("ooo: this request is not authorized"))
-		return
-	}
-
+	event, err := messages.DecodeReader(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	_key := key.Build(vkey)
+	_newKey := key.Build(_key)
+	data, err := app.filters.Write.check(_newKey, event, app.Static)
+	if err != nil {
+		app.Console.Err("setError:filter["+_newKey+"]", err)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
+	index, err := app.Storage.Set(_newKey, data)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
+	app.Console.Log("publish", _newKey)
+	app.filters.AfterWrite.check(_newKey)
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"index":"`+index+`"}`)
+}
+
+func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
+	if !app.Audit(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
+		return
+	}
+
+	_key := mux.Vars(r)["key"]
+	countGlob := strings.Count(_key, "*")
+	where := strings.Index(_key, "*")
+	invalidGlobCount := countGlob > 1
+	globNotAtTheEndOfPath := countGlob == 1 && where != len(_key)-1
+	if !key.IsValid(_key) || invalidGlobCount || globNotAtTheEndOfPath {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		return
+	}
+
+	event, err := messages.DecodeReader(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
 	data, err := app.filters.Write.check(_key, event, app.Static)
 	if err != nil {
-		app.Console.Err("setError["+_key+"]", err)
+		app.Console.Err("setError:filter["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
@@ -74,12 +126,56 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.Console.Log("publish", _key)
+	app.Console.Log("republish", _key)
 	app.filters.AfterWrite.check(_key)
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, "{"+
-		"\"index\": \""+index+"\""+
-		"}")
+	fmt.Fprintf(w, `{"index":"`+index+`"}`)
+}
+
+func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
+	if !app.Audit(r) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
+		return
+	}
+
+	_key := mux.Vars(r)["key"]
+	countGlob := strings.Count(_key, "*")
+	where := strings.Index(_key, "*")
+	invalidGlobCount := countGlob > 1
+	globNotAtTheEndOfPath := countGlob == 1 && where != len(_key)-1
+	if !key.IsValid(_key) || invalidGlobCount || globNotAtTheEndOfPath {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		return
+	}
+
+	event, err := messages.DecodeReader(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
+	data, err := app.filters.Write.check(_key, event, app.Static)
+	if err != nil {
+		app.Console.Err("setError["+_key+"]", err)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
+	index, err := app.Storage.Patch(_key, data)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
+	app.Console.Log("patch", _key)
+	app.filters.AfterWrite.check(_key)
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprintf(w, `{"index":"`+index+`"}`)
 }
 
 func (app *Server) read(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +188,7 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 
 	if !app.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", errors.New("ooo: this request is not authorized"))
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
 	}
 
@@ -128,7 +224,7 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 
 	if !app.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", errors.New("ooo: this request is not authorized"))
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
 	}
 
@@ -145,7 +241,7 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		app.Console.Err(err.Error())
-		if err.Error() == "leveldb: not found" || err.Error() == "ooo: not found" {
+		if err == ErrNotFound {
 			w.WriteHeader(http.StatusNotFound)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)

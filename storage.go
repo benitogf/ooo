@@ -43,7 +43,7 @@ type StorageOpt struct {
 //
 // Set(key, data): store data under the provided key, key cannot not include glob pattern
 //
-// SetForce(key, data, created, updated): store data by manually providing created/updated time values
+// SetWithMeta(key, data, created, updated): store data by manually providing created/updated time values
 //
 // GetAndLock(key): same as get but will lock the key mutex until SetAndUnlock is called for the same key (non glob key only)
 //
@@ -68,7 +68,8 @@ type Database interface {
 	GetNAscending(path string, limit int) ([]meta.Object, error)
 	GetNRange(path string, limit int, from, to int64) ([]meta.Object, error)
 	Set(key string, data json.RawMessage) (string, error)
-	SetForce(key string, data json.RawMessage, created, updated int64) (string, error)
+	Patch(key string, data json.RawMessage) (string, error)
+	SetWithMeta(key string, data json.RawMessage, created, updated int64) (string, error)
 	GetAndLock(key string) ([]byte, error)
 	SetAndUnlock(key string, data json.RawMessage) (string, error)
 	Unlock(key string) error

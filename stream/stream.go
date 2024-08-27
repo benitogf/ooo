@@ -233,10 +233,9 @@ func (sm *Stream) Write(client *Conn, data string, snapshot bool, version int64)
 	defer client.mutex.Unlock()
 	client.conn.SetWriteDeadline(time.Now().Add(timeout))
 	err := client.conn.WriteMessage(websocket.BinaryMessage, []byte("{"+
-		"\"snapshot\": "+strconv.FormatBool(snapshot)+","+
-		"\"version\": \""+strconv.FormatInt(version, 16)+"\","+
-		"\"data\": "+data+
-		"}"))
+		"\"snapshot\":"+strconv.FormatBool(snapshot)+","+
+		"\"version\":\""+strconv.FormatInt(version, 16)+"\","+
+		"\"data\":"+data+"}"))
 
 	if err != nil {
 		client.conn.Close()

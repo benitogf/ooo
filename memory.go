@@ -10,7 +10,14 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/benitogf/ooo/key"
+	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/meta"
+)
+
+var (
+	ErrInvalidPath = errors.New("ooo: invalid path")
+	ErrNotFound    = errors.New("ooo: not found")
+	ErrNoop        = errors.New("ooo: noop")
 )
 
 // MemoryStorage composition of Database interface
@@ -127,7 +134,7 @@ func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
 	if !strings.Contains(path, "*") {
 		data, found := db.mem.Load(path)
 		if !found {
-			return []byte(""), errors.New("ooo: not found")
+			return []byte(""), ErrNotFound
 		}
 
 		return data.([]byte), nil
@@ -257,10 +264,6 @@ func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]me
 	}
 
 	db.mem.Range(func(k interface{}, value interface{}) bool {
-		if !key.Match(path, k.(string)) {
-			return true
-		}
-
 		current := k.(string)
 		if !key.Match(path, current) {
 			return true
@@ -307,12 +310,55 @@ func (db *MemoryStorage) Peek(key string, now int64) (int64, int64) {
 // Set a value
 func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) {
 	if !key.IsValid(path) {
-		return path, errors.New("ooo: invalid storage path")
+		return path, ErrInvalidPath
 	}
 	if len(data) == 0 {
 		return path, errors.New("ooo: invalid storage data (empty)")
 	}
 	now := time.Now().UTC().UnixNano()
+
+	if !strings.Contains(path, "*") {
+		index := key.LastIndex(path)
+		created, updated := db.Peek(path, now)
+		db.mem.Store(path, meta.New(&meta.Object{
+			Created: created,
+			Updated: updated,
+			Index:   index,
+			Path:    path,
+			Data:    data,
+		}))
+
+		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
+			db.watcher <- StorageEvent{Key: path, Operation: "set"}
+		}
+		return index, nil
+	}
+
+	// DO BATCH SET
+
+	return path, nil
+}
+
+func (db *MemoryStorage) _patch(path string, data json.RawMessage, now int64) (string, error) {
+	raw, found := db.mem.Load(path)
+	if !found {
+		return path, ErrNotFound
+	}
+
+	obj, err := meta.Decode(raw.([]byte))
+	if err != nil {
+		return path, err
+	}
+
+	merged, info, err := merge.MergeBytes(obj.Data, data)
+	if err != nil {
+		return path, err
+	}
+
+	if len(info.Replaced) == 0 {
+		return path, ErrNoop
+	}
+
 	index := key.LastIndex(path)
 	created, updated := db.Peek(path, now)
 	db.mem.Store(path, meta.New(&meta.Object{
@@ -320,19 +366,59 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 		Updated: updated,
 		Index:   index,
 		Path:    path,
-		Data:    data,
+		Data:    merged,
 	}))
 
-	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-		db.watcher <- StorageEvent{Key: path, Operation: "set"}
-	}
-	return index, nil
+	return path, nil
 }
 
-// SetForce set entries (force created/updated values)
-func (db *MemoryStorage) SetForce(path string, data json.RawMessage, created int64, updated int64) (string, error) {
+// Set a value to matching keys
+func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error) {
 	if !key.IsValid(path) {
-		return path, errors.New("ooo: invalid storage path")
+		return path, ErrInvalidPath
+	}
+	if len(data) == 0 {
+		return path, errors.New("ooo: invalid storage data (empty)")
+	}
+
+	now := time.Now().UTC().UnixNano()
+	if !strings.Contains(path, "*") {
+		index, err := db._patch(path, data, now)
+		if err != nil {
+			return path, err
+		}
+
+		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
+			db.watcher <- StorageEvent{Key: path, Operation: "set"}
+		}
+		return index, nil
+	}
+
+	keys := []string{}
+	db.mem.Range(func(_key interface{}, value interface{}) bool {
+		current := _key.(string)
+		if !key.Match(path, current) {
+			return true
+		}
+		keys = append(keys, current)
+		return true
+	})
+
+	// batch patch
+	for _, key := range keys {
+		_, err := db._patch(key, data, now)
+		if err != nil {
+			return path, err
+		}
+	}
+
+	return path, nil
+}
+
+// SetWithMeta set entries with metadata created/updated values
+func (db *MemoryStorage) SetWithMeta(path string, data json.RawMessage, created int64, updated int64) (string, error) {
+	if !key.IsValid(path) {
+		return path, ErrInvalidPath
 	}
 	index := key.LastIndex(path)
 	db.mem.Store(path, meta.New(&meta.Object{
@@ -358,7 +444,7 @@ func (db *MemoryStorage) Del(path string) error {
 	if !strings.Contains(path, "*") {
 		_, found := db.mem.Load(path)
 		if !found {
-			return errors.New("ooo: not found")
+			return ErrNotFound
 		}
 		db.mem.Delete(path)
 		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
