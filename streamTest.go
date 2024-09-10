@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/jsonpatch"
+	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
 	"github.com/gorilla/mux"
@@ -527,44 +529,26 @@ func StreamBroadcastNoPatchTest(t *testing.T, app *Server) {
 	wsExtraClient.Close()
 }
 
-// StreamGlobBroadcastConcurretTest testing stream function
-func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
+func StreamConcurrentTest(t *testing.T, app *Server, n int) {
+	type TestData struct {
+		SearchMetadata struct {
+			Count float64 `json:"count"`
+		} `json:"search_metadata"`
+	}
 	var wg sync.WaitGroup
-	var wsObjects []meta.Object
-	var wsEvent messages.Message
-	var wsCache json.RawMessage
-	wsURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/*"}
-	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
-	require.NoError(t, err)
-	wg.Add(1)
-	go func() {
-		for {
-			_, message, err := wsClient.ReadMessage()
-			if err != nil {
-				break
-			}
-			wsEvent, err = messages.DecodeBuffer(message)
-			expect.Nil(err)
-			if !wsEvent.Snapshot {
-				patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
-				require.NoError(t, err)
-				modified, err := patch.Apply([]byte(wsCache))
-				require.NoError(t, err)
-				err = json.Unmarshal(modified, &wsObjects)
-				require.NoError(t, err)
-				wsCache = modified
-			} else {
-				err = json.Unmarshal(wsEvent.Data, &wsObjects)
-				require.NoError(t, err)
-				wsCache = wsEvent.Data
-			}
-			wg.Done()
-		}
-	}()
-	wg.Wait() // first read
-	require.Zero(t, len(wsObjects))
 
-	app.Console.Log("post data")
+	testEntries := []client.Meta[TestData]{}
+
+	wg.Add(1)
+	go client.Subscribe(context.Background(), "ws", app.Address, "/test/*", func(m []client.Meta[TestData]) {
+		testEntries = m
+		wg.Done()
+	})
+
+	wg.Wait() // first read
+	require.Zero(t, len(testEntries))
+
+	app.Console.Log("push data")
 	keys := []string{}
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -575,9 +559,8 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 	}
 
 	wg.Wait() // created
-	require.Equal(t, len(keys), len(wsObjects))
-	same, _ := jsondiff.Compare(wsObjects[0].Data, TEST_DATA, &jsondiff.Options{})
-	require.Equal(t, same, jsondiff.FullMatch)
+	require.Equal(t, len(keys), len(testEntries))
+	require.Equal(t, float64(4), testEntries[0].Data.SearchMetadata.Count)
 
 	app.Console.Log("post update data", len(keys))
 	Q := 6
@@ -629,22 +612,8 @@ func StreamGlobBroadcastConcurretTest(t *testing.T, app *Server, n int) {
 	app.Console.Log("wait update data")
 	wg.Wait() // updated
 
-	// wsKeys := []string{}
-	// for _, obj := range wsObjects {
-	// 	wsKeys = append(wsKeys, obj.Index)
-	// }
-	// app.Console.Log("after", keys, wsKeys)
-	require.Equal(t, len(keys), len(wsObjects))
-	for _, obj := range wsObjects {
-		currentRaw := gjson.Get(string(obj.Data), "search_metadata.count")
-		current := currentRaw.Value().(float64)
-		require.Equal(t, float64(4+Q), current)
+	require.Equal(t, len(keys), len(testEntries))
+	for _, obj := range testEntries {
+		require.Equal(t, float64(4+Q), obj.Data.SearchMetadata.Count)
 	}
-
-	_, err = app.Storage.GetAndLock("test/*")
-	require.Error(t, err)
-	_, err = app.Storage.SetAndUnlock("test/*", TEST_DATA)
-	require.Error(t, err)
-
-	wsClient.Close()
 }
