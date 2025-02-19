@@ -83,7 +83,7 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 	app.Console.Log("publish", _newKey)
 	app.filters.AfterWrite.check(_newKey)
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"index":"`+index+`"}`)
+	w.Write([]byte(`{"index":"` + index + `"}`))
 }
 
 func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
@@ -129,7 +129,7 @@ func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
 	app.Console.Log("republish", _key)
 	app.filters.AfterWrite.check(_key)
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"index":"`+index+`"}`)
+	w.Write([]byte(`{"index":"` + index + `"}`))
 }
 
 func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
@@ -175,7 +175,7 @@ func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
 	app.Console.Log("patch", _key)
 	app.filters.AfterWrite.check(_key)
 	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"index":"`+index+`"}`)
+	w.Write([]byte(`{"index":"` + index + `"}`))
 }
 
 func (app *Server) read(w http.ResponseWriter, r *http.Request) {
@@ -256,5 +256,5 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 	// }
 
 	w.WriteHeader(http.StatusNoContent)
-	fmt.Fprintf(w, "unpublish "+_key)
+	w.Write([]byte(`"unpublish "+_key`))
 }

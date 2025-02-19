@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"testing"
@@ -47,6 +48,9 @@ func TestClientList(t *testing.T) {
 	go client.Subscribe(ctx, "ws", server.Address, "devices/*",
 		func(devices []client.Meta[Device]) {
 			if len(devices) > 0 {
+				sort.Slice(devices, func(i, j int) bool {
+					return devices[i].Created < devices[j].Created
+				})
 				log.Println("len", len(devices))
 				require.Equal(t, "device "+strconv.Itoa(len(devices)-1), devices[len(devices)-1].Data.Name)
 			}

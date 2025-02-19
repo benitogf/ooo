@@ -106,3 +106,11 @@ func TestBatchSet(t *testing.T) {
 	defer app.Close(os.Interrupt)
 	StorageBatchSetTest(app, t, 10)
 }
+
+func TestStreamPatch(t *testing.T) {
+	app := &Server{}
+	app.Silence = true
+	app.Start("localhost:0")
+	defer app.Close(os.Interrupt)
+	StreamBroadcastPatchTest(t, app)
+}

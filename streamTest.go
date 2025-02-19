@@ -77,7 +77,7 @@ func StreamBroadcastTest(t *testing.T, app *Server) {
 	wg.Add(1)
 
 	if !wsEvent.Snapshot {
-		patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
+		patch, err := jsonpatch.DecodePatch(wsEvent.Data)
 		require.NoError(t, err)
 		modified, err := patch.Apply([]byte(wsCache))
 		require.NoError(t, err)
@@ -616,4 +616,66 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	for _, obj := range testEntries {
 		require.Equal(t, float64(4+Q), obj.Data.SearchMetadata.Count)
 	}
+}
+
+func StreamBroadcastPatchTest(t *testing.T, app *Server) {
+	var wg sync.WaitGroup
+	type TestSubField struct {
+		One   string `json:"one"`
+		Two   string `json:"two"`
+		Three int    `json:"three"`
+	}
+	type TestData struct {
+		SubFields []TestSubField `json:"subFields"`
+	}
+
+	current := TestData{}
+
+	wg.Add(1)
+	go client.Subscribe(context.Background(), "ws", app.Address, "test", func(m []client.Meta[TestData]) {
+		if len(m) > 0 {
+			current = m[0].Data
+		}
+		wg.Done()
+	})
+	wg.Wait() // first read
+
+	wg.Add(1)
+	_td := TestData{
+		SubFields: []TestSubField{
+			{
+				One:   "one",
+				Two:   "two",
+				Three: 3,
+			},
+		},
+	}
+	td, err := json.Marshal(_td)
+	require.NoError(t, err)
+	app.Storage.Set("test", td)
+	wg.Wait()
+
+	require.Equal(t, 1, len(current.SubFields))
+
+	wg.Add(1)
+	_td = TestData{
+		SubFields: []TestSubField{
+			{
+				One:   "one",
+				Two:   "two",
+				Three: 3,
+			},
+			{
+				One:   "one",
+				Two:   "two",
+				Three: 3,
+			},
+		},
+	}
+	td, err = json.Marshal(_td)
+	require.NoError(t, err)
+	app.Storage.Set("test", td)
+	wg.Wait()
+
+	require.Equal(t, 2, len(current.SubFields))
 }
