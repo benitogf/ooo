@@ -222,11 +222,11 @@ func (app *Server) defaults() {
 		app.OnClose = func() {}
 	}
 
-	if app.AllowedOrigins == nil || len(app.AllowedOrigins) == 0 {
+	if len(app.AllowedOrigins) == 0 {
 		app.AllowedOrigins = []string{"*"}
 	}
 
-	if app.AllowedMethods == nil || len(app.AllowedMethods) == 0 {
+	if len(app.AllowedMethods) == 0 {
 		app.AllowedMethods = []string{
 			http.MethodGet,
 			http.MethodPost,
@@ -236,7 +236,7 @@ func (app *Server) defaults() {
 		}
 	}
 
-	if app.AllowedHeaders == nil || len(app.AllowedHeaders) == 0 {
+	if len(app.AllowedHeaders) == 0 {
 		app.AllowedHeaders = []string{"Authorization", "Content-Type"}
 	}
 

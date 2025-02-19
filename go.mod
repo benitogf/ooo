@@ -5,9 +5,9 @@ go 1.22
 require (
 	github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec
 	github.com/benitogf/jsondiff v0.0.0-20220926080659-c3db9b84b559
-	github.com/benitogf/jsonpatch v0.0.0-20220924150135-fc4b5c761ac7
+	github.com/benitogf/jsonpatch v0.0.0-20250219063919-7ffe2c25652f
 	github.com/getlantern/httptest v0.0.0-20161025015934-4b40f4c7e590
-	github.com/goccy/go-json v0.9.11
+	github.com/goccy/go-json v0.10.5
 	github.com/gorilla/handlers v1.5.1
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/websocket v1.5.0
