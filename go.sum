@@ -8,6 +8,8 @@ github.com/benitogf/jsonpatch v0.0.0-20220924150135-fc4b5c761ac7 h1:bD4MAvpNi2d2
 github.com/benitogf/jsonpatch v0.0.0-20220924150135-fc4b5c761ac7/go.mod h1:O1Z+hTPUrXzHUjmKlpmNYK9wcncZ5rS3K8PqItDO0x0=
 github.com/benitogf/jsonpatch v0.0.0-20250219063919-7ffe2c25652f h1:LWqj5dWKBbesBA9+uYXb6U3bYllDhwtQ9uJn+vxkjh8=
 github.com/benitogf/jsonpatch v0.0.0-20250219063919-7ffe2c25652f/go.mod h1:O1Z+hTPUrXzHUjmKlpmNYK9wcncZ5rS3K8PqItDO0x0=
+github.com/benitogf/jsonpatch v0.0.0-20250219100646-458e71efe70d h1:ZpQQZiG0Lca3Vb9EPVD2aOwRQiDBRXrpTCg1tF397Hk=
+github.com/benitogf/jsonpatch v0.0.0-20250219100646-458e71efe70d/go.mod h1:O1Z+hTPUrXzHUjmKlpmNYK9wcncZ5rS3K8PqItDO0x0=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
