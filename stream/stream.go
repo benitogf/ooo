@@ -174,6 +174,7 @@ func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
 			// this error means that the broadcast was filtered
 			if err != nil {
 				sm.Console.Err("broadcast["+sm.pools[poolIndex].Key+"]: failed to get data", err)
+				sm.pools[poolIndex].mutex.Unlock()
 				continue
 			}
 

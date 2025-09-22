@@ -2,7 +2,6 @@ package ooo
 
 import (
 	"errors"
-	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -123,7 +122,6 @@ func (db *MemoryStorage) KeysRange(path string, from, to int64) ([]string, error
 			return true
 		}
 		if obj.Created < from || obj.Created > to {
-			log.Println("not in range", obj.Created, from, to)
 			return true
 		}
 		keys = append(keys, _key)
