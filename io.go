@@ -2,7 +2,9 @@ package ooo
 
 import (
 	"errors"
+	"io"
 	"log"
+	"net/http"
 
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
@@ -113,4 +115,96 @@ func Push[T any](server *Server, path string, item T) error {
 	}
 	_, err = server.Storage.Set(_path, data)
 	return err
+}
+
+func GetFrom[T any](_client *http.Client, ssl bool, host string, path string) (client.Meta[T], error) {
+	lastPath := key.LastIndex(path)
+	isList := lastPath == "*"
+
+	if isList {
+		return client.Meta[T]{}, errors.New("GetFrom[" + path + "]: path is a list")
+	}
+
+	var resp *http.Response
+	var err error
+	if ssl {
+		resp, err = _client.Get("https://" + host + "/" + path)
+	} else {
+		resp, err = _client.Get("http://" + host + "/" + path)
+	}
+	if err != nil {
+		log.Println("GetFrom["+path+"]: failed to get from remote", err)
+		return client.Meta[T]{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Println("GetFrom["+path+"]: failed to read response", err)
+		return client.Meta[T]{}, err
+	}
+	obj, err := meta.Decode(body)
+	if err != nil {
+		log.Println("GetFrom["+path+"]: failed to decode data", err)
+		return client.Meta[T]{}, err
+	}
+	var item T
+	err = json.Unmarshal([]byte(obj.Data), &item)
+	if err != nil {
+		log.Println("GetFrom["+path+"]: failed to unmarshal data", err)
+		return client.Meta[T]{}, err
+	}
+	return client.Meta[T]{
+		Created: obj.Created,
+		Updated: obj.Updated,
+		Index:   obj.Index,
+		Data:    item,
+	}, nil
+}
+
+func GetListFrom[T any](_client *http.Client, ssl bool, host string, path string) ([]client.Meta[T], error) {
+	lastPath := key.LastIndex(path)
+	isList := lastPath == "*"
+
+	if !isList {
+		return []client.Meta[T]{}, errors.New("GetListFrom[" + path + "]: path is not a list")
+	}
+
+	var resp *http.Response
+	var err error
+	if ssl {
+		resp, err = _client.Get("https://" + host + "/" + path)
+	} else {
+		resp, err = _client.Get("http://" + host + "/" + path)
+	}
+	if err != nil {
+		log.Println("GetListFrom["+path+"]: failed to get from remote", err)
+		return []client.Meta[T]{}, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Println("GetListFrom["+path+"]: failed to read response", err)
+		return []client.Meta[T]{}, err
+	}
+	objs, err := meta.DecodeList(body)
+	if err != nil {
+		log.Println("GetListFrom["+path+"]: failed to decode data", err)
+		return []client.Meta[T]{}, err
+	}
+	result := []client.Meta[T]{}
+	for _, obj := range objs {
+		var item T
+		err = json.Unmarshal([]byte(obj.Data), &item)
+		if err != nil {
+			log.Println("GetListFrom["+path+"]: failed to unmarshal data", err)
+			continue
+		}
+		result = append(result, client.Meta[T]{
+			Created: obj.Created,
+			Updated: obj.Updated,
+			Index:   obj.Index,
+			Data:    item,
+		})
+	}
+	return result, nil
 }
