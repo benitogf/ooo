@@ -3,6 +3,7 @@ package messages
 import (
 	"errors"
 	"io"
+	"log"
 
 	"github.com/benitogf/jsonpatch"
 	"github.com/benitogf/ooo/meta"
@@ -61,10 +62,12 @@ func PatchCache(data []byte, cache json.RawMessage) (json.RawMessage, error) {
 
 	patch, err := jsonpatch.DecodePatch([]byte(message.Data))
 	if err != nil || patch == nil {
+		log.Println("PatchCache: failed to decode patch", err)
 		return cache, err
 	}
 	modifiedBytes, err := patch.Apply([]byte(cache))
 	if err != nil || modifiedBytes == nil {
+		log.Println("PatchCache: failed to apply patch", err)
 		return cache, err
 	}
 

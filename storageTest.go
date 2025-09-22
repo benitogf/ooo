@@ -1080,21 +1080,23 @@ func StorageGetNRangeTest(app *Server, t *testing.T, n int) {
 	require.Equal(t, "test/1", testObjects[0].Path)
 }
 
-// StorageKeysRangeTest testing storage GetN function
+// StorageKeysRangeTest testing storage KeysRange function
 func StorageKeysRangeTest(app *Server, t *testing.T, n int) {
 	app.Storage.Clear()
 	first := ""
-	for i := 0; i < n; i++ {
+	firstNow := int64(0)
+	for range n {
 		path := key.Build("test/*")
 		key, err := app.Storage.Set(path, TEST_DATA)
 		if first == "" {
 			first = key
+			firstNow = time.Now().UnixNano()
 		}
 		require.NoError(t, err)
 		require.Equal(t, path, "test/"+key)
 	}
 
-	keys, err := app.Storage.KeysRange("test/*", 0, key.Decode(first))
+	keys, err := app.Storage.KeysRange("test/*", 0, firstNow)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(keys))
 	require.Equal(t, "test/"+first, keys[0])

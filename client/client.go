@@ -79,6 +79,7 @@ func Subscribe[T any](ctx context.Context, protocol, host, path string, callback
 			result := []Meta[T]{}
 			if isList {
 				var objs []meta.Object
+				// log.Println("subscribe[", host, path, "]: message", string(message))
 				cache, objs, err = messages.PatchList(message, cache)
 				if err != nil {
 					log.Println("subscribe["+host+"/"+path+"]: failed to parse message from websocket", err)
