@@ -46,3 +46,5 @@ jobs:
       run: go test -v -coverprofile cover.out -count 1 -failfast -race ./key/
     - name: Test Client
       run: go test -v -coverprofile cover.out -count 1 -failfast -race ./client/
+    - name: Test IO
+      run: go test -v -coverprofile cover.out -count 1 -failfast -race ./io/
