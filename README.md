@@ -105,6 +105,100 @@ app.Audit = func(r *http.Request) bool {
 }
 ```
 
+### Example: static routes + filters + audit
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "errors"
+    "log"
+    "net/http"
+
+    "github.com/benitogf/ooo"
+)
+
+type Book struct {
+    Title  string `json:"title"`
+    Author string `json:"author"`
+    Secret string `json:"secret,omitempty"`
+}
+
+func main() {
+    app := ooo.Server{Static: true}
+
+    // Only allow requests that carry a valid API key
+    app.Audit = func(r *http.Request) bool {
+        return r.Header.Get("X-API-Key") == "secret"
+    }
+
+    // Make the list route available while Static mode is enabled
+    app.OpenFilter("books/*")
+    app.OpenFilter("books/locked") // single resource example
+
+    // Sanitize/validate before writes to the list
+    app.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
+        var b Book
+        if err := json.Unmarshal(data, &b); err != nil {
+            return nil, err
+        }
+        if b.Title == "" {
+            return nil, errors.New("title is required")
+        }
+        if b.Author == "" {
+            b.Author = "unknown"
+        }
+        // Persist possibly modified payload
+        out, _ := json.Marshal(b)
+        return out, nil
+    })
+
+    // Log after any write
+    app.AfterWrite("books/*", func(index string) {
+        log.Println("wrote book at", index)
+    })
+
+    // Hide secrets on reads
+    app.ReadFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
+        var b Book
+        if err := json.Unmarshal(data, &b); err != nil {
+            return nil, err
+        }
+        b.Secret = ""
+        out, _ := json.Marshal(b)
+        return out, nil
+    })
+
+    // Prevent deleting a specific resource
+    app.DeleteFilter("books/locked", func(key string) error {
+        return errors.New("this book cannot be deleted")
+    })
+
+    app.Start("0.0.0.0:8800")
+    app.WaitClose()
+}
+```
+
+You can try it with curl:
+
+```bash
+# Create a book (note the X-API-Key header and list path with /*)
+curl -sS -H 'X-API-Key: secret' -H 'Content-Type: application/json' \
+  -d '{"title":"Dune","author":"Frank Herbert","secret":"token"}' \
+  http://localhost:8800/books/*
+
+# Read all books (secrets are removed by the ReadFilter)
+curl -sS -H 'X-API-Key: secret' http://localhost:8800/books/* | jq .
+
+# Attempt a write without the API key (Audit will reject it)
+curl -sS -H 'Content-Type: application/json' \
+  -d '{"title":"NoAuth"}' http://localhost:8800/books/* -i
+
+# Attempt to delete the protected resource
+curl -sS -X DELETE -H 'X-API-Key: secret' http://localhost:8800/books/locked -i
+```
+
 ### subscribe events capture
 
 ```golang
