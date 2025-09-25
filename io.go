@@ -1,6 +1,7 @@
 package ooo
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"log"
@@ -117,7 +118,51 @@ func Push[T any](server *Server, path string, item T) error {
 	return err
 }
 
-func GetFrom[T any](_client *http.Client, ssl bool, host string, path string) (client.Meta[T], error) {
+func RemoteSet[T any](_client *http.Client, ssl bool, host string, path string, item T) error {
+	lastPath := key.LastIndex(path)
+	isList := lastPath == "*"
+
+	if isList {
+		return errors.New("RemoteSet[" + path + "]: path is a list")
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		log.Println("RemoteSet["+path+"]: failed to marshal data", err)
+		return err
+	}
+	if ssl {
+		_, err = _client.Post("https://"+host+"/"+path, "application/json", bytes.NewReader(data))
+	} else {
+		_, err = _client.Post("http://"+host+"/"+path, "application/json", bytes.NewReader(data))
+	}
+	return err
+}
+
+func RemotePush[T any](_client *http.Client, ssl bool, host string, path string, item T) error {
+	lastPath := key.LastIndex(path)
+	isList := lastPath == "*"
+
+	if !isList {
+		return errors.New("RemotePush[" + path + "]: path is not a list")
+	}
+
+	_path := key.Build(path)
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		log.Println("RemotePush["+path+"]: failed to marshal data", err)
+		return err
+	}
+	if ssl {
+		_, err = _client.Post("https://"+host+"/"+_path, "application/json", bytes.NewReader(data))
+	} else {
+		_, err = _client.Post("http://"+host+"/"+_path, "application/json", bytes.NewReader(data))
+	}
+	return err
+}
+
+func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string) (client.Meta[T], error) {
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
@@ -161,7 +206,7 @@ func GetFrom[T any](_client *http.Client, ssl bool, host string, path string) (c
 	}, nil
 }
 
-func GetListFrom[T any](_client *http.Client, ssl bool, host string, path string) ([]client.Meta[T], error) {
+func RemoteGetList[T any](_client *http.Client, ssl bool, host string, path string) ([]client.Meta[T], error) {
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
