@@ -133,6 +133,165 @@ app.Start("0.0.0.0:8800")
 ```
 
 
+## I/O Operations
+
+The `ooo` package provides functions for working with data through the OOO server. These functions handle JSON serialization/deserialization and provide a more convenient way to work with your data structures.
+
+### Basic Operations
+
+#### Get a Single Item
+
+```go
+// Get retrieves a single item from the specified path
+item, err := ooo.Get[YourType](server, "path/to/item")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Item: %+v\n", item.Data)
+```
+
+#### Get a List of Items
+
+```go
+// GetList retrieves all items from a list path (ends with "/*")
+items, err := ooo.GetList[YourType](server, "path/to/items/*")
+if err != nil {
+    log.Fatal(err)
+}
+for _, item := range items {
+    fmt.Printf("Item: %+v (created: %v)\n", item.Data, item.Created)
+}
+```
+
+#### Set an Item
+
+```go
+// Set creates or updates an item at the specified path
+err := ooo.Set(server, "path/to/item", YourType{
+    Field1: "value1",
+    Field2: "value2",
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### Add to a List
+
+```go
+// Push adds an item to a list (path must end with "/*")
+err := ooo.Push(server, "path/to/items/*", YourType{
+    Field1: "new item",
+    Field2: "another value",
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Remote Operations
+
+You can also perform operations on remote OOO servers using the client functions:
+
+```go
+// Create an HTTP client
+client := &http.Client{Timeout: 10 * time.Second}
+
+// RemoteGet fetches an item from a remote server
+item, err := ooo.RemoteGet[YourType](
+    client,
+    false,  // useHTTPS
+    "localhost:8800",  // host:port
+    "path/to/item",
+)
+
+// RemoteSet updates or creates an item on a remote server
+err = ooo.RemoteSet(
+    client,
+    false,  // useHTTPS
+    "localhost:8800",
+    "path/to/item",
+    YourType{Field1: "value"},
+)
+
+// RemotePush adds an item to a list on a remote server
+err = ooo.RemotePush(
+    client,
+    false,  // useHTTPS
+    "localhost:8800",
+    "path/to/items/*",
+    YourType{Field1: "new item"},
+)
+
+// RemoteGetList fetches all items from a list on a remote server
+items, err := ooo.RemoteGetList[YourType](
+    client,
+    false,  // useHTTPS
+    "localhost:8800",
+    "path/to/items/*",
+)
+```
+
+### Complete Example
+
+Here's a complete example demonstrating the usage of these functions:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/benitogf/ooo"
+)
+
+type Todo struct {
+	Task      string    `json:"task"`
+	Completed bool      `json:"completed"`
+	Due       time.Time `json:"due"`
+}
+
+func main() {
+	// Start a local server for testing
+	server := &ooo.Server{Silence: true}
+	server.Start("localhost:0")
+	defer server.Close(nil)
+
+	// Add some todos
+	err := ooo.Push(server, "todos/*", Todo{
+		Task:      "todo 1",
+		Completed: false,
+		Due:       time.Now().Add(24 * time.Hour),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = ooo.Push(server, "todos/*", Todo{
+		Task:      "todo 2",
+		Completed: false,
+		Due:       time.Now().Add(48 * time.Hour),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Get all todos
+	todos, err := ooo.GetList[Todo](server, "todos/*")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("All todos:")
+	for i, todo := range todos {
+		fmt.Printf("%d. %s (Due: %v)\n", i+1, todo.Data.Task, todo.Data.Due)
+	}
+}
+```
+
 ### write/read storage api
 
 ```golang
