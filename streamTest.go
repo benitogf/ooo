@@ -537,37 +537,47 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	}
 	var wg sync.WaitGroup
 
-	testEntries := []client.Meta[TestData]{}
+	entries := []client.Meta[TestData]{}
+	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
+	var entriesLock sync.Mutex
 
 	wg.Add(1)
 	go client.Subscribe(context.Background(), "ws", app.Address, "/test/*", func(m []client.Meta[TestData]) {
-		testEntries = m
+		entriesLock.Lock()
+		entries = m
+		// log.Println("CLIENT", len(m))
 		wg.Done()
+		entriesLock.Unlock()
 	})
 
 	wg.Wait() // first read
-	require.Zero(t, len(testEntries))
+	entriesLock.Lock()
+	require.Zero(t, len(entries))
+	entriesLock.Unlock()
 
 	app.Console.Log("push data")
 	keys := []string{}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		// _key := key.Build("test/*")
 		_key := "test/" + strconv.Itoa(i)
-		app.Storage.Set(_key, TEST_DATA)
+		_, err := app.Storage.Set(_key, TEST_DATA)
+		require.NoError(t, err)
 		keys = append(keys, _key)
 	}
 
 	wg.Wait() // created
-	require.Equal(t, len(keys), len(testEntries))
-	require.Equal(t, float64(4), testEntries[0].Data.SearchMetadata.Count)
+	entriesLock.Lock()
+	require.Equal(t, len(keys), len(entries))
+	require.Equal(t, float64(4), entries[0].Data.SearchMetadata.Count)
+	entriesLock.Unlock()
 
 	app.Console.Log("post update data", len(keys))
 	Q := 6
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
-			for i := 0; i < Q; i++ {
+			for range Q {
 				currentObj := meta.Object{}
 				rawCurrent, err := app.Storage.GetAndLock(__key)
 				expect.Nil(err)
@@ -576,7 +586,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
 				nextSet := current + 1
-				app.Console.Log("up", __key, nextSet)
+				app.Console.Log("up1", __key, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.count", nextSet)
 				expect.Nil(err)
 				_, err = app.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -588,7 +598,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
-			for i := 0; i < Q; i++ {
+			for range Q {
 				currentObj := meta.Object{}
 				rawCurrent, err := app.Storage.GetAndLock(__key)
 				expect.Nil(err)
@@ -600,7 +610,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 				if current == "popo" {
 					nextSet = "nopo"
 				}
-				app.Console.Log("up", __key, nextSet)
+				app.Console.Log("up2", __key, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.something", nextSet)
 				expect.Nil(err)
 				_, err = app.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -611,11 +621,12 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 
 	app.Console.Log("wait update data")
 	wg.Wait() // updated
-
-	require.Equal(t, len(keys), len(testEntries))
-	for _, obj := range testEntries {
+	entriesLock.Lock()
+	require.Equal(t, len(keys), len(entries))
+	for _, obj := range entries {
 		require.Equal(t, float64(4+Q), obj.Data.SearchMetadata.Count)
 	}
+	entriesLock.Unlock()
 }
 
 func StreamBroadcastPatchTest(t *testing.T, app *Server) {

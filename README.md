@@ -105,6 +105,100 @@ app.Audit = func(r *http.Request) bool {
 }
 ```
 
+### Example: static routes + filters + audit
+
+```go
+package main
+
+import (
+    "encoding/json"
+    "errors"
+    "log"
+    "net/http"
+
+    "github.com/benitogf/ooo"
+)
+
+type Book struct {
+    Title  string `json:"title"`
+    Author string `json:"author"`
+    Secret string `json:"secret,omitempty"`
+}
+
+func main() {
+    app := ooo.Server{Static: true}
+
+    // Only allow requests that carry a valid API key
+    app.Audit = func(r *http.Request) bool {
+        return r.Header.Get("X-API-Key") == "secret"
+    }
+
+    // Make the list route available while Static mode is enabled
+    app.OpenFilter("books/*")
+    app.OpenFilter("books/locked") // single resource example
+
+    // Sanitize/validate before writes to the list
+    app.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
+        var b Book
+        if err := json.Unmarshal(data, &b); err != nil {
+            return nil, err
+        }
+        if b.Title == "" {
+            return nil, errors.New("title is required")
+        }
+        if b.Author == "" {
+            b.Author = "unknown"
+        }
+        // Persist possibly modified payload
+        out, _ := json.Marshal(b)
+        return out, nil
+    })
+
+    // Log after any write
+    app.AfterWrite("books/*", func(index string) {
+        log.Println("wrote book at", index)
+    })
+
+    // Hide secrets on reads
+    app.ReadFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
+        var b Book
+        if err := json.Unmarshal(data, &b); err != nil {
+            return nil, err
+        }
+        b.Secret = ""
+        out, _ := json.Marshal(b)
+        return out, nil
+    })
+
+    // Prevent deleting a specific resource
+    app.DeleteFilter("books/locked", func(key string) error {
+        return errors.New("this book cannot be deleted")
+    })
+
+    app.Start("0.0.0.0:8800")
+    app.WaitClose()
+}
+```
+
+You can try it with curl:
+
+```bash
+# Create a book (note the X-API-Key header and list path with /*)
+curl -sS -H 'X-API-Key: secret' -H 'Content-Type: application/json' \
+  -d '{"title":"Dune","author":"Frank Herbert","secret":"token"}' \
+  http://localhost:8800/books/*
+
+# Read all books (secrets are removed by the ReadFilter)
+curl -sS -H 'X-API-Key: secret' http://localhost:8800/books/* | jq .
+
+# Attempt a write without the API key (Audit will reject it)
+curl -sS -H 'Content-Type: application/json' \
+  -d '{"title":"NoAuth"}' http://localhost:8800/books/* -i
+
+# Attempt to delete the protected resource
+curl -sS -X DELETE -H 'X-API-Key: secret' http://localhost:8800/books/locked -i
+```
+
 ### subscribe events capture
 
 ```golang
@@ -132,7 +226,6 @@ app.Router.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
 app.Start("0.0.0.0:8800")
 ```
 
-
 ### write/read storage api
 
 ```golang
@@ -152,7 +245,7 @@ type Game struct {
 	Started int64 `json:"started"`
 }
 
-// not good practice, just for illustration purposes only
+// not good practice, for illustration purposes only
 // handle errors responsably :)
 func panicHandle(err error) {
 	if err != nil {
@@ -196,3 +289,270 @@ func main() {
 	server.WaitClose()
 }
 ```
+
+## I/O Operations
+
+The `ooo` package provides functions for working with data through the OOO server. These functions handle JSON serialization/deserialization and provide a more convenient way to work with your data structures.
+
+### Basic Operations
+
+#### Get a Single Item
+
+```go
+// Get retrieves a single item from the specified path
+item, err := io.Get[YourType](server, "path/to/item")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Item: %+v\n", item.Data)
+```
+
+#### Get a List of Items
+
+```go
+// GetList retrieves all items from a list path (ends with "/*")
+items, err := io.GetList[YourType](server, "path/to/items/*")
+if err != nil {
+    log.Fatal(err)
+}
+for _, item := range items {
+    fmt.Printf("Item: %+v (created: %v)\n", item.Data, item.Created)
+}
+```
+
+#### Set an Item
+
+```go
+// Set creates or updates an item at the specified path
+err := io.Set(server, "path/to/item", YourType{
+    Field1: "value1",
+    Field2: "value2",
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+#### Add to a List
+
+```go
+// Push adds an item to a list (path must end with "/*")
+err := io.Push(server, "path/to/items/*", YourType{
+    Field1: "new item",
+    Field2: "another value",
+})
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Remote Operations
+
+You can also perform operations on remote OOO servers using the client functions:
+
+```go
+// Create an HTTP client
+client := &http.Client{Timeout: 10 * time.Second}
+
+// RemoteGet fetches an item from a remote server
+item, err := io.RemoteGet[YourType](
+    client,
+    false,  // useHTTPS
+    "localhost:8800",  // host:port
+    "path/to/item",
+)
+
+// RemoteSet updates or creates an item on a remote server
+err = io.RemoteSet(
+    client,
+    false,  // useHTTPS
+    "localhost:8800",
+    "path/to/item",
+    YourType{Field1: "value"},
+)
+
+// RemotePush adds an item to a list on a remote server
+err = io.RemotePush(
+    client,
+    false,  // useHTTPS
+    "localhost:8800",
+    "path/to/items/*",
+    YourType{Field1: "new item"},
+)
+
+// RemoteGetList fetches all items from a list on a remote server
+items, err := io.RemoteGetList[YourType](
+    client,
+    false,  // useHTTPS
+    "localhost:8800",
+    "path/to/items/*",
+)
+```
+
+#### Basic IO example
+
+Here's a complete example demonstrating the usage of these functions:
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/benitogf/ooo"
+	"github.com/benitogf/ooo/io"
+)
+
+type Todo struct {
+	Task      string    `json:"task"`
+	Completed bool      `json:"completed"`
+	Due       time.Time `json:"due"`
+}
+
+func main() {
+	// Start a local server for testing
+	server := &ooo.Server{Silence: true}
+	server.Start("localhost:0")
+	defer server.Close(nil)
+
+	// Add some todos
+	err := io.Push(server, "todos/*", Todo{
+		Task:      "todo 1",
+		Completed: false,
+		Due:       time.Now().Add(24 * time.Hour),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	err = io.Push(server, "todos/*", Todo{
+		Task:      "todo 2",
+		Completed: false,
+		Due:       time.Now().Add(48 * time.Hour),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Get all todos
+	todos, err := io.GetList[Todo](server, "todos/*")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("All todos:")
+	for i, todo := range todos {
+		fmt.Printf("%d. %s (Due: %v)\n", i+1, todo.Data.Task, todo.Data.Due)
+	}
+}
+```
+
+### WebSocket client
+
+Use the Go websocket client to subscribe to real-time updates on any path. The API is defined in `client/client.go` as:
+
+```go
+func Subscribe[T any](
+    ctx context.Context,
+    protocol string, // "ws" or "wss"
+    host string,     // e.g. "localhost:8800"
+    path string,     // e.g. "todos/*" or "todo"
+    callback OnMessageCallback[T], // func([]client.Meta[T])
+)
+```
+
+- For list paths (ending with `/*`), the callback receives the entire current list as `[]client.Meta[T]` on every update.
+- For single-item paths, the callback receives a slice with one element representing the current value.
+- The client automatically reconnects with backoff if the connection drops.
+- Cancel the provided `ctx` to stop receiving updates and close the connection.
+
+#### Example: subscribe to a list
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/benitogf/ooo"
+    "github.com/benitogf/ooo/io"
+    "github.com/benitogf/ooo/client"
+)
+
+type Todo struct {
+    Task      string    `json:"task"`
+    Completed bool      `json:"completed"`
+    Due       time.Time `json:"due"`
+}
+
+func main() {
+    // Start server (for demo). In production, use your existing host.
+    server := &ooo.Server{Silence: true}
+    server.Start("localhost:0")
+    defer server.Close(nil)
+
+    // Seed one item so the first callback has data
+    _ = io.Push(server, "todos/*", Todo{Task: "seed", Due: time.Now().Add(1 * time.Hour)})
+
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    go client.Subscribe[Todo](ctx, "ws", server.Address, "todos/*", func(items []client.Meta[Todo]) {
+        fmt.Println("list size:", len(items))
+        for i, it := range items {
+            fmt.Printf("%d. %s (due: %v)\n", i+1, it.Data.Task, it.Data.Due)
+        }
+    })
+
+    // Produce updates
+    time.Sleep(50 * time.Millisecond)
+    _ = io.Push(server, "todos/*", Todo{Task: "another", Due: time.Now().Add(2 * time.Hour)})
+
+    // Let some messages flow
+    time.Sleep(300 * time.Millisecond)
+}
+```
+
+#### Example: subscribe to a single item
+
+```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+// Ensure path exists
+_ = io.Set(server, "todo", Todo{Task: "one", Due: time.Now().Add(24 * time.Hour)})
+
+go client.Subscribe[Todo](ctx, "ws", server.Address, "todo", func(items []client.Meta[Todo]) {
+    if len(items) == 0 {
+        return
+    }
+    current := items[0]
+    fmt.Println("current todo:", current.Data.Task)
+})
+
+// Update the item to trigger a message
+_ = io.Set(server, "todo", Todo{Task: "updated"})
+```
+
+#### HTTPS (wss) usage
+
+If your server is behind TLS, use the `wss` protocol and your HTTPS host:
+
+```go
+ctx := context.Background()
+go client.Subscribe[Todo](ctx, "wss", "example.com:443", "todos/*", func(items []client.Meta[Todo]) {
+    // handle items
+})
+```
+
+#### Tuning and lifecycle
+
+- The handshake timeout can be adjusted via `client.HandshakeTimeout`.
+- The callback runs in the client's goroutine; keep work minimal or offload to channels.
+- Call `cancel()` on the context to close the websocket and stop reconnection attempts.

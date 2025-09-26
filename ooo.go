@@ -175,7 +175,7 @@ func (app *Server) fetch(key string) (stream.Cache, error) {
 	if err != nil {
 		return stream.Cache{}, err
 	}
-	return app.Stream.Refresh(key, app.getFilteredData), nil
+	return app.Stream.Refresh(key, app.getFilteredData)
 }
 
 // getFilteredData

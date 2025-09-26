@@ -77,7 +77,7 @@ func (db *MemoryStorage) _loadLock(path string) (*sync.Mutex, error) {
 
 // Clear all keys in the storage
 func (db *MemoryStorage) Clear() {
-	db.mem.Range(func(key interface{}, value interface{}) bool {
+	db.mem.Range(func(key any, value any) bool {
 		db.mem.Delete(key)
 		return true
 	})
@@ -86,7 +86,7 @@ func (db *MemoryStorage) Clear() {
 // Keys list all the keys in the storage
 func (db *MemoryStorage) Keys() ([]byte, error) {
 	stats := Stats{}
-	db.mem.Range(func(key interface{}, value interface{}) bool {
+	db.mem.Range(func(key any, value any) bool {
 		stats.Keys = append(stats.Keys, key.(string))
 		return true
 	})
@@ -112,17 +112,19 @@ func (db *MemoryStorage) KeysRange(path string, from, to int64) ([]string, error
 		return keys, errors.New("ooo: invalid range")
 	}
 
-	db.mem.Range(func(k interface{}, value interface{}) bool {
-		current := k.(string)
-		if !key.Match(path, current) {
+	db.mem.Range(func(k any, value any) bool {
+		_key := k.(string)
+		if !key.Match(path, _key) {
 			return true
 		}
-		paths := strings.Split(current, "/")
-		created := key.Decode(paths[len(paths)-1])
-		if created < from || created > to {
+		obj, err := meta.Decode(value.([]byte))
+		if err != nil {
 			return true
 		}
-		keys = append(keys, current)
+		if obj.Created < from || obj.Created > to {
+			return true
+		}
+		keys = append(keys, _key)
 		return true
 	})
 
@@ -141,7 +143,7 @@ func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
 	}
 
 	res := []meta.Object{}
-	db.mem.Range(func(k interface{}, value interface{}) bool {
+	db.mem.Range(func(k any, value any) bool {
 		if !key.Match(path, k.(string)) {
 			return true
 		}
@@ -215,7 +217,7 @@ func (db *MemoryStorage) getN(path string, limit int, order string) ([]meta.Obje
 		return res, errors.New("ooo: invalid limit")
 	}
 
-	db.mem.Range(func(k interface{}, value interface{}) bool {
+	db.mem.Range(func(k any, value any) bool {
 		if !key.Match(path, k.(string)) {
 			return true
 		}
@@ -263,7 +265,7 @@ func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]me
 		return res, errors.New("ooo: invalid limit")
 	}
 
-	db.mem.Range(func(k interface{}, value interface{}) bool {
+	db.mem.Range(func(k any, value any) bool {
 		current := k.(string)
 		if !key.Match(path, current) {
 			return true
@@ -395,7 +397,7 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 	}
 
 	keys := []string{}
-	db.mem.Range(func(_key interface{}, value interface{}) bool {
+	db.mem.Range(func(_key any, value any) bool {
 		current := _key.(string)
 		if !key.Match(path, current) {
 			return true
@@ -453,7 +455,7 @@ func (db *MemoryStorage) Del(path string) error {
 		return nil
 	}
 
-	db.mem.Range(func(k interface{}, value interface{}) bool {
+	db.mem.Range(func(k any, value any) bool {
 		if key.Match(path, k.(string)) {
 			db.mem.Delete(k.(string))
 		}

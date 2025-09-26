@@ -193,7 +193,11 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.Header.Get("Upgrade") == "websocket" {
-		app.ws(w, r)
+		err := app.ws(w, r)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
 		return
 	}
 

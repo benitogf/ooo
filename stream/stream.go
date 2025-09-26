@@ -97,15 +97,14 @@ func (sm *Stream) InitClock() {
 
 // New stream on a key
 func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request) (*Conn, error) {
-	wsClient, err := StreamUpgrader.Upgrade(w, r, nil)
-
+	err := sm.OnSubscribe(key)
 	if err != nil {
-		sm.Console.Err("socketUpgradeError["+key+"]", err)
 		return nil, err
 	}
 
-	err = sm.OnSubscribe(key)
+	wsClient, err := StreamUpgrader.Upgrade(w, r, nil)
 	if err != nil {
+		sm.Console.Err("socketUpgradeError["+key+"]", err)
 		return nil, err
 	}
 
@@ -170,13 +169,16 @@ func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
 	// skip pool 0 (clock)
 	for poolIndex := 1; poolIndex < len(sm.pools); poolIndex++ {
 		if key.Peer(sm.pools[poolIndex].Key, path) {
+			sm.pools[poolIndex].mutex.Lock()
 			data, err := opt.Get(sm.pools[poolIndex].Key)
 			// this error means that the broadcast was filtered
 			if err != nil {
+				sm.Console.Err("broadcast["+sm.pools[poolIndex].Key+"]: failed to get data", err)
+				sm.pools[poolIndex].mutex.Unlock()
 				continue
 			}
 
-			sm.pools[poolIndex].mutex.Lock()
+			// log.Println("BROADCAST cache version ", sm.pools[poolIndex].Key)
 			modifiedData, snapshot, version := sm.Patch(poolIndex, data)
 			sm.broadcast(poolIndex, modifiedData, snapshot, version)
 			sm.pools[poolIndex].mutex.Unlock()
@@ -257,6 +259,7 @@ func (sm *Stream) Read(key string, client *Conn) {
 
 // _setCache will store data in a pool's cache
 func (sm *Stream) _setCache(poolIndex int, data []byte) int64 {
+	// log.Println("SET cache version ", sm.pools[poolIndex].Key, strconv.FormatInt(time.Now().UTC().UnixNano(), 16))
 	now := time.Now().UTC().UnixNano()
 	sm.pools[poolIndex].cache.Version = now
 	sm.pools[poolIndex].cache.Data = data
@@ -303,8 +306,11 @@ func (sm *Stream) GetCacheVersion(key string) (int64, error) {
 	return sm.pools[poolIndex].cache.Version, nil
 }
 
-func (sm *Stream) Refresh(path string, getDataFn GetFn) Cache {
-	raw, _ := getDataFn(path)
+func (sm *Stream) Refresh(path string, getDataFn GetFn) (Cache, error) {
+	raw, err := getDataFn(path)
+	if err != nil {
+		return Cache{}, err
+	}
 	if len(raw) == 0 {
 		raw = meta.EmptyObject
 	}
@@ -314,10 +320,12 @@ func (sm *Stream) Refresh(path string, getDataFn GetFn) Cache {
 	cacheVersion, err := sm.GetCacheVersion(path)
 	if err != nil {
 		newVersion := sm.setCache(path, raw)
+		// log.Println("NEW version", path, strconv.FormatInt(newVersion, 16))
 		cache.Version = newVersion
-		return cache
+		return cache, nil
 	}
 
+	// log.Println("READ version", path, strconv.FormatInt(cacheVersion, 16))
 	cache.Version = cacheVersion
-	return cache
+	return cache, nil
 }
