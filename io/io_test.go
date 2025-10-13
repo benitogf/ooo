@@ -2,7 +2,9 @@ package io_test
 
 import (
 	"os"
+	"runtime"
 	"testing"
+	"time"
 
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/io"
@@ -47,14 +49,19 @@ func TestIObasic(t *testing.T) {
 	require.Equal(t, "here", thing2.Data.This)
 	require.Equal(t, "there", thing2.Data.That)
 
-	err = io.Push(server, THINGS_PATH, thing1)
+	err = io.Push(server, THINGS_PATH, thing1.Data)
 	require.NoError(t, err)
-	err = io.Push(server, THINGS_PATH, thing2)
+	if runtime.GOOS == "windows" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	err = io.Push(server, THINGS_PATH, thing2.Data)
 	require.NoError(t, err)
 
 	things, err := io.GetList[Thing](server, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(things))
+	require.Equal(t, "this", things[0].Data.This)
+	require.Equal(t, "here", things[1].Data.This)
 
 	err = io.Set(server, string(THINGS_BASE_PATH)+"/what", Thing{
 		This: "what",
