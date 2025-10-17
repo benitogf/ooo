@@ -26,12 +26,27 @@ func RemoteSet[T any](_client *http.Client, ssl bool, host string, path string, 
 		log.Println("RemoteSet["+path+"]: failed to marshal data", err)
 		return err
 	}
+	var resp *http.Response
 	if ssl {
-		_, err = _client.Post("https://"+host+"/"+path, "application/json", bytes.NewReader(data))
+		resp, err = _client.Post("https://"+host+"/"+path, "application/json", bytes.NewReader(data))
 	} else {
-		_, err = _client.Post("http://"+host+"/"+path, "application/json", bytes.NewReader(data))
+		resp, err = _client.Post("http://"+host+"/"+path, "application/json", bytes.NewReader(data))
 	}
-	return err
+	if err != nil {
+		log.Println("RemoteSet["+path+"]: failed to post to remote", err)
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Println("RemoteSet["+path+"]: failed to read response", err)
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Println("RemoteSet["+path+"]: not OK status: ", resp.Status, string(body))
+		return errors.New("RemoteSet[" + path + "]: not OK status: " + resp.Status)
+	}
+	return nil
 }
 
 func RemotePush[T any](_client *http.Client, ssl bool, host string, path string, item T) error {
@@ -49,12 +64,27 @@ func RemotePush[T any](_client *http.Client, ssl bool, host string, path string,
 		log.Println("RemotePush["+path+"]: failed to marshal data", err)
 		return err
 	}
+	var resp *http.Response
 	if ssl {
-		_, err = _client.Post("https://"+host+"/"+_path, "application/json", bytes.NewReader(data))
+		resp, err = _client.Post("https://"+host+"/"+_path, "application/json", bytes.NewReader(data))
 	} else {
-		_, err = _client.Post("http://"+host+"/"+_path, "application/json", bytes.NewReader(data))
+		resp, err = _client.Post("http://"+host+"/"+_path, "application/json", bytes.NewReader(data))
 	}
-	return err
+	if err != nil {
+		log.Println("RemotePush["+path+"]: failed to post to remote", err)
+		return err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Println("RemotePush["+path+"]: failed to read response", err)
+		return err
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Println("RemotePush["+path+"]: not OK status: ", resp.Status, string(body))
+		return errors.New("RemotePush[" + path + "]: not OK status: " + resp.Status)
+	}
+	return nil
 }
 
 func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string) (client.Meta[T], error) {
@@ -62,7 +92,7 @@ func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string) 
 	isList := lastPath == "*"
 
 	if isList {
-		return client.Meta[T]{}, errors.New("GetFrom[" + path + "]: path is a list")
+		return client.Meta[T]{}, errors.New("RemoteGet[" + path + "]: path is a list")
 	}
 
 	var resp *http.Response
@@ -73,24 +103,28 @@ func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string) 
 		resp, err = _client.Get("http://" + host + "/" + path)
 	}
 	if err != nil {
-		log.Println("GetFrom["+path+"]: failed to get from remote", err)
+		log.Println("RemoteGet["+path+"]: failed to get from remote", err)
 		return client.Meta[T]{}, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Println("GetFrom["+path+"]: failed to read response", err)
+		log.Println("RemoteGet["+path+"]: failed to read response", err)
 		return client.Meta[T]{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Println("RemoteGet["+path+"]: not OK status: ", resp.Status, string(body))
+		return client.Meta[T]{}, errors.New("RemoteGet[" + path + "]: not OK status: " + resp.Status)
 	}
 	obj, err := meta.Decode(body)
 	if err != nil {
-		log.Println("GetFrom["+path+"]: failed to decode data", err)
+		log.Println("RemoteGet["+path+"]: failed to decode data", err)
 		return client.Meta[T]{}, err
 	}
 	var item T
 	err = json.Unmarshal([]byte(obj.Data), &item)
 	if err != nil {
-		log.Println("GetFrom["+path+"]: failed to unmarshal data", err)
+		log.Println("RemoteGet["+path+"]: failed to unmarshal data", err)
 		return client.Meta[T]{}, err
 	}
 	return client.Meta[T]{
@@ -106,7 +140,7 @@ func RemoteGetList[T any](_client *http.Client, ssl bool, host string, path stri
 	isList := lastPath == "*"
 
 	if !isList {
-		return []client.Meta[T]{}, errors.New("GetListFrom[" + path + "]: path is not a list")
+		return []client.Meta[T]{}, errors.New("RemoteGetList[" + path + "]: path is not a list")
 	}
 
 	var resp *http.Response
@@ -117,18 +151,22 @@ func RemoteGetList[T any](_client *http.Client, ssl bool, host string, path stri
 		resp, err = _client.Get("http://" + host + "/" + path)
 	}
 	if err != nil {
-		log.Println("GetListFrom["+path+"]: failed to get from remote", err)
+		log.Println("RemoteGetList["+path+"]: failed to get from remote", err)
 		return []client.Meta[T]{}, err
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Println("GetListFrom["+path+"]: failed to read response", err)
+		log.Println("RemoteGetList["+path+"]: failed to read response", err)
 		return []client.Meta[T]{}, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		log.Println("RemoteGetList["+path+"]: not OK status: ", resp.Status, string(body))
+		return []client.Meta[T]{}, errors.New("RemoteGetList[" + path + "]: not OK status: " + resp.Status)
 	}
 	objs, err := meta.DecodeList(body)
 	if err != nil {
-		log.Println("GetListFrom["+path+"]: failed to decode data", err)
+		log.Println("RemoteGetList["+path+"]: failed to decode data", err)
 		return []client.Meta[T]{}, err
 	}
 	result := []client.Meta[T]{}
@@ -136,7 +174,7 @@ func RemoteGetList[T any](_client *http.Client, ssl bool, host string, path stri
 		var item T
 		err = json.Unmarshal([]byte(obj.Data), &item)
 		if err != nil {
-			log.Println("GetListFrom["+path+"]: failed to unmarshal data", err)
+			log.Println("RemoteGetList["+path+"]: failed to unmarshal data", err)
 			continue
 		}
 		result = append(result, client.Meta[T]{
