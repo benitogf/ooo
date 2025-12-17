@@ -26,7 +26,7 @@ type Meta[T any] struct {
 }
 type OnMessageCallback[T any] func([]Meta[T])
 
-func Subscribe[T any](ctx context.Context, protocol, host, path string, callback OnMessageCallback[T]) {
+func Subscribe[T any](ctx context.Context, protocol, host, path string, header http.Header, callback OnMessageCallback[T]) {
 	retryCount := 0
 	var cache json.RawMessage
 	lastPath := key.LastIndex(path)
@@ -58,7 +58,7 @@ func Subscribe[T any](ctx context.Context, protocol, host, path string, callback
 		}
 
 		muWsClient.Lock()
-		wsClient, _, err = quickDial.Dial(wsURL.String(), nil)
+		wsClient, _, err = quickDial.Dial(wsURL.String(), header)
 		if wsClient == nil || err != nil {
 			muWsClient.Unlock()
 			log.Println("subscribe["+host+"/"+path+"]: failed websocket dial ", err)

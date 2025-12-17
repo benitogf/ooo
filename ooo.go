@@ -106,6 +106,7 @@ type Server struct {
 	WriteTimeout      time.Duration
 	ReadHeaderTimeout time.Duration
 	IdleTimeout       time.Duration
+	OnStorageEvent    StorageEventCallback
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -201,6 +202,9 @@ func (app *Server) watch(sc StorageChan) {
 		if ev.Key != "" {
 			app.Console.Log("broadcast[" + ev.Key + "]")
 			app.Stream.Broadcast(ev.Key, broadcastOpt)
+			if app.OnStorageEvent != nil {
+				app.OnStorageEvent(ev)
+			}
 		}
 		if !app.Storage.Active() {
 			break

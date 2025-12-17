@@ -19,6 +19,7 @@ type StorageEvent struct {
 type StorageOpt struct {
 	NoBroadcastKeys []string
 	DbOpt           interface{}
+	BeforeRead      func(key string)
 }
 
 // Database interface to be implemented by storages
@@ -98,3 +99,6 @@ func WatchStorageNoop(dataStore Database) {
 		}
 	}
 }
+
+// StorageEventCallback is a callback type for storage events
+type StorageEventCallback func(event StorageEvent)

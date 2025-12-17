@@ -94,50 +94,50 @@ func TestRemoteIO(t *testing.T) {
 	err := io.RemoteSet(server.Client, false, server.Address, THING_INVALID_PATH, Thing{
 		This: "this",
 		That: "that",
-	})
+	}, nil)
 	require.Error(t, err)
 
-	_, err = io.RemoteGet[Thing](server.Client, false, server.Address, THING_INVALID_PATH)
+	_, err = io.RemoteGet[Thing](server.Client, false, server.Address, THING_INVALID_PATH, nil)
 	require.Error(t, err)
 
-	_, err = io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_INVALID_PATH)
+	_, err = io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_INVALID_PATH, nil)
 	require.Error(t, err)
 
 	err = io.RemoteSet(server.Client, false, server.Address, THING1_PATH, Thing{
 		This: "this",
 		That: "that",
-	})
+	}, nil)
 	require.NoError(t, err)
 	err = io.RemoteSet(server.Client, false, server.Address, THING2_PATH, Thing{
 		This: "here",
 		That: "there",
-	})
+	}, nil)
 	require.NoError(t, err)
 
-	thing1, err := io.RemoteGet[Thing](server.Client, false, server.Address, THING1_PATH)
+	thing1, err := io.RemoteGet[Thing](server.Client, false, server.Address, THING1_PATH, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "this", thing1.Data.This)
 	require.Equal(t, "that", thing1.Data.That)
 
-	thing2, err := io.RemoteGet[Thing](server.Client, false, server.Address, THING2_PATH)
+	thing2, err := io.RemoteGet[Thing](server.Client, false, server.Address, THING2_PATH, nil)
 	require.NoError(t, err)
 
 	require.Equal(t, "here", thing2.Data.This)
 	require.Equal(t, "there", thing2.Data.That)
 
-	err = io.RemotePush(server.Client, false, server.Address, THINGS_PATH, thing1.Data)
+	err = io.RemotePush(server.Client, false, server.Address, THINGS_PATH, thing1.Data, nil)
 	require.NoError(t, err)
 	if runtime.GOOS == "windows" {
 		time.Sleep(10 * time.Millisecond)
 	}
-	err = io.RemotePush(server.Client, false, server.Address, THINGS_PATH, thing2.Data)
+	err = io.RemotePush(server.Client, false, server.Address, THINGS_PATH, thing2.Data, nil)
 	require.NoError(t, err)
 
-	err = io.RemotePush(server.Client, false, server.Address, THINGS_INVALID_PATH, thing1.Data)
+	err = io.RemotePush(server.Client, false, server.Address, THINGS_INVALID_PATH, thing1.Data, nil)
 	require.Error(t, err)
 
-	things, err := io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_PATH)
+	things, err := io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_PATH, nil)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(things))
 	require.Equal(t, "this", things[0].Data.This)
@@ -146,10 +146,10 @@ func TestRemoteIO(t *testing.T) {
 	err = io.RemoteSet(server.Client, false, server.Address, string(THINGS_BASE_PATH)+"/what", Thing{
 		This: "what",
 		That: "how",
-	})
+	}, nil)
 	require.NoError(t, err)
 
-	things, err = io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_PATH)
+	things, err = io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_PATH, nil)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(things))
 	require.Equal(t, "this", things[0].Data.This)

@@ -46,7 +46,7 @@ func TestClientList(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*",
+	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil,
 		func(devices []client.Meta[Device]) {
 			if len(devices) > 0 {
 				sort.Slice(devices, func(i, j int) bool {
@@ -78,7 +78,7 @@ func TestClientClose(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*",
+	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil,
 		func(devices []client.Meta[Device]) {
 			wg.Done()
 		})
@@ -100,7 +100,7 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	// client.DEBUG = false
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*",
+	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil,
 		func(devices []client.Meta[Device]) {
 			wg.Done()
 		})
@@ -120,7 +120,7 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	client.HandshakeTimeout = 10 * time.Millisecond
-	go client.Subscribe(ctx, "ws", "notAnIP", "devices/*",
+	go client.Subscribe(ctx, "ws", "notAnIP", "devices/*", nil,
 		func(devices []client.Meta[Device]) {
 			expect.True(false)
 		})
@@ -155,7 +155,7 @@ func TestClientListCallbackCurry(t *testing.T) {
 	}
 
 	wg.Add(1)
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*", makeDevicesCallback())
+	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil, makeDevicesCallback())
 
 	wg.Wait()
 

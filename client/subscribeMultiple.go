@@ -1,6 +1,9 @@
 package client
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 type MultiState[T any] struct {
 	Data    []Meta[T]
@@ -12,6 +15,7 @@ type Path struct {
 	Protocol string
 	Host     string
 	Path     string
+	Header   http.Header
 }
 
 // SubscribeMultiple2 subscribes to 2 paths with different types and a single callback.
@@ -43,14 +47,14 @@ func SubscribeMultiple2[T1, T2 any](
 		}
 	}()
 
-	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, func(messages []Meta[T1]) {
+	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, path1.Header, func(messages []Meta[T1]) {
 		select {
 		case ch1 <- messages:
 		case <-ctx.Done():
 		}
 	})
 
-	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, func(messages []Meta[T2]) {
+	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, path2.Header, func(messages []Meta[T2]) {
 		select {
 		case ch2 <- messages:
 		case <-ctx.Done():
@@ -104,21 +108,21 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		}
 	}()
 
-	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, func(messages []Meta[T1]) {
+	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, path1.Header, func(messages []Meta[T1]) {
 		select {
 		case ch1 <- messages:
 		case <-ctx.Done():
 		}
 	})
 
-	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, func(messages []Meta[T2]) {
+	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, path2.Header, func(messages []Meta[T2]) {
 		select {
 		case ch2 <- messages:
 		case <-ctx.Done():
 		}
 	})
 
-	go Subscribe(ctx, path3.Protocol, path3.Host, path3.Path, func(messages []Meta[T3]) {
+	go Subscribe(ctx, path3.Protocol, path3.Host, path3.Path, path3.Header, func(messages []Meta[T3]) {
 		select {
 		case ch3 <- messages:
 		case <-ctx.Done():
@@ -185,28 +189,28 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		}
 	}()
 
-	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, func(messages []Meta[T1]) {
+	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, path1.Header, func(messages []Meta[T1]) {
 		select {
 		case ch1 <- messages:
 		case <-ctx.Done():
 		}
 	})
 
-	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, func(messages []Meta[T2]) {
+	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, path2.Header, func(messages []Meta[T2]) {
 		select {
 		case ch2 <- messages:
 		case <-ctx.Done():
 		}
 	})
 
-	go Subscribe(ctx, path3.Protocol, path3.Host, path3.Path, func(messages []Meta[T3]) {
+	go Subscribe(ctx, path3.Protocol, path3.Host, path3.Path, path3.Header, func(messages []Meta[T3]) {
 		select {
 		case ch3 <- messages:
 		case <-ctx.Done():
 		}
 	})
 
-	go Subscribe(ctx, path4.Protocol, path4.Host, path4.Path, func(messages []Meta[T4]) {
+	go Subscribe(ctx, path4.Protocol, path4.Host, path4.Path, path4.Header, func(messages []Meta[T4]) {
 		select {
 		case ch4 <- messages:
 		case <-ctx.Done():

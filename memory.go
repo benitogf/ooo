@@ -28,6 +28,7 @@ type MemoryStorage struct {
 	noBroadcastKeys []string
 	watcher         StorageChan
 	storage         *Storage
+	beforeRead      func(key string)
 }
 
 // Active provides access to the status of the storage client
@@ -48,6 +49,7 @@ func (db *MemoryStorage) Start(storageOpt StorageOpt) error {
 		db.watcher = make(StorageChan)
 	}
 	db.noBroadcastKeys = storageOpt.NoBroadcastKeys
+	db.beforeRead = storageOpt.BeforeRead
 	db.storage.Active = true
 	return nil
 }
@@ -168,11 +170,17 @@ func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
 
 // Get a key/pattern related value(s)
 func (db *MemoryStorage) Get(path string) ([]byte, error) {
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
 	return db.get(path, "asc")
 }
 
 // Get a key/pattern related value(s)
 func (db *MemoryStorage) GetDescending(path string) ([]byte, error) {
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
 	return db.get(path, "desc")
 }
 
@@ -180,9 +188,12 @@ func (db *MemoryStorage) GetAndLock(path string) ([]byte, error) {
 	if strings.Contains(path, "*") {
 		return []byte{}, errors.New("ooo: can't lock a glob pattern path")
 	}
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
 	lock := db._getLock(path)
 	lock.Lock()
-	return db.Get(path)
+	return db.get(path, "asc")
 }
 
 func (db *MemoryStorage) SetAndUnlock(path string, data json.RawMessage) (string, error) {
@@ -246,16 +257,25 @@ func (db *MemoryStorage) getN(path string, limit int, order string) ([]meta.Obje
 
 // GetN get last N elements of a path related value(s)
 func (db *MemoryStorage) GetN(path string, limit int) ([]meta.Object, error) {
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
 	return db.getN(path, limit, "desc")
 }
 
-// GetN get last N elements of a path related value(s)
+// GetNAscending get last N elements of a path related value(s)
 func (db *MemoryStorage) GetNAscending(path string, limit int) ([]meta.Object, error) {
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
 	return db.getN(path, limit, "asc")
 }
 
 // GetNRange get last N elements of a path related value(s)
 func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]meta.Object, error) {
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
 	res := []meta.Object{}
 	if !strings.Contains(path, "*") {
 		return res, errors.New("ooo: invalid pattern")

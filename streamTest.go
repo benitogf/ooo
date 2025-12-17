@@ -542,7 +542,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	var entriesLock sync.Mutex
 
 	wg.Add(1)
-	go client.Subscribe(context.Background(), "ws", app.Address, "/test/*", func(m []client.Meta[TestData]) {
+	go client.Subscribe(context.Background(), "ws", app.Address, "/test/*", nil, func(m []client.Meta[TestData]) {
 		entriesLock.Lock()
 		entries = m
 		// log.Println("CLIENT", len(m))
@@ -643,7 +643,7 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 	current := TestData{}
 
 	wg.Add(1)
-	go client.Subscribe(context.Background(), "ws", app.Address, "test", func(m []client.Meta[TestData]) {
+	go client.Subscribe(context.Background(), "ws", app.Address, "test", nil, func(m []client.Meta[TestData]) {
 		if len(m) > 0 {
 			current = m[0].Data
 		}
