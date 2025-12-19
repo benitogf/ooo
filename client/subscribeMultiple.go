@@ -47,18 +47,32 @@ func SubscribeMultiple2[T1, T2 any](
 		}
 	}()
 
-	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, path1.Header, func(messages []Meta[T1]) {
-		select {
-		case ch1 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T1]{
+		Ctx:      ctx,
+		Protocol: path1.Protocol,
+		Host:     path1.Host,
+		Path:     path1.Path,
+		Header:   path1.Header,
+		OnMessage: func(messages []Meta[T1]) {
+			select {
+			case ch1 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 
-	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, path2.Header, func(messages []Meta[T2]) {
-		select {
-		case ch2 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T2]{
+		Ctx:      ctx,
+		Protocol: path2.Protocol,
+		Host:     path2.Host,
+		Path:     path2.Path,
+		Header:   path2.Header,
+		OnMessage: func(messages []Meta[T2]) {
+			select {
+			case ch2 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 }
 
@@ -108,25 +122,46 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		}
 	}()
 
-	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, path1.Header, func(messages []Meta[T1]) {
-		select {
-		case ch1 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T1]{
+		Ctx:      ctx,
+		Protocol: path1.Protocol,
+		Host:     path1.Host,
+		Path:     path1.Path,
+		Header:   path1.Header,
+		OnMessage: func(messages []Meta[T1]) {
+			select {
+			case ch1 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 
-	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, path2.Header, func(messages []Meta[T2]) {
-		select {
-		case ch2 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T2]{
+		Ctx:      ctx,
+		Protocol: path2.Protocol,
+		Host:     path2.Host,
+		Path:     path2.Path,
+		Header:   path2.Header,
+		OnMessage: func(messages []Meta[T2]) {
+			select {
+			case ch2 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 
-	go Subscribe(ctx, path3.Protocol, path3.Host, path3.Path, path3.Header, func(messages []Meta[T3]) {
-		select {
-		case ch3 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T3]{
+		Ctx:      ctx,
+		Protocol: path3.Protocol,
+		Host:     path3.Host,
+		Path:     path3.Path,
+		Header:   path3.Header,
+		OnMessage: func(messages []Meta[T3]) {
+			select {
+			case ch3 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 }
 
@@ -189,31 +224,59 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		}
 	}()
 
-	go Subscribe(ctx, path1.Protocol, path1.Host, path1.Path, path1.Header, func(messages []Meta[T1]) {
-		select {
-		case ch1 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T1]{
+		Ctx:      ctx,
+		Protocol: path1.Protocol,
+		Host:     path1.Host,
+		Path:     path1.Path,
+		Header:   path1.Header,
+		OnMessage: func(messages []Meta[T1]) {
+			select {
+			case ch1 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 
-	go Subscribe(ctx, path2.Protocol, path2.Host, path2.Path, path2.Header, func(messages []Meta[T2]) {
-		select {
-		case ch2 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T2]{
+		Ctx:      ctx,
+		Protocol: path2.Protocol,
+		Host:     path2.Host,
+		Path:     path2.Path,
+		Header:   path2.Header,
+		OnMessage: func(messages []Meta[T2]) {
+			select {
+			case ch2 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 
-	go Subscribe(ctx, path3.Protocol, path3.Host, path3.Path, path3.Header, func(messages []Meta[T3]) {
-		select {
-		case ch3 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T3]{
+		Ctx:      ctx,
+		Protocol: path3.Protocol,
+		Host:     path3.Host,
+		Path:     path3.Path,
+		Header:   path3.Header,
+		OnMessage: func(messages []Meta[T3]) {
+			select {
+			case ch3 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 
-	go Subscribe(ctx, path4.Protocol, path4.Host, path4.Path, path4.Header, func(messages []Meta[T4]) {
-		select {
-		case ch4 <- messages:
-		case <-ctx.Done():
-		}
+	go Subscribe(SubscribeConfig[T4]{
+		Ctx:      ctx,
+		Protocol: path4.Protocol,
+		Host:     path4.Host,
+		Path:     path4.Path,
+		Header:   path4.Header,
+		OnMessage: func(messages []Meta[T4]) {
+			select {
+			case ch4 <- messages:
+			case <-ctx.Done():
+			}
+		},
 	})
 }

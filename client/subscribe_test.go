@@ -46,8 +46,12 @@ func TestClientList(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil,
-		func(devices []client.Meta[Device]) {
+	go client.Subscribe(client.SubscribeConfig[Device]{
+		Ctx:      ctx,
+		Protocol: "ws",
+		Host:     server.Address,
+		Path:     "devices/*",
+		OnMessage: func(devices []client.Meta[Device]) {
 			if len(devices) > 0 {
 				sort.Slice(devices, func(i, j int) bool {
 					return devices[i].Created < devices[j].Created
@@ -56,7 +60,8 @@ func TestClientList(t *testing.T) {
 				require.Equal(t, "device "+strconv.Itoa(len(devices)-1), devices[len(devices)-1].Data.Name)
 			}
 			wg.Done()
-		})
+		},
+	})
 	wg.Wait()
 
 	for i := range 5 {
@@ -78,10 +83,15 @@ func TestClientClose(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil,
-		func(devices []client.Meta[Device]) {
+	go client.Subscribe(client.SubscribeConfig[Device]{
+		Ctx:      ctx,
+		Protocol: "ws",
+		Host:     server.Address,
+		Path:     "devices/*",
+		OnMessage: func(devices []client.Meta[Device]) {
 			wg.Done()
-		})
+		},
+	})
 	wg.Wait()
 
 	cancel()
@@ -100,10 +110,15 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	// client.DEBUG = false
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil,
-		func(devices []client.Meta[Device]) {
+	go client.Subscribe(client.SubscribeConfig[Device]{
+		Ctx:      ctx,
+		Protocol: "ws",
+		Host:     server.Address,
+		Path:     "devices/*",
+		OnMessage: func(devices []client.Meta[Device]) {
 			wg.Done()
-		})
+		},
+	})
 	wg.Wait()
 
 	// close server and wait for the client to start reconnection attempts
@@ -119,11 +134,16 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 func TestClientCloseWithoutConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	client.HandshakeTimeout = 10 * time.Millisecond
-	go client.Subscribe(ctx, "ws", "notAnIP", "devices/*", nil,
-		func(devices []client.Meta[Device]) {
+	go client.Subscribe(client.SubscribeConfig[Device]{
+		Ctx:              ctx,
+		Protocol:         "ws",
+		Host:             "notAnIP",
+		Path:             "devices/*",
+		HandshakeTimeout: 10 * time.Millisecond,
+		OnMessage: func(devices []client.Meta[Device]) {
 			expect.True(false)
-		})
+		},
+	})
 
 	// wait for retries to stablish connection
 	time.Sleep(200 * time.Millisecond)
@@ -155,7 +175,13 @@ func TestClientListCallbackCurry(t *testing.T) {
 	}
 
 	wg.Add(1)
-	go client.Subscribe(ctx, "ws", server.Address, "devices/*", nil, makeDevicesCallback())
+	go client.Subscribe(client.SubscribeConfig[Device]{
+		Ctx:       ctx,
+		Protocol:  "ws",
+		Host:      server.Address,
+		Path:      "devices/*",
+		OnMessage: makeDevicesCallback(),
+	})
 
 	wg.Wait()
 

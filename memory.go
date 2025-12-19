@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/goccy/go-json"
 
@@ -337,7 +336,7 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 	if len(data) == 0 {
 		return path, errors.New("ooo: invalid storage data (empty)")
 	}
-	now := time.Now().UTC().UnixNano()
+	now := key.MonotonicNow()
 
 	if !strings.Contains(path, "*") {
 		index := key.LastIndex(path)
@@ -403,7 +402,7 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 		return path, errors.New("ooo: invalid storage data (empty)")
 	}
 
-	now := time.Now().UTC().UnixNano()
+	now := key.MonotonicNow()
 	if !strings.Contains(path, "*") {
 		index, err := db._patch(path, data, now)
 		if err != nil {
