@@ -47,12 +47,12 @@ func SubscribeMultiple2[T1, T2 any](
 		}
 	}()
 
-	go Subscribe(SubscribeConfig[T1]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path1.Protocol,
 		Host:     path1.Host,
-		Path:     path1.Path,
 		Header:   path1.Header,
+	}, path1.Path, SubscribeEvents[T1]{
 		OnMessage: func(messages []Meta[T1]) {
 			select {
 			case ch1 <- messages:
@@ -61,12 +61,12 @@ func SubscribeMultiple2[T1, T2 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig[T2]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path2.Protocol,
 		Host:     path2.Host,
-		Path:     path2.Path,
 		Header:   path2.Header,
+	}, path2.Path, SubscribeEvents[T2]{
 		OnMessage: func(messages []Meta[T2]) {
 			select {
 			case ch2 <- messages:
@@ -122,12 +122,12 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		}
 	}()
 
-	go Subscribe(SubscribeConfig[T1]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path1.Protocol,
 		Host:     path1.Host,
-		Path:     path1.Path,
 		Header:   path1.Header,
+	}, path1.Path, SubscribeEvents[T1]{
 		OnMessage: func(messages []Meta[T1]) {
 			select {
 			case ch1 <- messages:
@@ -136,12 +136,12 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig[T2]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path2.Protocol,
 		Host:     path2.Host,
-		Path:     path2.Path,
 		Header:   path2.Header,
+	}, path2.Path, SubscribeEvents[T2]{
 		OnMessage: func(messages []Meta[T2]) {
 			select {
 			case ch2 <- messages:
@@ -150,12 +150,12 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig[T3]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path3.Protocol,
 		Host:     path3.Host,
-		Path:     path3.Path,
 		Header:   path3.Header,
+	}, path3.Path, SubscribeEvents[T3]{
 		OnMessage: func(messages []Meta[T3]) {
 			select {
 			case ch3 <- messages:
@@ -224,12 +224,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		}
 	}()
 
-	go Subscribe(SubscribeConfig[T1]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path1.Protocol,
 		Host:     path1.Host,
-		Path:     path1.Path,
 		Header:   path1.Header,
+	}, path1.Path, SubscribeEvents[T1]{
 		OnMessage: func(messages []Meta[T1]) {
 			select {
 			case ch1 <- messages:
@@ -238,12 +238,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig[T2]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path2.Protocol,
 		Host:     path2.Host,
-		Path:     path2.Path,
 		Header:   path2.Header,
+	}, path2.Path, SubscribeEvents[T2]{
 		OnMessage: func(messages []Meta[T2]) {
 			select {
 			case ch2 <- messages:
@@ -252,12 +252,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig[T3]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path3.Protocol,
 		Host:     path3.Host,
-		Path:     path3.Path,
 		Header:   path3.Header,
+	}, path3.Path, SubscribeEvents[T3]{
 		OnMessage: func(messages []Meta[T3]) {
 			select {
 			case ch3 <- messages:
@@ -266,12 +266,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig[T4]{
+	go Subscribe(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path4.Protocol,
 		Host:     path4.Host,
-		Path:     path4.Path,
 		Header:   path4.Header,
+	}, path4.Path, SubscribeEvents[T4]{
 		OnMessage: func(messages []Meta[T4]) {
 			select {
 			case ch4 <- messages:

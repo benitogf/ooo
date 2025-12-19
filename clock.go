@@ -6,11 +6,13 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/benitogf/ooo/monotonic"
 )
 
-// Time returns a string timestamp
+// Time returns a string timestamp using the monotonic clock
 func Time() string {
-	now := time.Now().UTC().UnixNano()
+	now := monotonic.Now()
 	return strconv.FormatInt(now, 10)
 }
 

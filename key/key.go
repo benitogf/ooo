@@ -5,29 +5,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
-)
 
-var (
-	clockMu   sync.Mutex
-	lastClock int64
+	"github.com/benitogf/ooo/monotonic"
 )
-
-// MonotonicNow returns a monotonically increasing timestamp in nanoseconds.
-// If the system clock moves backwards, it returns lastClock + 1 to ensure
-// timestamps always move forward.
-func MonotonicNow() int64 {
-	clockMu.Lock()
-	defer clockMu.Unlock()
-	now := time.Now().UTC().UnixNano()
-	if now <= lastClock {
-		lastClock++
-		return lastClock
-	}
-	lastClock = now
-	return now
-}
 
 // GlobRegex checks for valid glob paths
 var GlobRegex = regexp.MustCompile(`^[a-zA-Z\*\d]$|^[a-zA-Z\*\d][a-zA-Z\*\d\/]+[a-zA-Z\*\d]$`)
@@ -73,7 +53,7 @@ func Build(key string) string {
 		return key
 	}
 
-	now := MonotonicNow()
+	now := monotonic.Now()
 	index := strconv.FormatInt(now, 16)
 	return strings.Replace(key, "/*", "/"+index, 1)
 }

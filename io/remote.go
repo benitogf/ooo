@@ -13,7 +13,39 @@ import (
 	"github.com/goccy/go-json"
 )
 
-func RemoteSet[T any](_client *http.Client, ssl bool, host string, path string, item T, header http.Header) error {
+// RemoteConfig holds connection configuration for remote operations.
+// Required fields: Client, Host.
+// Optional fields: SSL, Header.
+type RemoteConfig struct {
+	Client *http.Client
+	SSL    bool
+	Host   string
+	Header http.Header
+}
+
+// URL returns the full URL for a given path based on the config.
+func (c *RemoteConfig) URL(path string) string {
+	if c.SSL {
+		return "https://" + c.Host + "/" + path
+	}
+	return "http://" + c.Host + "/" + path
+}
+
+// Validate checks that required fields are set.
+func (c *RemoteConfig) Validate() error {
+	if c.Client == nil {
+		return errors.New("io: Client is required")
+	}
+	if c.Host == "" {
+		return errors.New("io: Host is required")
+	}
+	return nil
+}
+
+func RemoteSet[T any](cfg RemoteConfig, path string, item T) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
@@ -26,22 +58,16 @@ func RemoteSet[T any](_client *http.Client, ssl bool, host string, path string, 
 		log.Println("RemoteSet["+path+"]: failed to marshal data", err)
 		return err
 	}
-	var url string
-	if ssl {
-		url = "https://" + host + "/" + path
-	} else {
-		url = "http://" + host + "/" + path
-	}
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	req, err := http.NewRequest("POST", cfg.URL(path), bytes.NewReader(data))
 	if err != nil {
 		log.Println("RemoteSet["+path+"]: failed to create request", err)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	for k, v := range header {
+	for k, v := range cfg.Header {
 		req.Header[k] = v
 	}
-	resp, err := _client.Do(req)
+	resp, err := cfg.Client.Do(req)
 	if err != nil {
 		log.Println("RemoteSet["+path+"]: failed to post to remote", err)
 		return err
@@ -59,7 +85,10 @@ func RemoteSet[T any](_client *http.Client, ssl bool, host string, path string, 
 	return nil
 }
 
-func RemotePush[T any](_client *http.Client, ssl bool, host string, path string, item T, header http.Header) error {
+func RemotePush[T any](cfg RemoteConfig, path string, item T) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
@@ -74,22 +103,16 @@ func RemotePush[T any](_client *http.Client, ssl bool, host string, path string,
 		log.Println("RemotePush["+path+"]: failed to marshal data", err)
 		return err
 	}
-	var url string
-	if ssl {
-		url = "https://" + host + "/" + _path
-	} else {
-		url = "http://" + host + "/" + _path
-	}
-	req, err := http.NewRequest("POST", url, bytes.NewReader(data))
+	req, err := http.NewRequest("POST", cfg.URL(_path), bytes.NewReader(data))
 	if err != nil {
 		log.Println("RemotePush["+path+"]: failed to create request", err)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	for k, v := range header {
+	for k, v := range cfg.Header {
 		req.Header[k] = v
 	}
-	resp, err := _client.Do(req)
+	resp, err := cfg.Client.Do(req)
 	if err != nil {
 		log.Println("RemotePush["+path+"]: failed to post to remote", err)
 		return err
@@ -107,7 +130,10 @@ func RemotePush[T any](_client *http.Client, ssl bool, host string, path string,
 	return nil
 }
 
-func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string, header http.Header) (client.Meta[T], error) {
+func RemoteGet[T any](cfg RemoteConfig, path string) (client.Meta[T], error) {
+	if err := cfg.Validate(); err != nil {
+		return client.Meta[T]{}, err
+	}
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
@@ -115,21 +141,15 @@ func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string, 
 		return client.Meta[T]{}, errors.New("RemoteGet[" + path + "]: path is a list")
 	}
 
-	var url string
-	if ssl {
-		url = "https://" + host + "/" + path
-	} else {
-		url = "http://" + host + "/" + path
-	}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", cfg.URL(path), nil)
 	if err != nil {
 		log.Println("RemoteGet["+path+"]: failed to create request", err)
 		return client.Meta[T]{}, err
 	}
-	for k, v := range header {
+	for k, v := range cfg.Header {
 		req.Header[k] = v
 	}
-	resp, err := _client.Do(req)
+	resp, err := cfg.Client.Do(req)
 	if err != nil {
 		log.Println("RemoteGet["+path+"]: failed to get from remote", err)
 		return client.Meta[T]{}, err
@@ -163,7 +183,10 @@ func RemoteGet[T any](_client *http.Client, ssl bool, host string, path string, 
 	}, nil
 }
 
-func RemoteGetList[T any](_client *http.Client, ssl bool, host string, path string, header http.Header) ([]client.Meta[T], error) {
+func RemoteGetList[T any](cfg RemoteConfig, path string) ([]client.Meta[T], error) {
+	if err := cfg.Validate(); err != nil {
+		return []client.Meta[T]{}, err
+	}
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
@@ -171,21 +194,15 @@ func RemoteGetList[T any](_client *http.Client, ssl bool, host string, path stri
 		return []client.Meta[T]{}, errors.New("RemoteGetList[" + path + "]: path is not a list")
 	}
 
-	var url string
-	if ssl {
-		url = "https://" + host + "/" + path
-	} else {
-		url = "http://" + host + "/" + path
-	}
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequest("GET", cfg.URL(path), nil)
 	if err != nil {
 		log.Println("RemoteGetList["+path+"]: failed to create request", err)
 		return []client.Meta[T]{}, err
 	}
-	for k, v := range header {
+	for k, v := range cfg.Header {
 		req.Header[k] = v
 	}
-	resp, err := _client.Do(req)
+	resp, err := cfg.Client.Do(req)
 	if err != nil {
 		log.Println("RemoteGetList["+path+"]: failed to get from remote", err)
 		return []client.Meta[T]{}, err

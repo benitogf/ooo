@@ -46,11 +46,11 @@ func TestClientList(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
-	go client.Subscribe(client.SubscribeConfig[Device]{
+	go client.Subscribe(client.SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: "ws",
 		Host:     server.Address,
-		Path:     "devices/*",
+	}, "devices/*", client.SubscribeEvents[Device]{
 		OnMessage: func(devices []client.Meta[Device]) {
 			if len(devices) > 0 {
 				sort.Slice(devices, func(i, j int) bool {
@@ -83,11 +83,11 @@ func TestClientClose(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
-	go client.Subscribe(client.SubscribeConfig[Device]{
+	go client.Subscribe(client.SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: "ws",
 		Host:     server.Address,
-		Path:     "devices/*",
+	}, "devices/*", client.SubscribeEvents[Device]{
 		OnMessage: func(devices []client.Meta[Device]) {
 			wg.Done()
 		},
@@ -110,11 +110,11 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	// client.DEBUG = false
-	go client.Subscribe(client.SubscribeConfig[Device]{
+	go client.Subscribe(client.SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: "ws",
 		Host:     server.Address,
-		Path:     "devices/*",
+	}, "devices/*", client.SubscribeEvents[Device]{
 		OnMessage: func(devices []client.Meta[Device]) {
 			wg.Done()
 		},
@@ -134,12 +134,12 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 func TestClientCloseWithoutConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go client.Subscribe(client.SubscribeConfig[Device]{
+	go client.Subscribe(client.SubscribeConfig{
 		Ctx:              ctx,
 		Protocol:         "ws",
 		Host:             "notAnIP",
-		Path:             "devices/*",
 		HandshakeTimeout: 10 * time.Millisecond,
+	}, "devices/*", client.SubscribeEvents[Device]{
 		OnMessage: func(devices []client.Meta[Device]) {
 			expect.True(false)
 		},
@@ -164,7 +164,7 @@ func TestClientListCallbackCurry(t *testing.T) {
 	wg := sync.WaitGroup{}
 
 	messagesCount := 0
-	makeDevicesCallback := func() client.OnMessageCallback[Device] {
+	makeDevicesCallback := func() func([]client.Meta[Device]) {
 		return func(devices []client.Meta[Device]) {
 			messagesCount++
 			if len(devices) > 0 {
@@ -175,11 +175,11 @@ func TestClientListCallbackCurry(t *testing.T) {
 	}
 
 	wg.Add(1)
-	go client.Subscribe(client.SubscribeConfig[Device]{
-		Ctx:       ctx,
-		Protocol:  "ws",
-		Host:      server.Address,
-		Path:      "devices/*",
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:      ctx,
+		Protocol: "ws",
+		Host:     server.Address,
+	}, "devices/*", client.SubscribeEvents[Device]{
 		OnMessage: makeDevicesCallback(),
 	})
 

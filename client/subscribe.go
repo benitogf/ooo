@@ -26,29 +26,19 @@ type Meta[T any] struct {
 	Data    T      `json:"data"`
 }
 
-type OnMessageCallback[T any] func([]Meta[T])
-type OnErrorCallback func(error)
-type OnOpenCallback func()
-type OnCloseCallback func()
-
-// SubscribeConfig holds configuration for the Subscribe function.
-// Required fields: Ctx, Protocol, Host, Path, OnMessage.
-// Optional fields: Header, OnError, OnOpen, OnClose, HandshakeTimeout.
-type SubscribeConfig[T any] struct {
+// SubscribeConfig holds connection configuration for Subscribe.
+// Required fields: Ctx, Protocol, Host.
+// Optional fields: Header, HandshakeTimeout.
+type SubscribeConfig struct {
 	Ctx              context.Context
 	Protocol         string
 	Host             string
-	Path             string
 	Header           http.Header
-	OnMessage        OnMessageCallback[T]
-	OnError          OnErrorCallback
-	OnOpen           OnOpenCallback
-	OnClose          OnCloseCallback
 	HandshakeTimeout time.Duration
 }
 
 // Validate checks that required fields are set and applies defaults.
-func (c *SubscribeConfig[T]) Validate() error {
+func (c *SubscribeConfig) Validate() error {
 	if c.Ctx == nil {
 		return errors.New("client: Ctx is required")
 	}
@@ -58,28 +48,46 @@ func (c *SubscribeConfig[T]) Validate() error {
 	if c.Host == "" {
 		return errors.New("client: Host is required")
 	}
-	if c.Path == "" {
-		return errors.New("client: Path is required")
-	}
-	if c.OnMessage == nil {
-		return errors.New("client: OnMessage callback is required")
-	}
 	if c.HandshakeTimeout == 0 {
 		c.HandshakeTimeout = DefaultHandshakeTimeout
 	}
 	return nil
 }
 
-func Subscribe[T any](cfg SubscribeConfig[T]) error {
+// SubscribeEvents holds event callbacks for Subscribe.
+// Required: OnMessage.
+// Optional: OnError, OnOpen, OnClose.
+type SubscribeEvents[T any] struct {
+	OnMessage func([]Meta[T])
+	OnError   func(error)
+	OnOpen    func()
+	OnClose   func()
+}
+
+// Validate checks that required callbacks are set.
+func (e *SubscribeEvents[T]) Validate() error {
+	if e.OnMessage == nil {
+		return errors.New("client: OnMessage callback is required")
+	}
+	return nil
+}
+
+func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T]) error {
 	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if path == "" {
+		return errors.New("client: path is required")
+	}
+	if err := events.Validate(); err != nil {
 		return err
 	}
 	retryCount := 0
 	var cache json.RawMessage
-	lastPath := key.LastIndex(cfg.Path)
+	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 	closingTime := atomic.Bool{}
-	wsURL := url.URL{Scheme: cfg.Protocol, Host: cfg.Host, Path: cfg.Path}
+	wsURL := url.URL{Scheme: cfg.Protocol, Host: cfg.Host, Path: path}
 	muWsClient := sync.Mutex{}
 	var wsClient *websocket.Conn
 
@@ -89,13 +97,13 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 		muWsClient.Lock()
 		defer muWsClient.Unlock()
 		if wsClient == nil {
-			log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: client closing but no connection to close", cfg.Host, cfg.Path, cfg.Ctx.Err())
+			log.Println("subscribe["+cfg.Host+"/"+path+"]: client closing but no connection to close", cfg.Host, path, cfg.Ctx.Err())
 			return
 		}
-		log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: client closing", cfg.Host, cfg.Path, cfg.Ctx.Err())
+		log.Println("subscribe["+cfg.Host+"/"+path+"]: client closing", cfg.Host, path, cfg.Ctx.Err())
 		wsClient.Close()
-		if cfg.OnClose != nil {
-			cfg.OnClose()
+		if events.OnClose != nil {
+			events.OnClose()
 		}
 	}(&closingTime)
 
@@ -110,25 +118,25 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 		wsClient, _, err = quickDial.Dial(wsURL.String(), cfg.Header)
 		if wsClient == nil || err != nil {
 			muWsClient.Unlock()
-			log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: failed websocket dial ", err)
-			if cfg.OnError != nil {
-				cfg.OnError(err)
+			log.Println("subscribe["+cfg.Host+"/"+path+"]: failed websocket dial ", err)
+			if events.OnError != nil {
+				events.OnError(err)
 			}
 			time.Sleep(2 * time.Second)
 			continue
 		}
 		muWsClient.Unlock()
-		log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: client connection stablished", cfg.Host, cfg.Path)
-		if cfg.OnOpen != nil {
-			cfg.OnOpen()
+		log.Println("subscribe["+cfg.Host+"/"+path+"]: client connection stablished", cfg.Host, path)
+		if events.OnOpen != nil {
+			events.OnOpen()
 		}
 
 		for {
 			_, message, err := wsClient.ReadMessage()
 			if err != nil || message == nil {
-				log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: failed websocket read connection ", err)
-				if cfg.OnError != nil {
-					cfg.OnError(err)
+				log.Println("subscribe["+cfg.Host+"/"+path+"]: failed websocket read connection ", err)
+				if events.OnError != nil {
+					events.OnError(err)
 				}
 				wsClient.Close()
 				break
@@ -137,12 +145,12 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 			result := []Meta[T]{}
 			if isList {
 				var objs []meta.Object
-				// log.Println("subscribe[", cfg.Host, cfg.Path, "]: message", string(message))
+				// log.Println("subscribe[", cfg.Host, path, "]: message", string(message))
 				cache, objs, err = messages.PatchList(message, cache)
 				if err != nil {
-					log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: failed to parse message from websocket", err)
-					if cfg.OnError != nil {
-						cfg.OnError(err)
+					log.Println("subscribe["+cfg.Host+"/"+path+"]: failed to parse message from websocket", err)
+					if events.OnError != nil {
+						events.OnError(err)
 					}
 					break
 				}
@@ -150,9 +158,9 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 					var item T
 					err = json.Unmarshal([]byte(obj.Data), &item)
 					if err != nil {
-						log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: failed to unmarshal data from websocket", err)
-						if cfg.OnError != nil {
-							cfg.OnError(err)
+						log.Println("subscribe["+cfg.Host+"/"+path+"]: failed to unmarshal data from websocket", err)
+						if events.OnError != nil {
+							events.OnError(err)
 						}
 						continue
 					}
@@ -164,16 +172,16 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 					})
 				}
 				retryCount = 0
-				cfg.OnMessage(result)
+				events.OnMessage(result)
 				continue
 			}
 
 			var obj meta.Object
 			cache, obj, err = messages.Patch(message, cache)
 			if err != nil {
-				log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: failed to parse message from websocket", err)
-				if cfg.OnError != nil {
-					cfg.OnError(err)
+				log.Println("subscribe["+cfg.Host+"/"+path+"]: failed to parse message from websocket", err)
+				if events.OnError != nil {
+					events.OnError(err)
 				}
 				break
 			}
@@ -181,9 +189,9 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 			var item T
 			err = json.Unmarshal([]byte(obj.Data), &item)
 			if err != nil {
-				log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: failed to unmarshal data from websocket", err)
-				if cfg.OnError != nil {
-					cfg.OnError(err)
+				log.Println("subscribe["+cfg.Host+"/"+path+"]: failed to unmarshal data from websocket", err)
+				if events.OnError != nil {
+					events.OnError(err)
 				}
 				break
 			}
@@ -194,33 +202,33 @@ func Subscribe[T any](cfg SubscribeConfig[T]) error {
 				Data:    item,
 			})
 			retryCount = 0
-			cfg.OnMessage(result)
+			events.OnMessage(result)
 		}
 
 		bye := closingTime.Load()
 		if bye {
-			log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: skip reconnection, client closing...", cfg.Host, cfg.Path)
+			log.Println("subscribe["+cfg.Host+"/"+path+"]: skip reconnection, client closing...", cfg.Host, path)
 			break
 		}
 
-		if cfg.OnClose != nil {
-			cfg.OnClose()
+		if events.OnClose != nil {
+			events.OnClose()
 		}
 
 		retryCount++
 		if retryCount < 30 {
-			log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: reconnecting...", cfg.Host, cfg.Path, err)
+			log.Println("subscribe["+cfg.Host+"/"+path+"]: reconnecting...", cfg.Host, path, err)
 			time.Sleep(300 * time.Millisecond)
 			continue
 		}
 
 		if retryCount < 100 {
-			log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: reconnecting in 2 seconds...", cfg.Host, cfg.Path, err)
+			log.Println("subscribe["+cfg.Host+"/"+path+"]: reconnecting in 2 seconds...", cfg.Host, path, err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		log.Println("subscribe["+cfg.Host+"/"+cfg.Path+"]: reconnecting in 10 seconds...", err)
+		log.Println("subscribe["+cfg.Host+"/"+path+"]: reconnecting in 10 seconds...", err)
 		time.Sleep(10 * time.Second)
 	}
 	return nil

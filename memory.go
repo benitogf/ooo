@@ -11,6 +11,7 @@ import (
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
 )
 
 var (
@@ -336,7 +337,7 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 	if len(data) == 0 {
 		return path, errors.New("ooo: invalid storage data (empty)")
 	}
-	now := key.MonotonicNow()
+	now := monotonic.Now()
 
 	if !strings.Contains(path, "*") {
 		index := key.LastIndex(path)
@@ -402,7 +403,7 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 		return path, errors.New("ooo: invalid storage data (empty)")
 	}
 
-	now := key.MonotonicNow()
+	now := monotonic.Now()
 	if !strings.Contains(path, "*") {
 		index, err := db._patch(path, data, now)
 		if err != nil {

@@ -11,6 +11,7 @@ import (
 
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
 
 	"github.com/benitogf/jsonpatch"
 
@@ -259,8 +260,8 @@ func (sm *Stream) Read(key string, client *Conn) {
 
 // _setCache will store data in a pool's cache
 func (sm *Stream) _setCache(poolIndex int, data []byte) int64 {
-	// log.Println("SET cache version ", sm.pools[poolIndex].Key, strconv.FormatInt(time.Now().UTC().UnixNano(), 16))
-	now := time.Now().UTC().UnixNano()
+	// log.Println("SET cache version ", sm.pools[poolIndex].Key, strconv.FormatInt(monotonic.Now(), 16))
+	now := monotonic.Now()
 	sm.pools[poolIndex].cache.Version = now
 	sm.pools[poolIndex].cache.Data = data
 	return now
@@ -272,7 +273,7 @@ func (sm *Stream) setCache(key string, data []byte) int64 {
 	defer sm.mutex.Unlock()
 	poolIndex := sm.findPool(key)
 	if poolIndex == -1 {
-		now := time.Now().UTC().UnixNano()
+		now := monotonic.Now()
 		// create a pool
 		sm.pools = append(
 			sm.pools,
