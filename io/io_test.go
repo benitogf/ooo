@@ -52,13 +52,15 @@ func TestIObasic(t *testing.T) {
 	require.Equal(t, "here", thing2.Data.This)
 	require.Equal(t, "there", thing2.Data.That)
 
-	err = io.Push(server, THINGS_PATH, thing1.Data)
+	index, err := io.Push(server, THINGS_PATH, thing1.Data)
 	require.NoError(t, err)
+	require.NotEmpty(t, index)
 	if runtime.GOOS == "windows" {
 		time.Sleep(10 * time.Millisecond)
 	}
-	err = io.Push(server, THINGS_PATH, thing2.Data)
+	index, err = io.Push(server, THINGS_PATH, thing2.Data)
 	require.NoError(t, err)
+	require.NotEmpty(t, index)
 	if runtime.GOOS == "windows" {
 		time.Sleep(10 * time.Millisecond)
 	}

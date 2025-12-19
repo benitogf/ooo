@@ -97,12 +97,12 @@ func Set[T any](server *ooo.Server, path string, item T) error {
 	return err
 }
 
-func Push[T any](server *ooo.Server, path string, item T) error {
+func Push[T any](server *ooo.Server, path string, item T) (string, error) {
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
 	if !isList {
-		return errors.New("Push[" + path + "]: path is not a list")
+		return "", errors.New("Push[" + path + "]: path is not a list")
 	}
 
 	_path := key.Build(path)
@@ -110,8 +110,9 @@ func Push[T any](server *ooo.Server, path string, item T) error {
 	data, err := json.Marshal(item)
 	if err != nil {
 		log.Println("Push["+path+"]: failed to marshal data", err)
-		return err
+		return "", err
 	}
 	_, err = server.Storage.Set(_path, data)
-	return err
+	index := key.LastIndex(_path)
+	return index, err
 }

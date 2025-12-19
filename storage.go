@@ -18,7 +18,6 @@ type StorageEvent struct {
 // StorageOpt options of the storage instance
 type StorageOpt struct {
 	NoBroadcastKeys []string
-	DbOpt           interface{}
 	BeforeRead      func(key string)
 }
 

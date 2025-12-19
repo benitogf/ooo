@@ -77,9 +77,7 @@ type Server struct {
 	Router            *mux.Router
 	Stream            stream.Stream
 	filters           filters
-	Pivot             string
 	NoBroadcastKeys   []string
-	DbOpt             interface{}
 	Audit             audit
 	Workers           int
 	ForcePatch        bool
@@ -107,6 +105,7 @@ type Server struct {
 	ReadHeaderTimeout time.Duration
 	IdleTimeout       time.Duration
 	OnStorageEvent    StorageEventCallback
+	BeforeRead        func(key string)
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -119,10 +118,14 @@ type tcpKeepAliveListener struct {
 
 func (app *Server) waitListen() {
 	var err error
-	err = app.Storage.Start(StorageOpt{
+	storageOpt := StorageOpt{
 		NoBroadcastKeys: app.NoBroadcastKeys,
-		DbOpt:           app.DbOpt,
-	})
+	}
+
+	if app.BeforeRead != nil {
+		storageOpt.BeforeRead = app.BeforeRead
+	}
+	err = app.Storage.Start(storageOpt)
 	if err != nil {
 		log.Fatal(err)
 	}
