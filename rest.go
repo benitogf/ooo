@@ -2,19 +2,13 @@ package ooo
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
 	"github.com/gorilla/mux"
-)
-
-var (
-	ErrNotAuthorized = errors.New("ooo: pathKeyError key is not valid")
 )
 
 func (app *Server) getStats(w http.ResponseWriter, r *http.Request) {
@@ -47,13 +41,14 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_key := mux.Vars(r)["key"]
-	countGlob := strings.Count(_key, "*")
-	where := strings.Index(_key, "*")
-	invalidGlobCount := countGlob > 1
-	globNotAtTheEndOfPath := countGlob == 1 && where != len(_key)-1
-	if !key.IsValid(_key) || invalidGlobCount || globNotAtTheEndOfPath {
+	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		fmt.Fprintf(w, "%s", ErrInvalidKey)
+		return
+	}
+	if err := key.ValidateGlob(_key); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
@@ -64,24 +59,29 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_newKey := key.Build(_key)
-	data, err := app.filters.Write.check(_newKey, event, app.Static)
+	data, err := app.filters.Write.check(_key, event, app.Static)
 	if err != nil {
-		app.Console.Err("setError:filter["+_newKey+"]", err)
+		app.Console.Err("setError:filter["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	index, err := app.Storage.Set(_newKey, data)
+	// Use Push for glob patterns, Set for specific keys
+	var index string
+	if key.LastIndex(_key) == "*" {
+		index, err = app.Storage.Push(_key, data)
+	} else {
+		index, err = app.Storage.Set(_key, data)
+	}
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	app.Console.Log("publish", _newKey)
-	app.filters.AfterWrite.check(_newKey)
+	app.Console.Log("publish", _key)
+	app.filters.AfterWrite.check(_key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"index":"` + index + `"}`))
 }
@@ -94,13 +94,14 @@ func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_key := mux.Vars(r)["key"]
-	countGlob := strings.Count(_key, "*")
-	where := strings.Index(_key, "*")
-	invalidGlobCount := countGlob > 1
-	globNotAtTheEndOfPath := countGlob == 1 && where != len(_key)-1
-	if !key.IsValid(_key) || invalidGlobCount || globNotAtTheEndOfPath {
+	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		fmt.Fprintf(w, "%s", ErrInvalidKey)
+		return
+	}
+	if err := key.ValidateGlob(_key); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
@@ -140,13 +141,14 @@ func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_key := mux.Vars(r)["key"]
-	countGlob := strings.Count(_key, "*")
-	where := strings.Index(_key, "*")
-	invalidGlobCount := countGlob > 1
-	globNotAtTheEndOfPath := countGlob == 1 && where != len(_key)-1
-	if !key.IsValid(_key) || invalidGlobCount || globNotAtTheEndOfPath {
+	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		fmt.Fprintf(w, "%s", ErrInvalidKey)
+		return
+	}
+	if err := key.ValidateGlob(_key); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
@@ -182,7 +184,7 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 	_key := mux.Vars(r)["key"]
 	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		fmt.Fprintf(w, "%s", ErrInvalidKey)
 		return
 	}
 
@@ -210,7 +212,7 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 	}
 	if bytes.Equal(entry.Data, meta.EmptyObject) {
 		w.WriteHeader(http.StatusNotFound)
-		fmt.Fprintf(w, "%s", errors.New("ooo: empty key"))
+		fmt.Fprintf(w, "%s", ErrEmptyKey)
 		return
 	}
 
@@ -222,7 +224,7 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 	_key := mux.Vars(r)["key"]
 	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprintf(w, "%s", errors.New("ooo: pathKeyError key is not valid"))
+		fmt.Fprintf(w, "%s", ErrInvalidKey)
 		return
 	}
 

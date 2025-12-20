@@ -1,6 +1,7 @@
 package io_test
 
 import (
+	"net/http"
 	"os"
 	"runtime"
 	"testing"
@@ -162,4 +163,111 @@ func TestRemoteIO(t *testing.T) {
 	require.Equal(t, "this", things[0].Data.This)
 	require.Equal(t, "here", things[1].Data.This)
 	require.Equal(t, "what", things[2].Data.This)
+}
+
+func TestRemoteDelete(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := io.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Set an item
+	err := io.RemoteSet(cfg, THING1_PATH, Thing{
+		This: "to-delete",
+		That: "soon",
+	})
+	require.NoError(t, err)
+
+	// Verify it exists
+	thing, err := io.RemoteGet[Thing](cfg, THING1_PATH)
+	require.NoError(t, err)
+	require.Equal(t, "to-delete", thing.Data.This)
+
+	// Delete it
+	err = io.RemoteDelete(cfg, THING1_PATH)
+	require.NoError(t, err)
+
+	// Verify it returns empty after deletion
+	thingAfter, err := io.RemoteGet[Thing](cfg, THING1_PATH)
+	require.NoError(t, err)
+	require.Empty(t, thingAfter.Data.This)
+}
+
+func TestRemoteConfigValidation(t *testing.T) {
+	// Missing Client
+	cfg := io.RemoteConfig{
+		Host: "localhost:8080",
+	}
+	err := io.RemoteSet(cfg, "test", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Client is required")
+
+	// Missing Host
+	cfg = io.RemoteConfig{
+		Client: &http.Client{},
+	}
+	err = io.RemoteSet(cfg, "test", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Host is required")
+}
+
+func TestRemotePathValidation(t *testing.T) {
+	cfg := io.RemoteConfig{
+		Client: &http.Client{},
+		Host:   "localhost:8080",
+	}
+
+	// RemoteSet with list path should fail
+	err := io.RemoteSet(cfg, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is a list")
+
+	// RemotePush with non-list path should fail
+	err = io.RemotePush(cfg, "thing1", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is not a list")
+
+	// RemoteGet with list path should fail
+	_, err = io.RemoteGet[Thing](cfg, "things/*")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is a list")
+
+	// RemoteGetList with non-list path should fail
+	_, err = io.RemoteGetList[Thing](cfg, "thing1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is not a list")
+}
+
+func TestLocalPathValidation(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Set with list path should fail
+	err := io.Set(server, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is a list")
+
+	// Push with non-list path should fail
+	_, err = io.Push(server, "thing1", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob pattern required")
+
+	// Get with list path should fail
+	_, err = io.Get[Thing](server, "things/*")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is a list")
+
+	// GetList with non-list path should fail
+	_, err = io.GetList[Thing](server, "thing1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "path is not a list")
 }

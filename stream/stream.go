@@ -9,7 +9,6 @@ import (
 
 	"github.com/goccy/go-json"
 
-	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
 
@@ -19,7 +18,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const timeout = 15 * time.Second
+var (
+	ErrPoolNotFound   = errors.New("stream: pool not found")
+	ErrPoolCacheEmpty = errors.New("stream: pool cache empty")
+)
 
 // Subscribe : monitoring or filtering of subscriptions
 type Subscribe func(key string) error
@@ -27,8 +29,10 @@ type Subscribe func(key string) error
 // Unsubscribe : function callback on subscription closing
 type Unsubscribe func(key string)
 
+// GetFn is a function type for retrieving data by key from storage.
 type GetFn func(key string) ([]byte, error)
 
+// EncodeFn is a function type for encoding data to a string format.
 type EncodeFn func(data []byte) string
 
 // Conn extends the websocket connection with a mutex
@@ -46,6 +50,9 @@ type Pool struct {
 	connections []*Conn
 }
 
+// DefaultWriteTimeout is the default timeout for WebSocket write operations.
+const DefaultWriteTimeout = 15 * time.Second
+
 // Stream a group of pools
 type Stream struct {
 	mutex         sync.RWMutex
@@ -53,7 +60,10 @@ type Stream struct {
 	OnUnsubscribe Unsubscribe
 	ForcePatch    bool
 	NoPatch       bool
-	pools         []*Pool
+	WriteTimeout  time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
+	clockPool     *Pool            // dedicated clock pool (was index 0)
+	pools         map[string]*Pool // O(1) lookup by key
+	poolIndex     *poolTrie        // trie for O(k) path matching in Broadcast
 	Console       *coat.Console
 }
 
@@ -76,23 +86,26 @@ var StreamUpgrader = websocket.Upgrader{
 	Subprotocols: []string{"bearer"},
 }
 
-func (sm *Stream) findPool(key string) int {
-	poolIndex := -1
-	for i := range sm.pools {
-		if sm.pools[i].Key == key {
-			poolIndex = i
-			break
-		}
+func (sm *Stream) getPool(key string) *Pool {
+	// Clock pool uses empty key
+	if key == "" {
+		return sm.clockPool
 	}
-
-	return poolIndex
+	return sm.pools[key]
 }
 
 func (sm *Stream) InitClock() {
-	if len(sm.pools) == 0 {
-		sm.pools = append(
-			sm.pools,
-			&Pool{Key: ""})
+	if sm.pools == nil {
+		sm.pools = make(map[string]*Pool)
+	}
+	if sm.poolIndex == nil {
+		sm.poolIndex = newPoolTrie()
+	}
+	if sm.clockPool == nil {
+		sm.clockPool = &Pool{Key: ""}
+	}
+	if sm.WriteTimeout == 0 {
+		sm.WriteTimeout = DefaultWriteTimeout
 	}
 }
 
@@ -121,101 +134,126 @@ func (sm *Stream) new(key string, wsClient *websocket.Conn) *Conn {
 
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	poolIndex := sm.findPool(key)
-	if poolIndex == -1 {
+
+	// Clock connections (empty key) go to dedicated clockPool
+	if key == "" {
+		if sm.clockPool == nil {
+			sm.clockPool = &Pool{Key: ""}
+		}
+		sm.clockPool.connections = append(sm.clockPool.connections, client)
+		sm.Console.Log("clock connections: ", len(sm.clockPool.connections))
+		return client
+	}
+
+	pool := sm.getPool(key)
+	if pool == nil {
 		// create a pool
-		sm.pools = append(
-			sm.pools,
-			&Pool{
-				Key:         key,
-				connections: []*Conn{client}})
-		poolIndex = len(sm.pools) - 1
-		sm.Console.Log("connections["+key+"]: ", len(sm.pools[poolIndex].connections))
+		pool = &Pool{
+			Key:         key,
+			connections: []*Conn{client},
+		}
+		sm.pools[key] = pool
+		sm.poolIndex.insert(key, pool)
+		sm.Console.Log("connections["+key+"]: ", len(pool.connections))
 		return client
 	}
 
 	// use existing pool
-	sm.pools[poolIndex].connections = append(
-		sm.pools[poolIndex].connections,
-		client)
-	sm.Console.Log("connections["+key+"]: ", len(sm.pools[poolIndex].connections))
+	pool.connections = append(pool.connections, client)
+	sm.Console.Log("connections["+key+"]: ", len(pool.connections))
 	return client
+}
+
+// removeConn removes a connection from a slice using swap-and-truncate.
+// This is O(1) instead of O(n) and doesn't allocate a new slice.
+func removeConn(conns []*Conn, client *Conn) []*Conn {
+	for i, v := range conns {
+		if v == client {
+			// Swap with last element and truncate
+			last := len(conns) - 1
+			conns[i] = conns[last]
+			conns[last] = nil // Allow GC
+			return conns[:last]
+		}
+	}
+	return conns
 }
 
 // Close client connection
 func (sm *Stream) Close(key string, client *Conn) {
-	// auxiliar clients array
-	na := []*Conn{}
-
-	// loop to remove this client
 	sm.mutex.Lock()
-	poolIndex := sm.findPool(key)
-	for _, v := range sm.pools[poolIndex].connections {
-		if v != client {
-			na = append(na, v)
+	// Handle clock pool (empty key) specially
+	if key == "" {
+		if sm.clockPool != nil {
+			sm.clockPool.connections = removeConn(sm.clockPool.connections, client)
+		}
+	} else {
+		pool := sm.getPool(key)
+		if pool != nil {
+			pool.connections = removeConn(pool.connections, client)
 		}
 	}
-
-	// replace clients array with the auxiliar
-	sm.pools[poolIndex].connections = na
 	sm.mutex.Unlock()
 	go sm.OnUnsubscribe(key)
 	client.conn.Close()
 }
 
-// Broadcast will look for pools that match a path and broadcast updates
+// Broadcast will look for pools that match a path and broadcast updates.
+// Uses a trie for O(k) path matching where k is the number of path segments,
+// instead of O(n) where n is the total number of pools.
+// Lock contention is minimized by only holding stream-level RLock during trie lookup,
+// then using per-pool locks for the actual broadcast.
 func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
+	// Get matching pools under stream RLock (brief)
 	sm.mutex.RLock()
-	defer sm.mutex.RUnlock()
-	// skip pool 0 (clock)
-	for poolIndex := 1; poolIndex < len(sm.pools); poolIndex++ {
-		if key.Peer(sm.pools[poolIndex].Key, path) {
-			sm.pools[poolIndex].mutex.Lock()
-			data, err := opt.Get(sm.pools[poolIndex].Key)
-			// this error means that the broadcast was filtered
-			if err != nil {
-				sm.Console.Err("broadcast["+sm.pools[poolIndex].Key+"]: failed to get data", err)
-				sm.pools[poolIndex].mutex.Unlock()
-				continue
-			}
+	matchingPools := sm.poolIndex.findMatching(path)
+	sm.mutex.RUnlock()
 
-			// log.Println("BROADCAST cache version ", sm.pools[poolIndex].Key)
-			modifiedData, snapshot, version := sm.Patch(poolIndex, data)
-			sm.broadcast(poolIndex, modifiedData, snapshot, version)
-			sm.pools[poolIndex].mutex.Unlock()
-			if opt.Callback != nil {
-				opt.Callback()
-			}
+	// Process each pool with only per-pool locking
+	for _, pool := range matchingPools {
+		pool.mutex.Lock()
+		data, err := opt.Get(pool.Key)
+		// this error means that the broadcast was filtered
+		if err != nil {
+			sm.Console.Err("broadcast["+pool.Key+"]: failed to get data", err)
+			pool.mutex.Unlock()
+			continue
+		}
+
+		modifiedData, snapshot, version := sm.patchPool(pool, data)
+		sm.broadcastPool(pool, modifiedData, snapshot, version)
+		pool.mutex.Unlock()
+		if opt.Callback != nil {
+			opt.Callback()
 		}
 	}
 }
 
-// broadcast message
-func (sm *Stream) broadcast(poolIndex int, data []byte, snapshot bool, version int64) {
-	connections := sm.pools[poolIndex].connections
-	for _, client := range connections {
+// broadcastPool sends message to all connections in a pool
+func (sm *Stream) broadcastPool(pool *Pool, data []byte, snapshot bool, version int64) {
+	for _, client := range pool.connections {
 		sm.Write(client, string(data), snapshot, version)
 	}
 }
 
-// Patch will return either the snapshot or the patch
+// patchPool will return either the snapshot or the patch for a pool
 //
 // patch, false (patch)
 //
 // snapshot, true (snapshot)
-func (sm *Stream) Patch(poolIndex int, data []byte) ([]byte, bool, int64) {
+func (sm *Stream) patchPool(pool *Pool, data []byte) ([]byte, bool, int64) {
 	// no patch, only snapshot
 	if sm.NoPatch {
-		version := sm._setCache(poolIndex, data)
+		version := sm.setCachePool(pool, data)
 		return data, true, version
 	}
-	patch, err := jsonpatch.CreatePatch(sm.pools[poolIndex].cache.Data, data)
+	patch, err := jsonpatch.CreatePatch(pool.cache.Data, data)
 	if err != nil {
 		sm.Console.Err("patch create failed", err)
-		version := sm._setCache(poolIndex, data)
+		version := sm.setCachePool(pool, data)
 		return data, true, version
 	}
-	version := sm._setCache(poolIndex, data)
+	version := sm.setCachePool(pool, data)
 	operations, err := json.Marshal(patch)
 	if err != nil {
 		sm.Console.Err("patch decode failed", err)
@@ -230,15 +268,31 @@ func (sm *Stream) Patch(poolIndex int, data []byte) ([]byte, bool, int64) {
 	return operations, false, version
 }
 
+// buildMessage constructs the WebSocket message JSON using append for efficiency.
+// This avoids multiple string allocations from concatenation.
+func buildMessage(data []byte, snapshot bool, version int64) []byte {
+	// Pre-calculate capacity: {"snapshot":true,"version":"hexversion","data":...}
+	// Fixed overhead: ~40 bytes + version hex (max 16) + data length
+	capacity := 50 + len(data)
+	buf := make([]byte, 0, capacity)
+
+	buf = append(buf, `{"snapshot":`...)
+	buf = strconv.AppendBool(buf, snapshot)
+	buf = append(buf, `,"version":"`...)
+	buf = strconv.AppendInt(buf, version, 16)
+	buf = append(buf, `","data":`...)
+	buf = append(buf, data...)
+	buf = append(buf, '}')
+
+	return buf
+}
+
 // Write will write data to a ws connection
 func (sm *Stream) Write(client *Conn, data string, snapshot bool, version int64) {
 	client.mutex.Lock()
 	defer client.mutex.Unlock()
-	client.conn.SetWriteDeadline(time.Now().Add(timeout))
-	err := client.conn.WriteMessage(websocket.BinaryMessage, []byte("{"+
-		"\"snapshot\":"+strconv.FormatBool(snapshot)+","+
-		"\"version\":\""+strconv.FormatInt(version, 16)+"\","+
-		"\"data\":"+data+"}"))
+	client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
+	err := client.conn.WriteMessage(websocket.BinaryMessage, buildMessage([]byte(data), snapshot, version))
 
 	if err != nil {
 		client.conn.Close()
@@ -258,53 +312,53 @@ func (sm *Stream) Read(key string, client *Conn) {
 	}
 }
 
-// _setCache will store data in a pool's cache
-func (sm *Stream) _setCache(poolIndex int, data []byte) int64 {
-	// log.Println("SET cache version ", sm.pools[poolIndex].Key, strconv.FormatInt(monotonic.Now(), 16))
+// setCachePool will store data in a pool's cache
+func (sm *Stream) setCachePool(pool *Pool, data []byte) int64 {
+	// log.Println("SET cache version ", pool.Key, strconv.FormatInt(monotonic.Now(), 16))
 	now := monotonic.Now()
-	sm.pools[poolIndex].cache.Version = now
-	sm.pools[poolIndex].cache.Data = data
+	pool.cache.Version = now
+	pool.cache.Data = data
 	return now
 }
 
-// SetCache by key
+// setCache by key
 func (sm *Stream) setCache(key string, data []byte) int64 {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
-	poolIndex := sm.findPool(key)
-	if poolIndex == -1 {
+	pool := sm.getPool(key)
+	if pool == nil {
 		now := monotonic.Now()
 		// create a pool
-		sm.pools = append(
-			sm.pools,
-			&Pool{
-				Key: key,
-				cache: Cache{
-					Version: now,
-					Data:    data,
-				},
-				connections: []*Conn{}})
+		pool = &Pool{
+			Key: key,
+			cache: Cache{
+				Version: now,
+				Data:    data,
+			},
+			connections: []*Conn{},
+		}
+		sm.pools[key] = pool
 		return now
 	}
 
-	return sm._setCache(poolIndex, data)
+	return sm.setCachePool(pool, data)
 }
 
-// GetCache by key
+// GetCacheVersion by key
 func (sm *Stream) GetCacheVersion(key string) (int64, error) {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
-	poolIndex := sm.findPool(key)
-	if poolIndex == -1 {
-		return 0, errors.New("stream pool not found")
+	pool := sm.getPool(key)
+	if pool == nil {
+		return 0, ErrPoolNotFound
 	}
-	sm.pools[poolIndex].mutex.RLock()
-	defer sm.pools[poolIndex].mutex.RUnlock()
-	if len(sm.pools[poolIndex].cache.Data) == 0 {
-		return 0, errors.New("stream pool cache empty")
+	pool.mutex.RLock()
+	defer pool.mutex.RUnlock()
+	if len(pool.cache.Data) == 0 {
+		return 0, ErrPoolCacheEmpty
 	}
 
-	return sm.pools[poolIndex].cache.Version, nil
+	return pool.cache.Version, nil
 }
 
 func (sm *Stream) Refresh(path string, getDataFn GetFn) (Cache, error) {

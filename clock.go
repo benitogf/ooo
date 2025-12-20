@@ -1,7 +1,6 @@
 package ooo
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -36,7 +35,7 @@ func (app *Server) tick() {
 func (app *Server) clock(w http.ResponseWriter, r *http.Request) {
 	if !app.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", errors.New("ooo: this request is not authorized"))
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		app.Console.Err("socketConnectionUnauthorized time")
 		return
 	}

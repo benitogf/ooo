@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 
@@ -30,7 +31,9 @@ func TestSnapshot(t *testing.T) {
 	const testData = `{"one": 2}`
 	const testDataUpdated = `{"one": 1}`
 	stream := Stream{
-		Console: coat.NewConsole(domain, false),
+		Console:   coat.NewConsole(domain, false),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
 			log.Println("sub", key)
 			return nil
@@ -45,8 +48,8 @@ func TestSnapshot(t *testing.T) {
 	wsConn, err := stream.New(testKey, w, req)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[0].Key)
-	require.Equal(t, 1, len(stream.pools[0].connections))
+	require.Equal(t, testKey, stream.pools[testKey].Key)
+	require.Equal(t, 1, len(stream.pools[testKey].connections))
 
 	stream.setCache(testKey, []byte(testData))
 
@@ -54,15 +57,16 @@ func TestSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, cacheVersion)
 
-	modifiedData, snapshot, version := stream.Patch(0, []byte(testDataUpdated))
+	pool := stream.getPool(testKey)
+	modifiedData, snapshot, version := stream.patchPool(pool, []byte(testDataUpdated))
 	require.True(t, snapshot)
 	require.NotZero(t, version)
 	require.Equal(t, testDataUpdated, string(modifiedData))
 
 	stream.Close(testKey, wsConn)
 	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[0].Key)
-	require.Equal(t, 0, len(stream.pools[0].connections))
+	require.Equal(t, testKey, stream.pools[testKey].Key)
+	require.Equal(t, 0, len(stream.pools[testKey].connections))
 }
 
 func TestPatch(t *testing.T) {
@@ -72,7 +76,9 @@ func TestPatch(t *testing.T) {
 	const patchOperations = `[{"op":"add","path":"/3","value":{"four":4}}]`
 
 	stream := Stream{
-		Console: coat.NewConsole(domain, false),
+		Console:   coat.NewConsole(domain, false),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
 			log.Println("sub", key)
 			return nil
@@ -87,8 +93,8 @@ func TestPatch(t *testing.T) {
 	wsConn, err := stream.New(testKey, w, req)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[0].Key)
-	require.Equal(t, 1, len(stream.pools[0].connections))
+	require.Equal(t, testKey, stream.pools[testKey].Key)
+	require.Equal(t, 1, len(stream.pools[testKey].connections))
 
 	stream.setCache(testKey, []byte(testData))
 
@@ -96,15 +102,42 @@ func TestPatch(t *testing.T) {
 	require.NoError(t, err)
 	require.NotZero(t, cacheVersion)
 
-	modifiedData, snapshot, version := stream.Patch(0, []byte(testDataUpdated))
+	pool := stream.getPool(testKey)
+	modifiedData, snapshot, version := stream.patchPool(pool, []byte(testDataUpdated))
 	require.False(t, snapshot)
 	require.NotZero(t, version)
 	require.Equal(t, patchOperations, string(modifiedData))
 
 	stream.Close(testKey, wsConn)
 	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[0].Key)
-	require.Equal(t, 0, len(stream.pools[0].connections))
+	require.Equal(t, testKey, stream.pools[testKey].Key)
+	require.Equal(t, 0, len(stream.pools[testKey].connections))
+}
+
+func BenchmarkBuildMessage(b *testing.B) {
+	data := `{"created":1234567890,"updated":1234567891,"index":"abc123","data":{"field":"value"}}`
+	snapshot := true
+	version := int64(0x1a2b3c4d5e6f)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Current implementation using string concatenation
+		_ = []byte("{" +
+			"\"snapshot\":" + strconv.FormatBool(snapshot) + "," +
+			"\"version\":\"" + strconv.FormatInt(version, 16) + "\"," +
+			"\"data\":" + data + "}")
+	}
+}
+
+func BenchmarkBuildMessageOptimized(b *testing.B) {
+	data := `{"created":1234567890,"updated":1234567891,"index":"abc123","data":{"field":"value"}}`
+	snapshot := true
+	version := int64(0x1a2b3c4d5e6f)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = buildMessage([]byte(data), snapshot, version)
+	}
 }
 
 func TestConcurrentBroadcast(t *testing.T) {
@@ -112,7 +145,9 @@ func TestConcurrentBroadcast(t *testing.T) {
 	var wg sync.WaitGroup
 
 	stream := Stream{
-		Console: coat.NewConsole(domain, false),
+		Console:   coat.NewConsole(domain, false),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
 			log.Println("sub", key)
 			return nil
@@ -122,26 +157,26 @@ func TestConcurrentBroadcast(t *testing.T) {
 		},
 	}
 
-	req, w := makeStreamRequestMock(domain + "/")
-	wsConn, err := stream.New("", w, req)
+	req, w := makeStreamRequestMock(domain + "/root")
+	wsConn, err := stream.New("root", w, req)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, "", stream.pools[0].Key)
-	require.Equal(t, 1, len(stream.pools[0].connections))
+	require.Equal(t, "root", stream.pools["root"].Key)
+	require.Equal(t, 1, len(stream.pools["root"].connections))
 
 	reqA, wA := makeStreamRequestMock(domain + "/a")
 	wsConnA, err := stream.New("a", wA, reqA)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(stream.pools))
-	require.Equal(t, "a", stream.pools[1].Key)
-	require.Equal(t, 1, len(stream.pools[1].connections))
+	require.Equal(t, "a", stream.pools["a"].Key)
+	require.Equal(t, 1, len(stream.pools["a"].connections))
 
 	reqB, wB := makeStreamRequestMock(domain + "/b")
 	wsConnB, err := stream.New("b", wB, reqB)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(stream.pools))
-	require.Equal(t, "b", stream.pools[2].Key)
-	require.Equal(t, 1, len(stream.pools[2].connections))
+	require.Equal(t, "b", stream.pools["b"].Key)
+	require.Equal(t, 1, len(stream.pools["b"].connections))
 
 	stream.setCache("a", []byte(testData))
 	stream.setCache("b", []byte(testData))
@@ -176,10 +211,65 @@ func TestConcurrentBroadcast(t *testing.T) {
 
 	wg.Wait()
 
-	stream.Close("", wsConn)
+	stream.Close("root", wsConn)
 	stream.Close("a", wsConnA)
 	stream.Close("b", wsConnB)
 	require.Equal(t, 3, len(stream.pools))
-	require.Equal(t, 0, len(stream.pools[0].connections))
-	require.Equal(t, 0, len(stream.pools[1].connections))
+	require.Equal(t, 0, len(stream.pools["root"].connections))
+	require.Equal(t, 0, len(stream.pools["a"].connections))
+}
+
+func TestRemoveConn(t *testing.T) {
+	// Test removing from middle
+	c1 := &Conn{}
+	c2 := &Conn{}
+	c3 := &Conn{}
+	conns := []*Conn{c1, c2, c3}
+
+	result := removeConn(conns, c2)
+	require.Equal(t, 2, len(result))
+	require.Contains(t, result, c1)
+	require.Contains(t, result, c3)
+
+	// Test removing from beginning
+	conns = []*Conn{c1, c2, c3}
+	result = removeConn(conns, c1)
+	require.Equal(t, 2, len(result))
+	require.Contains(t, result, c2)
+	require.Contains(t, result, c3)
+
+	// Test removing from end
+	conns = []*Conn{c1, c2, c3}
+	result = removeConn(conns, c3)
+	require.Equal(t, 2, len(result))
+	require.Contains(t, result, c1)
+	require.Contains(t, result, c2)
+
+	// Test removing non-existent
+	conns = []*Conn{c1, c2}
+	c4 := &Conn{}
+	result = removeConn(conns, c4)
+	require.Equal(t, 2, len(result))
+
+	// Test removing from single element slice
+	conns = []*Conn{c1}
+	result = removeConn(conns, c1)
+	require.Equal(t, 0, len(result))
+}
+
+func BenchmarkRemoveConn(b *testing.B) {
+	// Create a slice with 100 connections
+	conns := make([]*Conn, 100)
+	for i := range conns {
+		conns[i] = &Conn{}
+	}
+	target := conns[50] // Remove from middle
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Make a copy to avoid modifying the original
+		testConns := make([]*Conn, len(conns))
+		copy(testConns, conns)
+		_ = removeConn(testConns, target)
+	}
 }

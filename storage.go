@@ -43,6 +43,8 @@ type StorageOpt struct {
 //
 // Set(key, data): store data under the provided key, key cannot not include glob pattern
 //
+// Push(path, data): store data under a new key generated from a glob pattern path, returns the generated index
+//
 // SetWithMeta(key, data, created, updated): store data by manually providing created/updated time values
 //
 // GetAndLock(key): same as get but will lock the key mutex until SetAndUnlock is called for the same key (non glob key only)
@@ -68,6 +70,7 @@ type Database interface {
 	GetNAscending(path string, limit int) ([]meta.Object, error)
 	GetNRange(path string, limit int, from, to int64) ([]meta.Object, error)
 	Set(key string, data json.RawMessage) (string, error)
+	Push(path string, data json.RawMessage) (string, error)
 	Patch(key string, data json.RawMessage) (string, error)
 	SetWithMeta(key string, data json.RawMessage, created, updated int64) (string, error)
 	GetAndLock(key string) ([]byte, error)

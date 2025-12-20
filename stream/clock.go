@@ -10,7 +10,10 @@ import (
 func (sm *Stream) BroadcastClock(data string) {
 	sm.mutex.RLock()
 	defer sm.mutex.RUnlock()
-	connections := sm.pools[0].connections
+	if sm.clockPool == nil {
+		return
+	}
+	connections := sm.clockPool.connections
 
 	for _, client := range connections {
 		sm.WriteClock(client, data)
@@ -21,7 +24,7 @@ func (sm *Stream) BroadcastClock(data string) {
 func (sm *Stream) WriteClock(client *Conn, data string) {
 	client.mutex.Lock()
 	defer client.mutex.Unlock()
-	client.conn.SetWriteDeadline(time.Now().Add(timeout))
+	client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
 	err := client.conn.WriteMessage(websocket.BinaryMessage, []byte(data))
 	if err != nil {
 		client.conn.Close()

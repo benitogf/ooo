@@ -114,3 +114,34 @@ func TestFilters(t *testing.T) {
 	comparison, _ = jsondiff.Compare(body, interceptedData, &jsondiff.Options{})
 	require.Equal(t, comparison, jsondiff.FullMatch)
 }
+
+func TestServerValidate(t *testing.T) {
+	// Valid config
+	app := &Server{}
+	require.NoError(t, app.Validate())
+
+	// ForcePatch and NoPatch both enabled
+	app = &Server{
+		ForcePatch: true,
+		NoPatch:    true,
+	}
+	err := app.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ForcePatch and NoPatch cannot both be enabled")
+
+	// Negative Workers
+	app = &Server{
+		Workers: -1,
+	}
+	err = app.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Workers cannot be negative")
+
+	// Negative Deadline
+	app = &Server{
+		Deadline: -1,
+	}
+	err = app.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Deadline cannot be negative")
+}

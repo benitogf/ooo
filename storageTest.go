@@ -15,6 +15,7 @@ import (
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -1091,7 +1092,7 @@ func StorageKeysRangeTest(app *Server, t *testing.T, n int) {
 		key, err := app.Storage.Set(path, TEST_DATA)
 		if first == "" {
 			first = key
-			firstNow = time.Now().UnixNano()
+			firstNow = monotonic.Now()
 		}
 		require.NoError(t, err)
 		require.Equal(t, path, "test/"+key)

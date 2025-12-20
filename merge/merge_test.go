@@ -86,3 +86,13 @@ func TestNewKey(t *testing.T) {
 	require.Equal(t, "no", testOne.Another)
 	require.Equal(t, 2, len(info.Replaced))
 }
+
+func BenchmarkMergeBytes(b *testing.B) {
+	testLeft := json.RawMessage(`{"test":"123","count":42,"active":true,"nested":{"a":"b","c":"d"}}`)
+	testRight := json.RawMessage(`{"test":"1234","count":43}`)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = merge.MergeBytes(testLeft, testRight)
+	}
+}

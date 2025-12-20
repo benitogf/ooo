@@ -1,7 +1,7 @@
 package ooo
 
 import (
-	"errors"
+	"fmt"
 
 	"github.com/goccy/go-json"
 
@@ -105,77 +105,75 @@ func (app *Server) OpenFilter(name string) {
 	app.DeleteFilter(name, NoopHook)
 }
 
-func (r watchers) check(path string) {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
+// findMatch returns the index of the first filter that matches the given path.
+// Returns -1 if no match is found.
+// Note: Only the first matching filter is applied (first-match-only behavior).
+func findMatch[T any](items []T, path string, getPath func(T) string) int {
+	for i, item := range items {
+		filterPath := getPath(item)
+		if filterPath == path || key.Match(filterPath, path) {
+			return i
 		}
 	}
+	return -1
+}
 
+// check finds and executes the first matching watcher for the given path.
+// Only the first matching watcher is called (first-match-only behavior).
+func (r watchers) check(path string) {
+	match := findMatch(r, path, func(w watch) string { return w.path })
 	if match == -1 {
 		return
 	}
-
 	r[match].apply(path)
 }
 
+// check finds and executes the first matching hook for the given path.
+// In static mode, returns an error if no matching hook is found.
+// Only the first matching hook is called (first-match-only behavior).
 func (r hooks) check(path string, static bool) error {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
+	match := findMatch(r, path, func(h hook) string { return h.path })
 
 	if match == -1 && !static {
 		return nil
 	}
 
 	if match == -1 && static {
-		return errors.New("route not defined, static mode, key:" + path)
+		return fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
 	}
 
 	return r[match].apply(path)
 }
 
+// checkStatic verifies that a matching filter exists for the given path.
+// In static mode, returns an error if no matching filter is found.
+// Only checks for the first match (first-match-only behavior).
 func (r router) checkStatic(path string, static bool) error {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
+	match := findMatch(r, path, func(f filter) string { return f.path })
 
 	if match == -1 && !static {
 		return nil
 	}
 
 	if match == -1 && static {
-		return errors.New("route not defined, static mode, key:" + path)
+		return fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
 	}
 
 	return nil
 }
 
+// check finds and executes the first matching filter for the given path.
+// In static mode, returns an error if no matching filter is found.
+// Only the first matching filter is applied (first-match-only behavior).
 func (r router) check(path string, data json.RawMessage, static bool) (json.RawMessage, error) {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
+	match := findMatch(r, path, func(f filter) string { return f.path })
 
 	if match == -1 && !static {
 		return data, nil
 	}
 
 	if match == -1 && static {
-		return nil, errors.New("route not defined, static mode, key:" + path)
+		return nil, fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
 	}
 
 	filtered, err := r[match].apply(path, data)
@@ -188,7 +186,7 @@ func (r router) check(path string, data json.RawMessage, static bool) (json.RawM
 	}
 
 	if len(filteredDecoded) == 0 {
-		return nil, errors.New("invalid filter result, key:" + path)
+		return nil, fmt.Errorf("%w, key:%s", ErrInvalidFilterResult, path)
 	}
 
 	return filteredDecoded, nil

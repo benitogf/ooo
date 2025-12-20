@@ -11,24 +11,28 @@ import (
 	"github.com/goccy/go-json"
 )
 
+var (
+	ErrPathGlobRequired   = errors.New("io: path glob required")
+	ErrPathGlobNotAllowed = errors.New("io: path glob not allowed")
+)
+
 func GetList[T any](server *ooo.Server, path string) ([]client.Meta[T], error) {
 	lastPath := key.LastIndex(path)
 	isList := lastPath == "*"
 
 	var result []client.Meta[T]
 	if !isList {
-		return result, errors.New("GetList[" + path + "]: path is not a list")
+		log.Println("GetList["+path+"]: ", ErrPathGlobRequired)
+		return result, ErrPathGlobRequired
 	}
-	raw, err := server.Storage.Get(path)
+
+	// Use GetNAscending with a large limit to get all items
+	objs, err := server.Storage.GetNAscending(path, 0)
 	if err != nil {
 		log.Println("GetList["+path+"]: failed to get from storage", err)
 		return result, err
 	}
-	objs, err := meta.DecodeList(raw)
-	if err != nil {
-		log.Println("GetList["+path+"]: failed to decode data", err)
-		return result, err
-	}
+
 	for _, obj := range objs {
 		var item T
 		err = json.Unmarshal([]byte(obj.Data), &item)
@@ -52,7 +56,8 @@ func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
 
 	var result client.Meta[T]
 	if isList {
-		return result, errors.New("Get[" + path + "]: path is a list")
+		log.Println("Get["+path+"]: ", ErrPathGlobNotAllowed)
+		return result, ErrPathGlobNotAllowed
 	}
 
 	raw, err := server.Storage.Get(path)
@@ -60,7 +65,7 @@ func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
 		log.Println("Get["+path+"]: failed to get from storage", err)
 		return result, err
 	}
-	obj, err := meta.Decode(raw)
+	obj, err := meta.DecodePooled(raw)
 	if err != nil {
 		log.Println("Get["+path+"]: failed to decode data", err)
 		return result, err
@@ -68,6 +73,7 @@ func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
 	var item T
 	err = json.Unmarshal([]byte(obj.Data), &item)
 	if err != nil {
+		meta.PutObject(obj)
 		log.Println("Get["+path+"]: failed to unmarshal data", err)
 		return result, err
 	}
@@ -77,6 +83,7 @@ func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
 		Index:   obj.Index,
 		Data:    item,
 	}
+	meta.PutObject(obj)
 	return result, nil
 }
 
@@ -85,7 +92,8 @@ func Set[T any](server *ooo.Server, path string, item T) error {
 	isList := lastPath == "*"
 
 	if isList {
-		return errors.New("Set[" + path + "]: path is a list")
+		log.Println("Set["+path+"]: ", ErrPathGlobNotAllowed)
+		return ErrPathGlobNotAllowed
 	}
 
 	data, err := json.Marshal(item)
@@ -98,21 +106,10 @@ func Set[T any](server *ooo.Server, path string, item T) error {
 }
 
 func Push[T any](server *ooo.Server, path string, item T) (string, error) {
-	lastPath := key.LastIndex(path)
-	isList := lastPath == "*"
-
-	if !isList {
-		return "", errors.New("Push[" + path + "]: path is not a list")
-	}
-
-	_path := key.Build(path)
-
 	data, err := json.Marshal(item)
 	if err != nil {
 		log.Println("Push["+path+"]: failed to marshal data", err)
 		return "", err
 	}
-	_, err = server.Storage.Set(_path, data)
-	index := key.LastIndex(_path)
-	return index, err
+	return server.Storage.Push(path, data)
 }

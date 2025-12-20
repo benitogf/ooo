@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -106,6 +107,22 @@ type Server struct {
 	IdleTimeout       time.Duration
 	OnStorageEvent    StorageEventCallback
 	BeforeRead        func(key string)
+	startErr          chan error // channel for startup errors
+}
+
+// Validate checks the server configuration for common issues.
+// Call this before Start() to catch configuration errors early.
+func (app *Server) Validate() error {
+	if app.ForcePatch && app.NoPatch {
+		return ErrForcePatchConflict
+	}
+	if app.Workers < 0 {
+		return ErrNegativeWorkers
+	}
+	if app.Deadline < 0 {
+		return ErrNegativeDeadline
+	}
+	return nil
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -127,7 +144,9 @@ func (app *Server) waitListen() {
 	}
 	err = app.Storage.Start(storageOpt)
 	if err != nil {
-		log.Fatal(err)
+		app.startErr <- fmt.Errorf("ooo: storage start failed: %w", err)
+		app.wg.Done()
+		return
 	}
 	app.server = &http.Server{
 		WriteTimeout:      app.WriteTimeout,
@@ -145,14 +164,16 @@ func (app *Server) waitListen() {
 		}).Handler(handlers.CompressHandler(app.Router))}
 	ln, err := net.Listen("tcp4", app.Address)
 	if err != nil {
-		log.Fatal("failed to start tcp, ", err)
+		app.startErr <- fmt.Errorf("ooo: failed to start tcp: %w", err)
+		app.wg.Done()
+		return
 	}
 	app.Address = ln.Addr().String()
 	atomic.StoreInt64(&app.active, 1)
 	app.wg.Done()
 	err = app.server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
-	if atomic.LoadInt64(&app.closing) != 1 {
-		log.Fatal(err)
+	if atomic.LoadInt64(&app.closing) != 1 && err != nil {
+		app.Console.Err("server error", err)
 	}
 }
 
@@ -161,9 +182,16 @@ func (app *Server) Active() bool {
 	return atomic.LoadInt64(&app.active) == 1 && atomic.LoadInt64(&app.closing) == 0
 }
 
-func (app *Server) waitStart() {
+func (app *Server) waitStart() error {
+	// Check for startup errors from waitListen
+	select {
+	case err := <-app.startErr:
+		return err
+	default:
+	}
+
 	if atomic.LoadInt64(&app.active) == 0 || !app.Storage.Active() {
-		log.Fatal("server start failed")
+		return ErrServerStartFailed
 	}
 
 	for i := 0; i < app.Workers; i++ {
@@ -171,6 +199,7 @@ func (app *Server) waitStart() {
 	}
 
 	app.Console.Log("glad to serve[" + app.Address + "]")
+	return nil
 }
 
 // Fetch data, update cache and apply filter
@@ -215,24 +244,11 @@ func (app *Server) watch(sc StorageChan) {
 	}
 }
 
-// defaults will populate the server fields with their zero values
-func (app *Server) defaults() {
-	if app.Router == nil {
-		app.Router = mux.NewRouter()
-	}
-
-	if app.Deadline.Nanoseconds() == 0 {
-		app.Deadline = time.Second * 10
-	}
-
-	if app.OnClose == nil {
-		app.OnClose = func() {}
-	}
-
+// defaultCORS sets default CORS configuration.
+func (app *Server) defaultCORS() {
 	if len(app.AllowedOrigins) == 0 {
 		app.AllowedOrigins = []string{"*"}
 	}
-
 	if len(app.AllowedMethods) == 0 {
 		app.AllowedMethods = []string{
 			http.MethodGet,
@@ -242,71 +258,51 @@ func (app *Server) defaults() {
 			http.MethodPatch,
 		}
 	}
-
 	if len(app.AllowedHeaders) == 0 {
 		app.AllowedHeaders = []string{"Authorization", "Content-Type"}
 	}
+}
 
-	if app.Console == nil {
-		app.Console = coat.NewConsole(app.Address, app.Silence)
+// defaultTimeouts sets default timeout values.
+func (app *Server) defaultTimeouts() {
+	if app.Deadline.Nanoseconds() == 0 {
+		app.Deadline = time.Second * 10
 	}
-
-	if app.Stream.Console == nil {
-		app.Stream.Console = app.Console
-	}
-
-	if app.Storage == nil {
-		app.Storage = &MemoryStorage{}
-	}
-
 	if app.Tick == 0 {
 		app.Tick = 1 * time.Second
 	}
-
 	if app.ReadTimeout == 0 {
 		app.ReadTimeout = 1 * time.Minute
 	}
-
 	if app.WriteTimeout == 0 {
 		app.WriteTimeout = 1 * time.Minute
 	}
-
 	if app.ReadHeaderTimeout == 0 {
 		app.ReadHeaderTimeout = 10 * time.Second
 	}
-
 	if app.IdleTimeout == 0 {
 		app.IdleTimeout = 10 * time.Second
 	}
+}
 
+// defaultCallbacks sets default callback functions.
+func (app *Server) defaultCallbacks() {
+	if app.OnClose == nil {
+		app.OnClose = func() {}
+	}
 	if app.Audit == nil {
 		app.Audit = func(r *http.Request) bool { return true }
 	}
-
 	if app.OnSubscribe == nil {
 		app.OnSubscribe = func(key string) error { return nil }
 	}
-
-	if app.Stream.OnSubscribe == nil {
-		app.Stream.OnSubscribe = app.OnSubscribe
-	}
-
 	if app.OnUnsubscribe == nil {
 		app.OnUnsubscribe = func(key string) {}
 	}
+}
 
-	if app.Stream.OnUnsubscribe == nil {
-		app.Stream.OnUnsubscribe = app.OnUnsubscribe
-	}
-
-	if app.Workers == 0 {
-		app.Workers = 6
-	}
-
-	if app.NoBroadcastKeys == nil {
-		app.NoBroadcastKeys = []string{}
-	}
-
+// defaultClient sets up the default HTTP client.
+func (app *Server) defaultClient() {
 	if app.Client == nil {
 		app.Client = &http.Client{
 			Timeout: 10 * time.Second,
@@ -324,7 +320,41 @@ func (app *Server) defaults() {
 			},
 		}
 	}
+}
 
+// defaults will populate the server fields with their zero values.
+func (app *Server) defaults() {
+	if app.Router == nil {
+		app.Router = mux.NewRouter()
+	}
+	if app.Console == nil {
+		app.Console = coat.NewConsole(app.Address, app.Silence)
+	}
+	if app.Stream.Console == nil {
+		app.Stream.Console = app.Console
+	}
+	if app.Storage == nil {
+		app.Storage = &MemoryStorage{}
+	}
+	if app.Workers == 0 {
+		app.Workers = 6
+	}
+	if app.NoBroadcastKeys == nil {
+		app.NoBroadcastKeys = []string{}
+	}
+
+	app.defaultTimeouts()
+	app.defaultCORS()
+	app.defaultCallbacks()
+	app.defaultClient()
+
+	// Stream configuration
+	if app.Stream.OnSubscribe == nil {
+		app.Stream.OnSubscribe = app.OnSubscribe
+	}
+	if app.Stream.OnUnsubscribe == nil {
+		app.Stream.OnUnsubscribe = app.OnUnsubscribe
+	}
 	app.Stream.ForcePatch = app.ForcePatch
 	app.Stream.NoPatch = app.NoPatch
 	if app.Stream.ForcePatch && app.Stream.NoPatch {
@@ -333,16 +363,8 @@ func (app *Server) defaults() {
 	app.Stream.InitClock()
 }
 
-// Start : initialize and start the http server and database connection
-func (app *Server) Start(address string) {
-	app.Address = address
-	if atomic.LoadInt64(&app.active) == 1 {
-		app.Console.Err("server already active")
-		return
-	}
-	atomic.StoreInt64(&app.active, 0)
-	atomic.StoreInt64(&app.closing, 0)
-	app.defaults()
+// setupRoutes configures the HTTP routes for the server.
+func (app *Server) setupRoutes() {
 	// https://ieftimov.com/post/make-resilient-golang-net-http-servers-using-timeouts-deadlines-context-cancellation/
 	app.Router.HandleFunc("/", app.getStats).Methods("GET")
 	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
@@ -356,12 +378,39 @@ func (app *Server) Start(address string) {
 		http.HandlerFunc(app.patch), app.Deadline, deadlineMsg)).Methods("PATCH")
 	app.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", app.read).Methods("GET")
 	app.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", app.read).Queries("v", "{[\\d]}").Methods("GET")
+}
+
+// StartWithError initializes and starts the http server and database connection.
+// Returns an error if startup fails instead of calling log.Fatal.
+func (app *Server) StartWithError(address string) error {
+	app.Address = address
+	if atomic.LoadInt64(&app.active) == 1 {
+		return ErrServerAlreadyActive
+	}
+	atomic.StoreInt64(&app.active, 0)
+	atomic.StoreInt64(&app.closing, 0)
+	app.startErr = make(chan error, 1)
+	app.defaults()
+	app.setupRoutes()
 	app.wg.Add(1)
 	go app.waitListen()
 	app.wg.Wait()
-	app.waitStart()
+	if err := app.waitStart(); err != nil {
+		return err
+	}
 	app.Console = coat.NewConsole(app.Address, app.Silence)
 	go app.tick()
+	return nil
+}
+
+// Start initializes and starts the http server and database connection.
+// Panics if startup fails. Use StartWithError for error handling.
+// If the server is already active, this is a no-op (does not panic).
+func (app *Server) Start(address string) {
+	err := app.StartWithError(address)
+	if err != nil && err != ErrServerAlreadyActive {
+		log.Fatal(err)
+	}
 }
 
 // Close : shutdown the http server and database connection
