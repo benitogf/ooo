@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/benitogf/ooo/filters"
+	"github.com/benitogf/ooo/key"
 	"github.com/gorilla/mux"
 )
 
@@ -11,10 +13,17 @@ func (app *Server) ws(w http.ResponseWriter, r *http.Request) error {
 	_key := mux.Vars(r)["key"]
 	version := r.FormValue("v")
 
-	err := app.filters.Read.checkStatic(_key, app.Static)
-	if err != nil {
-		app.Console.Err("ooo: filtered route", err)
-		return err
+	// Static mode validation - check if any read filter exists
+	if app.Static {
+		var hasFilter bool
+		if key.IsGlob(_key) {
+			hasFilter = app.filters.ReadList.HasMatch(_key) != -1
+		} else {
+			hasFilter = app.filters.ReadObject.HasMatch(_key) != -1
+		}
+		if !hasFilter {
+			return filters.ErrRouteNotDefined
+		}
 	}
 
 	client, err := app.Stream.New(_key, w, r)

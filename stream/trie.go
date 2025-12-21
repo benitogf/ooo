@@ -1,7 +1,6 @@
 package stream
 
 import (
-	"strings"
 	"sync"
 )
 
@@ -29,12 +28,61 @@ func newPoolTrie() *poolTrie {
 	}
 }
 
-// splitPath splits a path into segments.
-func splitPath(path string) []string {
+// pathSegment represents a segment of a path without allocation.
+type pathSegment struct {
+	start, end int
+}
+
+// countSegments counts the number of segments in a path (zero-alloc).
+func countSegments(path string) int {
 	if path == "" {
-		return nil
+		return 0
 	}
-	return strings.Split(path, "/")
+	count := 1
+	for i := 0; i < len(path); i++ {
+		if path[i] == '/' {
+			count++
+		}
+	}
+	return count
+}
+
+// getSegment returns the segment at the given index (zero-alloc).
+// Returns the segment as a substring of the original path.
+func getSegment(path string, index int) string {
+	if path == "" {
+		return ""
+	}
+	start := 0
+	current := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '/' {
+			if current == index {
+				return path[start:i]
+			}
+			current++
+			start = i + 1
+		}
+	}
+	return ""
+}
+
+// iterSegments iterates over path segments without allocation.
+// The callback receives each segment as a substring of the original path.
+// Return false from the callback to stop iteration.
+func iterSegments(path string, fn func(segment string) bool) {
+	if path == "" {
+		return
+	}
+	start := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '/' {
+			if !fn(path[start:i]) {
+				return
+			}
+			start = i + 1
+		}
+	}
 }
 
 // insert adds a pool to the trie at the given key path.
@@ -42,10 +90,8 @@ func (t *poolTrie) insert(key string, pool *Pool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	segments := splitPath(key)
 	node := t.root
-
-	for _, seg := range segments {
+	iterSegments(key, func(seg string) bool {
 		if node.children == nil {
 			node.children = make(map[string]*trieNode)
 		}
@@ -57,7 +103,8 @@ func (t *poolTrie) insert(key string, pool *Pool) {
 			node.children[seg] = child
 		}
 		node = child
-	}
+		return true
+	})
 	node.pool = pool
 }
 
@@ -67,13 +114,13 @@ func (t *poolTrie) remove(key string) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	segments := splitPath(key)
-	return t.removeRecursive(t.root, segments, 0)
+	numSegments := countSegments(key)
+	return t.removeRecursive(t.root, key, numSegments, 0)
 }
 
 // removeRecursive removes a path from the trie and cleans up empty nodes.
-func (t *poolTrie) removeRecursive(node *trieNode, segments []string, depth int) bool {
-	if depth == len(segments) {
+func (t *poolTrie) removeRecursive(node *trieNode, path string, numSegments, depth int) bool {
+	if depth == numSegments {
 		if node.pool == nil {
 			return false
 		}
@@ -81,13 +128,13 @@ func (t *poolTrie) removeRecursive(node *trieNode, segments []string, depth int)
 		return true
 	}
 
-	seg := segments[depth]
+	seg := getSegment(path, depth)
 	child, exists := node.children[seg]
 	if !exists {
 		return false
 	}
 
-	removed := t.removeRecursive(child, segments, depth+1)
+	removed := t.removeRecursive(child, path, numSegments, depth+1)
 
 	// Clean up empty child nodes
 	if removed && child.pool == nil && len(child.children) == 0 {
@@ -106,7 +153,7 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 
 	// Use a map to deduplicate results
 	seen := make(map[*Pool]struct{})
-	pathSegments := splitPath(path)
+	numSegments := countSegments(path)
 
 	// We need to find pools where:
 	// 1. pool.Key matches path (pool has wildcard that matches path)
@@ -115,7 +162,7 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 	// For case 1: traverse trie, at each level check both exact match and "*"
 	// For case 2: if path contains "*", we need to check all pools at that level
 
-	t.matchRecursive(t.root, pathSegments, 0, seen)
+	t.matchRecursive(t.root, path, numSegments, 0, seen)
 
 	results := make([]*Pool, 0, len(seen))
 	for pool := range seen {
@@ -125,8 +172,8 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 }
 
 // matchRecursive traverses the trie to find matching pools.
-func (t *poolTrie) matchRecursive(node *trieNode, pathSegments []string, depth int, seen map[*Pool]struct{}) {
-	if depth == len(pathSegments) {
+func (t *poolTrie) matchRecursive(node *trieNode, path string, numSegments, depth int, seen map[*Pool]struct{}) {
+	if depth == numSegments {
 		// We've consumed all path segments
 		// Check if there's a pool at this exact location
 		if node.pool != nil {
@@ -139,18 +186,18 @@ func (t *poolTrie) matchRecursive(node *trieNode, pathSegments []string, depth i
 		return
 	}
 
-	seg := pathSegments[depth]
+	seg := getSegment(path, depth)
 
 	// Case 1: Exact segment match
 	if child, exists := node.children[seg]; exists {
-		t.matchRecursive(child, pathSegments, depth+1, seen)
+		t.matchRecursive(child, path, numSegments, depth+1, seen)
 	}
 
 	// Case 2: Wildcard in trie matches any segment in path
 	// e.g., pool="users/*" should match path="users/123"
 	if seg != "*" {
 		if wildcard, exists := node.children["*"]; exists {
-			t.matchRecursive(wildcard, pathSegments, depth+1, seen)
+			t.matchRecursive(wildcard, path, numSegments, depth+1, seen)
 		}
 	}
 
@@ -159,12 +206,12 @@ func (t *poolTrie) matchRecursive(node *trieNode, pathSegments []string, depth i
 	if seg == "*" {
 		for childSeg, child := range node.children {
 			if childSeg != "*" {
-				t.matchRecursive(child, pathSegments, depth+1, seen)
+				t.matchRecursive(child, path, numSegments, depth+1, seen)
 			}
 		}
 		// Also match wildcard to wildcard
 		if wildcard, exists := node.children["*"]; exists {
-			t.matchRecursive(wildcard, pathSegments, depth+1, seen)
+			t.matchRecursive(wildcard, path, numSegments, depth+1, seen)
 		}
 	}
 }
@@ -174,15 +221,19 @@ func (t *poolTrie) get(key string) *Pool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	segments := splitPath(key)
 	node := t.root
-
-	for _, seg := range segments {
+	var found = true
+	iterSegments(key, func(seg string) bool {
 		child, exists := node.children[seg]
 		if !exists {
-			return nil
+			found = false
+			return false
 		}
 		node = child
+		return true
+	})
+	if !found {
+		return nil
 	}
 	return node.pool
 }

@@ -341,9 +341,10 @@ func StreamBroadcastFilterTest(t *testing.T, app *Server) {
 	var wg sync.WaitGroup
 	var postObject meta.Object
 	var wsExtraEvent messages.Message
-	// extra filter
-	app.ReadFilter("test/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
-		return []byte(`{"extra": "extra"}`), nil
+	// extra filter - returns modified list data
+	app.ReadListFilter("test/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+		// Return a single object with extra data
+		return []meta.Object{{Data: []byte(`{"extra": "extra"}`)}}, nil
 	})
 	// extra route
 	app.Router = mux.NewRouter()
@@ -542,11 +543,11 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	var entriesLock sync.Mutex
 
 	wg.Add(1)
-	go client.Subscribe(client.SubscribeConfig{
+	go client.SubscribeList(client.SubscribeConfig{
 		Ctx:      context.Background(),
 		Protocol: "ws",
 		Host:     app.Address,
-	}, "/test/*", client.SubscribeEvents[TestData]{
+	}, "/test/*", client.SubscribeListEvents[TestData]{
 		OnMessage: func(m []client.Meta[TestData]) {
 			entriesLock.Lock()
 			entries = m
@@ -584,10 +585,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 		wg.Add(Q)
 		go func(__key string) {
 			for range Q {
-				currentObj := meta.Object{}
-				rawCurrent, err := app.Storage.GetAndLock(__key)
-				expect.Nil(err)
-				err = json.Unmarshal(rawCurrent, &currentObj)
+				currentObj, err := app.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
@@ -605,10 +603,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 		wg.Add(Q)
 		go func(__key string) {
 			for range Q {
-				currentObj := meta.Object{}
-				rawCurrent, err := app.Storage.GetAndLock(__key)
-				expect.Nil(err)
-				err = json.Unmarshal(rawCurrent, &currentObj)
+				currentObj, err := app.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.something")
 				current := currentRaw.Value().(string)
@@ -654,10 +649,8 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 		Protocol: "ws",
 		Host:     app.Address,
 	}, "test", client.SubscribeEvents[TestData]{
-		OnMessage: func(m []client.Meta[TestData]) {
-			if len(m) > 0 {
-				current = m[0].Data
-			}
+		OnMessage: func(m client.Meta[TestData]) {
+			current = m.Data
 			wg.Done()
 		},
 	})
@@ -701,4 +694,71 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 	wg.Wait()
 
 	require.Equal(t, 2, len(current.SubFields))
+}
+
+// StreamLimitFilterTest tests that the LimitFilter correctly maintains the limit
+// when items are inserted and broadcast to subscribed clients.
+// The client should never see more than the limit number of items due to ReadListFilter.
+func StreamLimitFilterTest(t *testing.T, app *Server) {
+	type TestItem struct {
+		Value int `json:"value"`
+	}
+
+	const limit = 3
+	const totalInserts = limit + 5 // Insert more than the limit
+
+	var wg sync.WaitGroup
+	maxSeen := 0
+
+	// Set up limit filter - uses ReadListFilter to limit view + AfterWrite to cleanup
+	app.LimitFilter("limited/*", limit)
+	app.OpenFilter("limited/*")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Subscribe to the limited path
+	wg.Add(1)
+	go client.SubscribeList(client.SubscribeConfig{
+		Ctx:      ctx,
+		Protocol: "ws",
+		Host:     app.Address,
+	}, "limited/*", client.SubscribeListEvents[TestItem]{
+		OnMessage: func(m []client.Meta[TestItem]) {
+			if len(m) > maxSeen {
+				maxSeen = len(m)
+			}
+			wg.Done()
+		},
+	})
+
+	// Wait for initial empty snapshot
+	wg.Wait()
+
+	// Insert items via HTTP (triggers AfterWrite for LimitFilter cleanup)
+	// Each insert triggers 1 broadcast for the insert
+	// When over limit, AfterWrite deletes old items which triggers additional broadcasts
+	// First 'limit' inserts: 1 broadcast each
+	// Remaining inserts: 2 broadcasts each (insert + delete)
+	for i := range totalInserts {
+		if i < limit {
+			wg.Add(1) // just the insert broadcast
+		} else {
+			wg.Add(2) // insert broadcast + delete broadcast
+		}
+		data, _ := json.Marshal(TestItem{Value: i})
+		req := httptest.NewRequest("POST", "/limited/*", bytes.NewBuffer(data))
+		w := httptest.NewRecorder()
+		app.Router.ServeHTTP(w, req)
+		require.Equal(t, 200, w.Result().StatusCode)
+		wg.Wait()
+	}
+
+	// Verify final state - client should never see more than limit items due to ReadListFilter
+	require.LessOrEqual(t, maxSeen, limit, "client should never see more than limit items")
+
+	// Verify storage has exactly 'limit' items after cleanup
+	stored, err := app.Storage.GetList("limited/*")
+	require.NoError(t, err)
+	require.Equal(t, limit, len(stored), "storage should have exactly limit items")
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/require"
 )
@@ -28,7 +29,7 @@ func TestRestPutMethod(t *testing.T) {
 	// Verify data was stored
 	stored, err := app.Storage.Get("puttest")
 	require.NoError(t, err)
-	require.Contains(t, string(stored), "put")
+	require.Contains(t, string(stored.Data), "put")
 }
 
 func TestRestPutInvalidKey(t *testing.T) {
@@ -146,9 +147,9 @@ func TestRestReadFilterError(t *testing.T) {
 	app := Server{}
 	app.Silence = true
 
-	// Add read filter that returns error
-	app.ReadFilter("filtererror", func(key string, data json.RawMessage) (json.RawMessage, error) {
-		return nil, errors.New("read filter error")
+	// Add read filter that returns error (non-glob path uses ReadObjectFilter)
+	app.ReadObjectFilter("filtererror", func(key string, obj meta.Object) (meta.Object, error) {
+		return meta.Object{}, errors.New("read filter error")
 	})
 
 	app.Start("localhost:0")

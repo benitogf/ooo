@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 	"github.com/stretchr/testify/require"
 )
@@ -47,8 +48,8 @@ func TestFiltersStaticMode(t *testing.T) {
 	app.WriteFilter("allowed/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
 		return data, nil
 	})
-	app.ReadFilter("allowed/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
-		return data, nil
+	app.ReadListFilter("allowed/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+		return objs, nil
 	})
 	app.DeleteFilter("allowed/*", func(key string) error {
 		return nil
@@ -180,7 +181,7 @@ func TestAfterWriteCallback(t *testing.T) {
 	app.Silence = true
 
 	callbackTriggered := false
-	app.AfterWrite("callbacktest", func(key string) {
+	app.AfterWriteFilter("callbacktest", func(key string) {
 		callbackTriggered = true
 		require.Equal(t, "callbacktest", key)
 	})
@@ -221,8 +222,8 @@ func TestFiltersGlobMatching(t *testing.T) {
 	// Verify data was filtered
 	storedData, err := app.Storage.Get("glob/123/test")
 	require.NoError(t, err)
-	require.Contains(t, string(storedData), "filtered")
-	require.NotContains(t, string(storedData), "original")
+	require.Contains(t, string(storedData.Data), "filtered")
+	require.NotContains(t, string(storedData.Data), "original")
 }
 
 func TestFiltersMultipleMatches(t *testing.T) {
@@ -250,6 +251,6 @@ func TestFiltersMultipleMatches(t *testing.T) {
 	// Verify first filter was applied
 	storedData, err := app.Storage.Get("multi")
 	require.NoError(t, err)
-	require.Contains(t, string(storedData), "first")
-	require.NotContains(t, string(storedData), "second")
+	require.Contains(t, string(storedData.Data), "first")
+	require.NotContains(t, string(storedData.Data), "second")
 }

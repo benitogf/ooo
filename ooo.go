@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/benitogf/coat"
+	"github.com/benitogf/ooo/filters"
+	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/stream"
 	"github.com/gorilla/handlers"
@@ -28,7 +30,7 @@ const deadlineMsg = "ooo: server deadline reached"
 // r: the request to be audited
 // returns
 // true: approve the request
-// false: deny the request
+// false: rejects the request
 type audit func(r *http.Request) bool
 
 // Server application
@@ -67,7 +69,7 @@ type audit func(r *http.Request) bool
 //
 // Static: static routing flag
 //
-// Tick: time interval between ticks on the clock subscription
+// Tick: time interval between ticks on the clock websocket
 //
 // Signal: os signal channel
 //
@@ -77,7 +79,7 @@ type Server struct {
 	server            *http.Server
 	Router            *mux.Router
 	Stream            stream.Stream
-	filters           filters
+	filters           filters.Filters
 	NoBroadcastKeys   []string
 	Audit             audit
 	Workers           int
@@ -203,25 +205,58 @@ func (app *Server) waitStart() error {
 }
 
 // Fetch data, update cache and apply filter
-func (app *Server) fetch(key string) (stream.Cache, error) {
-	err := app.filters.Read.checkStatic(key, app.Static)
-	if err != nil {
-		return stream.Cache{}, err
+func (app *Server) fetch(path string) (stream.Cache, error) {
+	// Check if any filter exists for static mode validation
+	if app.Static {
+		hasFilter := app.filters.ReadObject.HasMatch(path) != -1 ||
+			app.filters.ReadList.HasMatch(path) != -1
+		if !hasFilter {
+			return stream.Cache{}, filters.ErrRouteNotDefined
+		}
 	}
-	return app.Stream.Refresh(key, app.getFilteredData)
+	return app.Stream.Refresh(path, app.getFilteredData)
 }
 
-// getFilteredData
-func (app *Server) getFilteredData(key string) ([]byte, error) {
-	raw, _ := app.Storage.Get(key)
-	if len(raw) == 0 {
-		raw = meta.EmptyObject
+// getFilteredData retrieves and filters data for broadcast.
+// Handles both glob (list) and non-glob (single) paths.
+// Uses meta.Object-based filters when available for better performance.
+func (app *Server) getFilteredData(path string) ([]byte, error) {
+	if key.HasGlob(path) {
+		return app.getFilteredList(path)
 	}
-	filteredData, err := app.filters.Read.check(key, raw, app.Static)
+	return app.getFilteredObject(path)
+}
+
+// getFilteredList retrieves and filters list data.
+func (app *Server) getFilteredList(path string) ([]byte, error) {
+	objs, err := app.Storage.GetList(path)
 	if err != nil {
 		return []byte(""), err
 	}
-	return filteredData, nil
+
+	filtered, err := app.filters.ReadList.Check(path, objs, app.Static)
+	if err != nil {
+		return []byte(""), err
+	}
+	return meta.Encode(filtered)
+}
+
+// getFilteredObject retrieves and filters single object data.
+func (app *Server) getFilteredObject(path string) ([]byte, error) {
+	obj, err := app.Storage.Get(path)
+	if err != nil {
+		// Object not found - return empty object
+		obj = meta.Object{}
+	}
+
+	filtered, err := app.filters.ReadObject.Check(path, obj, app.Static)
+	if err != nil {
+		return []byte(""), err
+	}
+	if filtered.Created == 0 && filtered.Index == "" {
+		return meta.EmptyObject, nil
+	}
+	return meta.Encode(filtered)
 }
 
 func (app *Server) watch(sc StorageChan) {
@@ -399,7 +434,7 @@ func (app *Server) StartWithError(address string) error {
 		return err
 	}
 	app.Console = coat.NewConsole(app.Address, app.Silence)
-	go app.tick()
+	go app.startClock()
 	return nil
 }
 

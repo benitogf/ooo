@@ -19,6 +19,7 @@ var (
 	ErrClientRequired = errors.New("io: Client is required")
 	ErrHostRequired   = errors.New("io: Host is required")
 	ErrRequestFailed  = errors.New("io: request failed")
+	ErrEmptyKey       = errors.New("io: empty key")
 )
 
 const (
@@ -164,7 +165,7 @@ func RemoteSetWithContext[T any](ctx context.Context, cfg RemoteConfig, path str
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if key.LastIndex(path) == "*" {
+	if key.IsGlob(path) {
 		log.Println("RemoteSet["+path+"]: ", ErrPathGlobNotAllowed)
 		return ErrPathGlobNotAllowed
 	}
@@ -200,7 +201,7 @@ func RemotePushWithContext[T any](ctx context.Context, cfg RemoteConfig, path st
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	if key.LastIndex(path) != "*" {
+	if !key.IsGlob(path) {
 		log.Println("RemotePush["+path+"]: ", ErrPathGlobRequired)
 		return ErrPathGlobRequired
 	}
@@ -238,7 +239,7 @@ func RemoteGetWithContext[T any](ctx context.Context, cfg RemoteConfig, path str
 	if err := cfg.Validate(); err != nil {
 		return client.Meta[T]{}, err
 	}
-	if key.LastIndex(path) == "*" {
+	if key.IsGlob(path) {
 		log.Println("RemoteGet["+path+"]: ", ErrPathGlobNotAllowed)
 		return client.Meta[T]{}, ErrPathGlobNotAllowed
 	}
@@ -254,6 +255,10 @@ func RemoteGetWithContext[T any](ctx context.Context, cfg RemoteConfig, path str
 		return req, nil
 	})
 	if err != nil {
+		// Return specific error for 404 (empty key)
+		if result.statusCode == 404 {
+			return client.Meta[T]{}, ErrEmptyKey
+		}
 		return client.Meta[T]{}, err
 	}
 
@@ -289,7 +294,7 @@ func RemoteGetListWithContext[T any](ctx context.Context, cfg RemoteConfig, path
 	if err := cfg.Validate(); err != nil {
 		return []client.Meta[T]{}, err
 	}
-	if key.LastIndex(path) != "*" {
+	if !key.IsGlob(path) {
 		log.Println("RemoteGetList["+path+"]: ", ErrPathGlobRequired)
 		return []client.Meta[T]{}, ErrPathGlobRequired
 	}

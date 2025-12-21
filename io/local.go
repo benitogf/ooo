@@ -7,7 +7,6 @@ import (
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
-	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 )
 
@@ -17,11 +16,8 @@ var (
 )
 
 func GetList[T any](server *ooo.Server, path string) ([]client.Meta[T], error) {
-	lastPath := key.LastIndex(path)
-	isList := lastPath == "*"
-
 	var result []client.Meta[T]
-	if !isList {
+	if !key.IsGlob(path) {
 		log.Println("GetList["+path+"]: ", ErrPathGlobRequired)
 		return result, ErrPathGlobRequired
 	}
@@ -51,47 +47,33 @@ func GetList[T any](server *ooo.Server, path string) ([]client.Meta[T], error) {
 }
 
 func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
-	lastPath := key.LastIndex(path)
-	isList := lastPath == "*"
-
 	var result client.Meta[T]
-	if isList {
+	if key.IsGlob(path) {
 		log.Println("Get["+path+"]: ", ErrPathGlobNotAllowed)
 		return result, ErrPathGlobNotAllowed
 	}
 
-	raw, err := server.Storage.Get(path)
+	obj, err := server.Storage.Get(path)
 	if err != nil {
 		log.Println("Get["+path+"]: failed to get from storage", err)
-		return result, err
-	}
-	obj, err := meta.DecodePooled(raw)
-	if err != nil {
-		log.Println("Get["+path+"]: failed to decode data", err)
 		return result, err
 	}
 	var item T
 	err = json.Unmarshal([]byte(obj.Data), &item)
 	if err != nil {
-		meta.PutObject(obj)
 		log.Println("Get["+path+"]: failed to unmarshal data", err)
 		return result, err
 	}
-	result = client.Meta[T]{
+	return client.Meta[T]{
 		Created: obj.Created,
 		Updated: obj.Updated,
 		Index:   obj.Index,
 		Data:    item,
-	}
-	meta.PutObject(obj)
-	return result, nil
+	}, nil
 }
 
 func Set[T any](server *ooo.Server, path string, item T) error {
-	lastPath := key.LastIndex(path)
-	isList := lastPath == "*"
-
-	if isList {
+	if key.IsGlob(path) {
 		log.Println("Set["+path+"]: ", ErrPathGlobNotAllowed)
 		return ErrPathGlobNotAllowed
 	}

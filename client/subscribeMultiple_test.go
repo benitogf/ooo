@@ -89,7 +89,7 @@ func TestSubscribeMultiple2_BasicFunctionality(t *testing.T) {
 	wg.Add(2)
 
 	go func() {
-		client.SubscribeMultiple2(
+		client.SubscribeMultipleList2(
 			ctx,
 			client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 			client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
@@ -149,7 +149,7 @@ func TestSubscribeMultiple2_StateAggregation(t *testing.T) {
 	// Wait for 2 initial callbacks (one per subscription path)
 	wg.Add(2)
 
-	go client.SubscribeMultiple2(
+	go client.SubscribeMultipleList2(
 		ctx,
 		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
@@ -206,7 +206,7 @@ func TestSubscribeMultiple2_ContextCancellation(t *testing.T) {
 	// Wait for 2 initial callbacks (one per subscription path)
 	wg.Add(2)
 
-	go client.SubscribeMultiple2(
+	go client.SubscribeMultipleList2(
 		ctx,
 		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
@@ -266,7 +266,7 @@ func TestSubscribeMultiple3_BasicFunctionality(t *testing.T) {
 	// Wait for 3 initial callbacks (one per subscription path)
 	wg.Add(3)
 
-	go client.SubscribeMultiple3(
+	go client.SubscribeMultipleList3(
 		ctx,
 		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
@@ -334,7 +334,7 @@ func TestSubscribeMultiple4_BasicFunctionality(t *testing.T) {
 	// Wait for 4 initial callbacks (one per subscription path)
 	wg.Add(4)
 
-	go client.SubscribeMultiple4(
+	go client.SubscribeMultipleList4(
 		ctx,
 		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
@@ -415,7 +415,7 @@ func TestSubscribeMultiple2_ConcurrentUpdates(t *testing.T) {
 	// Wait for 2 initial callbacks (one per subscription path)
 	wg.Add(2)
 
-	go client.SubscribeMultiple2(
+	go client.SubscribeMultipleList2(
 		ctx,
 		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
@@ -489,7 +489,7 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 	wg.Add(2)
 
 	// Subscription goroutine: maintains derived state
-	go client.SubscribeMultiple2(
+	go client.SubscribeMultipleList2(
 		ctx,
 		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
 		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},

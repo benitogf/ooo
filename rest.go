@@ -22,7 +22,15 @@ func (app *Server) getStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stats, err := app.Storage.Keys()
+	keys, err := app.Storage.Keys()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, "%s", err)
+		return
+	}
+
+	stats := Stats{Keys: keys}
+	data, err := meta.Encode(stats)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "%s", err)
@@ -30,7 +38,7 @@ func (app *Server) getStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(stats)
+	w.Write(data)
 }
 
 func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
@@ -59,7 +67,7 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := app.filters.Write.check(_key, event, app.Static)
+	data, err := app.filters.Write.Check(_key, event, app.Static)
 	if err != nil {
 		app.Console.Err("setError:filter["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -69,7 +77,7 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 
 	// Use Push for glob patterns, Set for specific keys
 	var index string
-	if key.LastIndex(_key) == "*" {
+	if key.IsGlob(_key) {
 		index, err = app.Storage.Push(_key, data)
 	} else {
 		index, err = app.Storage.Set(_key, data)
@@ -81,7 +89,7 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.Console.Log("publish", _key)
-	app.filters.AfterWrite.check(_key)
+	app.filters.AfterWrite.Check(_key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"index":"` + index + `"}`))
 }
@@ -112,7 +120,7 @@ func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := app.filters.Write.check(_key, event, app.Static)
+	data, err := app.filters.Write.Check(_key, event, app.Static)
 	if err != nil {
 		app.Console.Err("setError:filter["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -128,7 +136,7 @@ func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.Console.Log("republish", _key)
-	app.filters.AfterWrite.check(_key)
+	app.filters.AfterWrite.Check(_key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"index":"` + index + `"}`))
 }
@@ -159,7 +167,7 @@ func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := app.filters.Write.check(_key, event, app.Static)
+	data, err := app.filters.Write.Check(_key, event, app.Static)
 	if err != nil {
 		app.Console.Err("setError["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
@@ -175,7 +183,7 @@ func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	app.Console.Log("patch", _key)
-	app.filters.AfterWrite.check(_key)
+	app.filters.AfterWrite.Check(_key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"index":"` + index + `"}`))
 }
@@ -234,7 +242,7 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := app.filters.Delete.check(_key, app.Static)
+	err := app.filters.Delete.Check(_key, app.Static)
 	if err != nil {
 		app.Console.Err("detError["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)

@@ -34,6 +34,8 @@ var (
 	ErrHostRequired      = errors.New("client: Host is required")
 	ErrPathRequired      = errors.New("client: path is required")
 	ErrOnMessageRequired = errors.New("client: OnMessage callback is required")
+	ErrGlobNotAllowed    = errors.New("client: glob pattern not allowed for Subscribe, use SubscribeList")
+	ErrGlobRequired      = errors.New("client: glob pattern required for SubscribeList, use Subscribe")
 )
 
 type Meta[T any] struct {
@@ -106,14 +108,12 @@ func (c *SubscribeConfig) Validate() error {
 	return nil
 }
 
-// SubscribeEvents holds event callbacks for Subscribe.
+// SubscribeEvents holds event callbacks for Subscribe (single object).
 // Required: OnMessage.
-// Optional: OnError, OnOpen, OnClose.
+// Optional: OnError.
 type SubscribeEvents[T any] struct {
-	OnMessage func([]Meta[T])
+	OnMessage func(Meta[T])
 	OnError   func(error)
-	OnOpen    func()
-	OnClose   func()
 }
 
 // Validate checks that required callbacks are set.
@@ -124,12 +124,27 @@ func (e *SubscribeEvents[T]) Validate() error {
 	return nil
 }
 
-// subscribeState holds the mutable state for a subscription.
+// SubscribeListEvents holds event callbacks for SubscribeList (glob patterns).
+// Required: OnMessage.
+// Optional: OnError.
+type SubscribeListEvents[T any] struct {
+	OnMessage func([]Meta[T])
+	OnError   func(error)
+}
+
+// Validate checks that required callbacks are set.
+func (e *SubscribeListEvents[T]) Validate() error {
+	if e.OnMessage == nil {
+		return ErrOnMessageRequired
+	}
+	return nil
+}
+
+// subscribeState holds the mutable state for a single object subscription.
 type subscribeState[T any] struct {
 	cfg        SubscribeConfig
 	path       string
 	events     SubscribeEvents[T]
-	isList     bool
 	wsURL      url.URL
 	cache      json.RawMessage
 	retryCount int
@@ -166,9 +181,6 @@ func (s *subscribeState[T]) connect() bool {
 	s.muClient.Unlock()
 
 	s.cfg.console.Log(s.logPrefix() + ": connection established")
-	if s.events.OnOpen != nil {
-		s.events.OnOpen()
-	}
 	return true
 }
 
@@ -176,62 +188,31 @@ func (s *subscribeState[T]) connect() bool {
 // Returns false if the read loop should break.
 func (s *subscribeState[T]) handleMessage(message []byte) bool {
 	var err error
-	result := []Meta[T]{}
-
-	if s.isList {
-		var objs []meta.Object
-		s.cache, objs, err = messages.PatchList(message, s.cache)
-		if err != nil {
-			s.cfg.console.Err(s.logPrefix()+": failed to parse list message", err)
-			if s.events.OnError != nil {
-				s.events.OnError(err)
-			}
-			return false
+	var obj meta.Object
+	s.cache, obj, err = messages.Patch(message, s.cache)
+	if err != nil {
+		s.cfg.console.Err(s.logPrefix()+": failed to parse message", err)
+		if s.events.OnError != nil {
+			s.events.OnError(err)
 		}
-		for _, obj := range objs {
-			var item T
-			if err = json.Unmarshal(obj.Data, &item); err != nil {
-				s.cfg.console.Err(s.logPrefix()+": failed to unmarshal list item", err)
-				if s.events.OnError != nil {
-					s.events.OnError(err)
-				}
-				continue
-			}
-			result = append(result, Meta[T]{
-				Created: obj.Created,
-				Updated: obj.Updated,
-				Index:   obj.Index,
-				Data:    item,
-			})
+		return false
+	}
+	var item T
+	if err = json.Unmarshal(obj.Data, &item); err != nil {
+		s.cfg.console.Err(s.logPrefix()+": failed to unmarshal item", err)
+		if s.events.OnError != nil {
+			s.events.OnError(err)
 		}
-	} else {
-		var obj meta.Object
-		s.cache, obj, err = messages.Patch(message, s.cache)
-		if err != nil {
-			s.cfg.console.Err(s.logPrefix()+": failed to parse message", err)
-			if s.events.OnError != nil {
-				s.events.OnError(err)
-			}
-			return false
-		}
-		var item T
-		if err = json.Unmarshal(obj.Data, &item); err != nil {
-			s.cfg.console.Err(s.logPrefix()+": failed to unmarshal item", err)
-			if s.events.OnError != nil {
-				s.events.OnError(err)
-			}
-			return false
-		}
-		result = append(result, Meta[T]{
-			Created: obj.Created,
-			Updated: obj.Updated,
-			Index:   obj.Index,
-			Data:    item,
-		})
+		return false
 	}
 
 	s.retryCount = 0
-	s.events.OnMessage(result)
+	s.events.OnMessage(Meta[T]{
+		Created: obj.Created,
+		Updated: obj.Updated,
+		Index:   obj.Index,
+		Data:    item,
+	})
 	return true
 }
 
@@ -284,21 +265,22 @@ func (s *subscribeState[T]) startCloseWatcher() {
 		}
 		s.cfg.console.Err(s.logPrefix()+": closing", s.cfg.Ctx.Err())
 		s.wsClient.Close()
-		if s.events.OnClose != nil {
-			s.events.OnClose()
-		}
 	}()
 }
 
-// Subscribe establishes a WebSocket subscription to the given path.
+// Subscribe establishes a WebSocket subscription to a single object path (non-glob).
 // It automatically reconnects on connection loss with exponential backoff.
 // The subscription runs until the context is cancelled.
+// For glob patterns (lists), use SubscribeList instead.
 func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T]) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	if path == "" {
 		return ErrPathRequired
+	}
+	if key.IsGlob(path) {
+		return ErrGlobNotAllowed
 	}
 	if err := events.Validate(); err != nil {
 		return err
@@ -308,7 +290,6 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 		cfg:    cfg,
 		path:   path,
 		events: events,
-		isList: key.LastIndex(path) == "*",
 		wsURL:  url.URL{Scheme: cfg.Protocol, Host: cfg.Host, Path: path},
 	}
 
@@ -326,8 +307,181 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 			break
 		}
 
-		if state.events.OnClose != nil {
-			state.events.OnClose()
+		state.waitRetry()
+	}
+	return nil
+}
+
+// subscribeListState holds the mutable state for a list subscription.
+type subscribeListState[T any] struct {
+	cfg        SubscribeConfig
+	path       string
+	events     SubscribeListEvents[T]
+	wsURL      url.URL
+	cache      json.RawMessage
+	retryCount int
+	closing    atomic.Bool
+	muClient   sync.Mutex
+	wsClient   *websocket.Conn
+}
+
+// logPrefix returns a consistent log prefix for this subscription.
+func (s *subscribeListState[T]) logPrefix() string {
+	return "subscribeList[" + s.cfg.Host + "/" + s.path + "]"
+}
+
+// connect establishes a WebSocket connection.
+// Returns true if connection was successful, false otherwise.
+func (s *subscribeListState[T]) connect() bool {
+	dialer := &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: s.cfg.HandshakeTimeout,
+	}
+
+	s.muClient.Lock()
+	var err error
+	s.wsClient, _, err = dialer.Dial(s.wsURL.String(), s.cfg.Header)
+	if s.wsClient == nil || err != nil {
+		s.muClient.Unlock()
+		s.cfg.console.Err(s.logPrefix()+": failed websocket dial", err)
+		if s.events.OnError != nil {
+			s.events.OnError(err)
+		}
+		time.Sleep(2 * time.Second)
+		return false
+	}
+	s.muClient.Unlock()
+
+	s.cfg.console.Log(s.logPrefix() + ": connection established")
+	return true
+}
+
+// handleMessage processes a single WebSocket message.
+// Returns false if the read loop should break.
+func (s *subscribeListState[T]) handleMessage(message []byte) bool {
+	var err error
+	var objs []meta.Object
+	s.cache, objs, err = messages.PatchList(message, s.cache)
+	if err != nil {
+		s.cfg.console.Err(s.logPrefix()+": failed to parse list message", err)
+		if s.events.OnError != nil {
+			s.events.OnError(err)
+		}
+		return false
+	}
+
+	result := make([]Meta[T], 0, len(objs))
+	for _, obj := range objs {
+		var item T
+		if err = json.Unmarshal(obj.Data, &item); err != nil {
+			s.cfg.console.Err(s.logPrefix()+": failed to unmarshal list item", err)
+			if s.events.OnError != nil {
+				s.events.OnError(err)
+			}
+			continue
+		}
+		result = append(result, Meta[T]{
+			Created: obj.Created,
+			Updated: obj.Updated,
+			Index:   obj.Index,
+			Data:    item,
+		})
+	}
+
+	s.retryCount = 0
+	s.events.OnMessage(result)
+	return true
+}
+
+// readLoop reads messages from the WebSocket until an error occurs.
+func (s *subscribeListState[T]) readLoop() {
+	for {
+		_, message, err := s.wsClient.ReadMessage()
+		if err != nil || message == nil {
+			s.cfg.console.Err(s.logPrefix()+": read error", err)
+			if s.events.OnError != nil {
+				s.events.OnError(err)
+			}
+			s.wsClient.Close()
+			return
+		}
+		if !s.handleMessage(message) {
+			s.wsClient.Close()
+			return
+		}
+	}
+}
+
+// waitRetry waits before reconnecting based on retry count.
+func (s *subscribeListState[T]) waitRetry() {
+	s.retryCount++
+	if s.retryCount < s.cfg.Retry.MediumThreshold {
+		s.cfg.console.Log(s.logPrefix() + ": reconnecting...")
+		time.Sleep(s.cfg.Retry.InitialDelay)
+		return
+	}
+	if s.retryCount < s.cfg.Retry.MaxThreshold {
+		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MediumDelay)
+		time.Sleep(s.cfg.Retry.MediumDelay)
+		return
+	}
+	s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MaxDelay)
+	time.Sleep(s.cfg.Retry.MaxDelay)
+}
+
+// startCloseWatcher starts a goroutine that closes the connection when context is done.
+func (s *subscribeListState[T]) startCloseWatcher() {
+	go func() {
+		<-s.cfg.Ctx.Done()
+		s.closing.Store(true)
+		s.muClient.Lock()
+		defer s.muClient.Unlock()
+		if s.wsClient == nil {
+			s.cfg.console.Log(s.logPrefix() + ": closing but no connection")
+			return
+		}
+		s.cfg.console.Err(s.logPrefix()+": closing", s.cfg.Ctx.Err())
+		s.wsClient.Close()
+	}()
+}
+
+// SubscribeList establishes a WebSocket subscription to a glob pattern path (list).
+// It automatically reconnects on connection loss with exponential backoff.
+// The subscription runs until the context is cancelled.
+// For single object paths (non-glob), use Subscribe instead.
+func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeListEvents[T]) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if path == "" {
+		return ErrPathRequired
+	}
+	if !key.IsGlob(path) {
+		return ErrGlobRequired
+	}
+	if err := events.Validate(); err != nil {
+		return err
+	}
+
+	state := &subscribeListState[T]{
+		cfg:    cfg,
+		path:   path,
+		events: events,
+		wsURL:  url.URL{Scheme: cfg.Protocol, Host: cfg.Host, Path: path},
+	}
+
+	state.startCloseWatcher()
+
+	for {
+		if !state.connect() {
+			continue
+		}
+
+		state.readLoop()
+
+		if state.closing.Load() {
+			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
+			break
 		}
 
 		state.waitRetry()

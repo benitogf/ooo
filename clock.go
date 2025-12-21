@@ -19,7 +19,7 @@ func (app *Server) sendTime() {
 	app.Stream.BroadcastClock(Time())
 }
 
-func (app *Server) tick() {
+func (app *Server) startClock() {
 	ticker := time.NewTicker(app.Tick)
 	for {
 		<-ticker.C

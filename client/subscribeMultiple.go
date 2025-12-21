@@ -18,10 +18,10 @@ type Path struct {
 	Header   http.Header
 }
 
-// SubscribeMultiple2 subscribes to 2 paths with different types and a single callback.
+// SubscribeMultipleList2 subscribes to 2 list paths (glob patterns) with different types and a single callback.
 // When any subscription updates, the callback receives ALL current states.
 // Uses typed channels for type-safe, lock-free state management.
-func SubscribeMultiple2[T1, T2 any](
+func SubscribeMultipleList2[T1, T2 any](
 	ctx context.Context,
 	path1 Path,
 	path2 Path,
@@ -47,12 +47,12 @@ func SubscribeMultiple2[T1, T2 any](
 		}
 	}()
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path1.Protocol,
 		Host:     path1.Host,
 		Header:   path1.Header,
-	}, path1.Path, SubscribeEvents[T1]{
+	}, path1.Path, SubscribeListEvents[T1]{
 		OnMessage: func(messages []Meta[T1]) {
 			select {
 			case ch1 <- messages:
@@ -61,12 +61,12 @@ func SubscribeMultiple2[T1, T2 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path2.Protocol,
 		Host:     path2.Host,
 		Header:   path2.Header,
-	}, path2.Path, SubscribeEvents[T2]{
+	}, path2.Path, SubscribeListEvents[T2]{
 		OnMessage: func(messages []Meta[T2]) {
 			select {
 			case ch2 <- messages:
@@ -76,10 +76,10 @@ func SubscribeMultiple2[T1, T2 any](
 	})
 }
 
-// SubscribeMultiple3 subscribes to 3 paths with different types and a single callback.
+// SubscribeMultipleList3 subscribes to 3 list paths (glob patterns) with different types and a single callback.
 // When any subscription updates, the callback receives ALL current states.
 // Uses typed channels for type-safe, lock-free state management.
-func SubscribeMultiple3[T1, T2, T3 any](
+func SubscribeMultipleList3[T1, T2, T3 any](
 	ctx context.Context,
 	path1 Path,
 	path2 Path,
@@ -122,12 +122,12 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		}
 	}()
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path1.Protocol,
 		Host:     path1.Host,
 		Header:   path1.Header,
-	}, path1.Path, SubscribeEvents[T1]{
+	}, path1.Path, SubscribeListEvents[T1]{
 		OnMessage: func(messages []Meta[T1]) {
 			select {
 			case ch1 <- messages:
@@ -136,12 +136,12 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path2.Protocol,
 		Host:     path2.Host,
 		Header:   path2.Header,
-	}, path2.Path, SubscribeEvents[T2]{
+	}, path2.Path, SubscribeListEvents[T2]{
 		OnMessage: func(messages []Meta[T2]) {
 			select {
 			case ch2 <- messages:
@@ -150,12 +150,12 @@ func SubscribeMultiple3[T1, T2, T3 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path3.Protocol,
 		Host:     path3.Host,
 		Header:   path3.Header,
-	}, path3.Path, SubscribeEvents[T3]{
+	}, path3.Path, SubscribeListEvents[T3]{
 		OnMessage: func(messages []Meta[T3]) {
 			select {
 			case ch3 <- messages:
@@ -165,10 +165,10 @@ func SubscribeMultiple3[T1, T2, T3 any](
 	})
 }
 
-// SubscribeMultiple4 subscribes to 4 paths with different types and a single callback.
+// SubscribeMultipleList4 subscribes to 4 list paths (glob patterns) with different types and a single callback.
 // When any subscription updates, the callback receives ALL current states.
 // Uses typed channels for type-safe, lock-free state management.
-func SubscribeMultiple4[T1, T2, T3, T4 any](
+func SubscribeMultipleList4[T1, T2, T3, T4 any](
 	ctx context.Context,
 	path1 Path,
 	path2 Path,
@@ -224,12 +224,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		}
 	}()
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path1.Protocol,
 		Host:     path1.Host,
 		Header:   path1.Header,
-	}, path1.Path, SubscribeEvents[T1]{
+	}, path1.Path, SubscribeListEvents[T1]{
 		OnMessage: func(messages []Meta[T1]) {
 			select {
 			case ch1 <- messages:
@@ -238,12 +238,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path2.Protocol,
 		Host:     path2.Host,
 		Header:   path2.Header,
-	}, path2.Path, SubscribeEvents[T2]{
+	}, path2.Path, SubscribeListEvents[T2]{
 		OnMessage: func(messages []Meta[T2]) {
 			select {
 			case ch2 <- messages:
@@ -252,12 +252,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path3.Protocol,
 		Host:     path3.Host,
 		Header:   path3.Header,
-	}, path3.Path, SubscribeEvents[T3]{
+	}, path3.Path, SubscribeListEvents[T3]{
 		OnMessage: func(messages []Meta[T3]) {
 			select {
 			case ch3 <- messages:
@@ -266,12 +266,12 @@ func SubscribeMultiple4[T1, T2, T3, T4 any](
 		},
 	})
 
-	go Subscribe(SubscribeConfig{
+	go SubscribeList(SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: path4.Protocol,
 		Host:     path4.Host,
 		Header:   path4.Header,
-	}, path4.Path, SubscribeEvents[T4]{
+	}, path4.Path, SubscribeListEvents[T4]{
 		OnMessage: func(messages []Meta[T4]) {
 			select {
 			case ch4 <- messages:

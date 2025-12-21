@@ -14,6 +14,16 @@ var (
 	ErrGlobNotAtEnd     = errors.New("key: glob pattern must be at the end of the path")
 )
 
+// IsGlob returns true if the path ends with a glob pattern (/*).
+func IsGlob(path string) bool {
+	return LastIndex(path) == "*"
+}
+
+// HasGlob returns true if the path contains a glob pattern (*) anywhere.
+func HasGlob(path string) bool {
+	return strings.Contains(path, "*")
+}
+
 // isValidChar checks if a character is valid for a key path.
 // Valid characters: a-z, A-Z, 0-9, *, /
 func isValidChar(c byte) bool {
@@ -70,7 +80,7 @@ func Match(path string, key string) bool {
 	if path == key {
 		return true
 	}
-	if !strings.Contains(path, "*") {
+	if !HasGlob(path) {
 		return false
 	}
 	match, err := filepath.Match(path, key)

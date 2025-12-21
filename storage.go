@@ -31,9 +31,13 @@ type StorageOpt struct {
 //
 // Keys: returns a list with existing keys in the storage
 //
-// Get(key): retrieve a value or list of values, the key can include a glob pattern (ascending created time order)
+// Get(key): retrieve a single value by exact key (non-glob)
 //
-// GetDescending(key): retrieve a value or list of values, the key can include a glob pattern (descending created time order)
+// GetAndLock(key): same as Get but will lock the key mutex until SetAndUnlock is called (non-glob only)
+//
+// GetList(path): retrieve list of values matching a glob pattern (ascending created time order)
+//
+// GetListDescending(path): retrieve list of values matching a glob pattern (descending created time order)
 //
 // GetN(path, N): retrieve N list of values matching a glob pattern (descending created time order)
 //
@@ -41,15 +45,13 @@ type StorageOpt struct {
 //
 // GetNRange(path, N, from, to): retrieve N list of values matching a glob pattern path created in the time from-to time range (descending created time order)
 //
-// Set(key, data): store data under the provided key, key cannot not include glob pattern
+// Set(key, data): store data under the provided key, key cannot include glob pattern
 //
 // Push(path, data): store data under a new key generated from a glob pattern path, returns the generated index
 //
 // SetWithMeta(key, data, created, updated): store data by manually providing created/updated time values
 //
-// GetAndLock(key): same as get but will lock the key mutex until SetAndUnlock is called for the same key (non glob key only)
-//
-// SetAndUnlock(key, data): same as set but will unlock the key mutex (non glob key only)
+// SetAndUnlock(key, data): same as set but will unlock the key mutex (non-glob only)
 //
 // Unlock(key): unlock key mutex
 //
@@ -62,10 +64,12 @@ type Database interface {
 	Active() bool
 	Start(StorageOpt) error
 	Close()
-	Keys() ([]byte, error)
+	Keys() ([]string, error)
 	KeysRange(path string, from, to int64) ([]string, error)
-	Get(key string) ([]byte, error)
-	GetDescending(key string) ([]byte, error)
+	Get(key string) (meta.Object, error)
+	GetAndLock(key string) (meta.Object, error)
+	GetList(path string) ([]meta.Object, error)
+	GetListDescending(path string) ([]meta.Object, error)
 	GetN(path string, limit int) ([]meta.Object, error)
 	GetNAscending(path string, limit int) ([]meta.Object, error)
 	GetNRange(path string, limit int, from, to int64) ([]meta.Object, error)
@@ -73,7 +77,6 @@ type Database interface {
 	Push(path string, data json.RawMessage) (string, error)
 	Patch(key string, data json.RawMessage) (string, error)
 	SetWithMeta(key string, data json.RawMessage, created, updated int64) (string, error)
-	GetAndLock(key string) ([]byte, error)
 	SetAndUnlock(key string, data json.RawMessage) (string, error)
 	Unlock(key string) error
 	Del(key string) error

@@ -129,6 +129,8 @@ func TestRestGet(t *testing.T) {
 	require.Equal(t, "sources", index)
 	data, _ := app.Storage.Get("test")
 	dataSources, _ := app.Storage.Get("sources")
+	dataEncoded, _ := meta.Encode(data)
+	dataSourcesEncoded, _ := meta.Encode(dataSources)
 
 	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
@@ -138,7 +140,7 @@ func TestRestGet(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-	require.Equal(t, string(data), string(body))
+	require.Equal(t, string(dataEncoded), string(body))
 
 	req = httptest.NewRequest(http.MethodGet, "/sources", nil)
 	w = httptest.NewRecorder()
@@ -148,7 +150,7 @@ func TestRestGet(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-	require.Equal(t, string(dataSources), string(body))
+	require.Equal(t, string(dataSourcesEncoded), string(body))
 
 	req = httptest.NewRequest(http.MethodGet, "/test/notest", nil)
 	w = httptest.NewRecorder()
@@ -324,10 +326,7 @@ func TestPatch(t *testing.T) {
 	resp := w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 
-	raw, err := app.Storage.Get("test/1")
-	require.NoError(t, err)
-
-	obj, err := meta.Decode(raw)
+	obj, err := app.Storage.Get("test/1")
 	require.NoError(t, err)
 
 	require.Equal(t, string(testOutput), string(obj.Data))

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
@@ -231,9 +232,9 @@ func TestWebSocketReadFilter(t *testing.T) {
 	app := Server{}
 	app.Silence = true
 
-	// Add read filter that modifies data
-	app.ReadFilter("filtered", func(key string, data json.RawMessage) (json.RawMessage, error) {
-		return json.RawMessage(`{"filtered":true}`), nil
+	// Add read filter that modifies data (non-glob path uses ReadObjectFilter)
+	app.ReadObjectFilter("filtered", func(key string, obj meta.Object) (meta.Object, error) {
+		return meta.Object{Data: json.RawMessage(`{"filtered":true}`), Created: 1, Index: "1"}, nil
 	})
 
 	app.Start("localhost:0")

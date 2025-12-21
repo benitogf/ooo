@@ -194,10 +194,60 @@ func TestRemoteDelete(t *testing.T) {
 	err = io.RemoteDelete(cfg, THING1_PATH)
 	require.NoError(t, err)
 
-	// Verify it returns empty after deletion
-	thingAfter, err := io.RemoteGet[Thing](cfg, THING1_PATH)
+	// Verify it returns ErrEmptyKey after deletion
+	_, err = io.RemoteGet[Thing](cfg, THING1_PATH)
+	require.ErrorIs(t, err, io.ErrEmptyKey)
+}
+
+func TestRemoteEmptyKeyVsRouteNotDefined(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter("valid/*")
+	server.OpenFilter("validitem")
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := io.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Test 1: Route not defined (400 Bad Request) - path has no filter registered
+	_, err := io.RemoteGet[Thing](cfg, "undefined")
+	require.Error(t, err)
+	require.ErrorIs(t, err, io.ErrRequestFailed)
+
+	// Test 2: Empty key (404 Not Found) - path has filter but no data
+	_, err = io.RemoteGet[Thing](cfg, "validitem")
+	require.Error(t, err)
+	require.ErrorIs(t, err, io.ErrEmptyKey)
+
+	// Test 3: After setting data, should succeed
+	err = io.RemoteSet(cfg, "validitem", Thing{This: "test", That: "data"})
 	require.NoError(t, err)
-	require.Empty(t, thingAfter.Data.This)
+
+	thing, err := io.RemoteGet[Thing](cfg, "validitem")
+	require.NoError(t, err)
+	require.Equal(t, "test", thing.Data.This)
+
+	// Test 4: After deleting, should return ErrEmptyKey again
+	err = io.RemoteDelete(cfg, "validitem")
+	require.NoError(t, err)
+
+	_, err = io.RemoteGet[Thing](cfg, "validitem")
+	require.Error(t, err)
+	require.ErrorIs(t, err, io.ErrEmptyKey)
+
+	// Test 5: List path - route not defined
+	_, err = io.RemoteGetList[Thing](cfg, "undefined/*")
+	require.Error(t, err)
+	require.ErrorIs(t, err, io.ErrRequestFailed)
+
+	// Test 6: List path - empty list (valid route, no data) returns empty slice
+	things, err := io.RemoteGetList[Thing](cfg, "valid/*")
+	require.NoError(t, err)
+	require.Empty(t, things)
 }
 
 func TestRemoteConfigValidation(t *testing.T) {
@@ -227,22 +277,22 @@ func TestRemotePathValidation(t *testing.T) {
 	// RemoteSet with list path should fail
 	err := io.RemoteSet(cfg, "things/*", Thing{})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is a list")
+	require.Contains(t, err.Error(), "glob not allowed")
 
 	// RemotePush with non-list path should fail
 	err = io.RemotePush(cfg, "thing1", Thing{})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is not a list")
+	require.Contains(t, err.Error(), "glob required")
 
 	// RemoteGet with list path should fail
 	_, err = io.RemoteGet[Thing](cfg, "things/*")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is a list")
+	require.Contains(t, err.Error(), "glob not allowed")
 
 	// RemoteGetList with non-list path should fail
 	_, err = io.RemoteGetList[Thing](cfg, "thing1")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is not a list")
+	require.Contains(t, err.Error(), "glob required")
 }
 
 func TestLocalPathValidation(t *testing.T) {
@@ -254,7 +304,7 @@ func TestLocalPathValidation(t *testing.T) {
 	// Set with list path should fail
 	err := io.Set(server, "things/*", Thing{})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is a list")
+	require.Contains(t, err.Error(), "glob not allowed")
 
 	// Push with non-list path should fail
 	_, err = io.Push(server, "thing1", Thing{})
@@ -264,10 +314,10 @@ func TestLocalPathValidation(t *testing.T) {
 	// Get with list path should fail
 	_, err = io.Get[Thing](server, "things/*")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is a list")
+	require.Contains(t, err.Error(), "glob not allowed")
 
 	// GetList with non-list path should fail
 	_, err = io.GetList[Thing](server, "thing1")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "path is not a list")
+	require.Contains(t, err.Error(), "glob required")
 }

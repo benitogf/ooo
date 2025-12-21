@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/benitogf/jsondiff"
+	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 
 	"github.com/stretchr/testify/require"
@@ -40,50 +41,58 @@ func TestFilters(t *testing.T) {
 
 		return data, nil
 	})
-	app.ReadFilter("bag/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
-		return interceptedData, nil
+	// Use meta-based list filter for bag/*
+	app.ReadListFilter("bag/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+		return []meta.Object{{Data: interceptedData}}, nil
+	})
+	// Use meta-based object filter for bag/1 (single item read)
+	app.ReadObjectFilter("bag/*", func(key string, obj meta.Object) (meta.Object, error) {
+		return meta.Object{Data: interceptedData, Created: 1, Index: "1"}, nil
 	})
 
 	app.WriteFilter("book/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
 		return data, nil
 	})
-	app.ReadFilter("book/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
-		return data, nil
+	// Use meta-based list filter for book/*
+	app.ReadListFilter("book/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+		return objs, nil
 	})
-	app.AfterWrite("flyer", func(key string) {
+	app.AfterWriteFilter("flyer", func(key string) {
 		notified = true
 	})
 
 	app.Start("localhost:9889")
 	defer app.Close(os.Interrupt)
-	_, err := app.filters.Write.check("test/1", unacceptedData, false)
+	_, err := app.filters.Write.Check("test/1", unacceptedData, false)
 	require.Error(t, err)
-	_, err = app.filters.Write.check("test/1", acceptedData, false)
+	_, err = app.filters.Write.Check("test/1", acceptedData, false)
 	require.NoError(t, err)
-	data, err := app.filters.Read.check("bag/1", uninterceptedData, false)
+	// Test meta-based object filter
+	obj, err := app.filters.ReadObject.Check("bag/1", meta.Object{Data: uninterceptedData}, false)
 	require.NoError(t, err)
-	comparison, _ := jsondiff.Compare(data, interceptedData, &jsondiff.Options{})
+	comparison, _ := jsondiff.Compare(obj.Data, interceptedData, &jsondiff.Options{})
 	require.Equal(t, comparison, jsondiff.FullMatch)
-	_, err = app.filters.Write.check("test1", filteredData, false)
+	_, err = app.filters.Write.Check("test1", filteredData, false)
 	require.Error(t, err)
-	_, err = app.filters.Write.check("test1", unfilteredData, false)
+	_, err = app.filters.Write.Check("test1", unfilteredData, false)
 	require.NoError(t, err)
-	// test static
-	_, err = app.filters.Write.check("book", unacceptedData, true)
+	// test static - write filters
+	_, err = app.filters.Write.Check("book", unacceptedData, true)
 	require.Error(t, err)
-	_, err = app.filters.Write.check("book/1/1", unacceptedData, true)
+	_, err = app.filters.Write.Check("book/1/1", unacceptedData, true)
 	require.Error(t, err)
-	_, err = app.filters.Write.check("book/1/1/1", unacceptedData, true)
+	_, err = app.filters.Write.Check("book/1/1/1", unacceptedData, true)
 	require.Error(t, err)
-	_, err = app.filters.Read.check("book", unacceptedData, true)
+	// test static - read list filters
+	_, err = app.filters.ReadList.Check("book", nil, true)
 	require.Error(t, err)
-	_, err = app.filters.Read.check("book/1/1", unacceptedData, true)
+	_, err = app.filters.ReadList.Check("book/1/1", nil, true)
 	require.Error(t, err)
-	_, err = app.filters.Read.check("book/1/1/1", unacceptedData, true)
+	_, err = app.filters.ReadList.Check("book/1/1/1", nil, true)
 	require.Error(t, err)
-	_, err = app.filters.Write.check("book/1", unfilteredData, true)
+	_, err = app.filters.Write.Check("book/1", unfilteredData, true)
 	require.NoError(t, err)
-	_, err = app.filters.Read.check("book/1", unfilteredData, true)
+	_, err = app.filters.ReadList.Check("book/1", nil, true)
 	require.NoError(t, err)
 	req := httptest.NewRequest("POST", "/test/1", bytes.NewBuffer(TEST_DATA))
 	w := httptest.NewRecorder()
@@ -111,7 +120,11 @@ func TestFilters(t *testing.T) {
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Equal(t, 200, resp.StatusCode)
-	comparison, _ = jsondiff.Compare(body, interceptedData, &jsondiff.Options{})
+	// Response is a meta.Object, decode and check the data field
+	var respObj meta.Object
+	err = json.Unmarshal(body, &respObj)
+	require.NoError(t, err)
+	comparison, _ = jsondiff.Compare(respObj.Data, interceptedData, &jsondiff.Options{})
 	require.Equal(t, comparison, jsondiff.FullMatch)
 }
 

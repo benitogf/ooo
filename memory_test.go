@@ -114,3 +114,11 @@ func TestStreamPatch(t *testing.T) {
 	defer app.Close(os.Interrupt)
 	StreamBroadcastPatchTest(t, app)
 }
+
+func TestStreamLimitFilter(t *testing.T) {
+	app := &Server{}
+	app.Silence = true
+	app.Start("localhost:0")
+	defer app.Close(os.Interrupt)
+	StreamLimitFilterTest(t, app)
+}

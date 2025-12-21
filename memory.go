@@ -79,27 +79,24 @@ func (db *MemoryStorage) Clear() {
 }
 
 // Keys list all the keys in the storage
-func (db *MemoryStorage) Keys() ([]byte, error) {
-	stats := Stats{}
-	db.mem.Range(func(key any, value any) bool {
-		stats.Keys = append(stats.Keys, key.(string))
+func (db *MemoryStorage) Keys() ([]string, error) {
+	keys := []string{}
+	db.mem.Range(func(k any, value any) bool {
+		keys = append(keys, k.(string))
 		return true
 	})
 
-	if stats.Keys == nil {
-		stats.Keys = []string{}
-	}
-	sort.Slice(stats.Keys, func(i, j int) bool {
-		return strings.ToLower(stats.Keys[i]) < strings.ToLower(stats.Keys[j])
+	sort.Slice(keys, func(i, j int) bool {
+		return strings.ToLower(keys[i]) < strings.ToLower(keys[j])
 	})
 
-	return meta.Encode(stats)
+	return keys, nil
 }
 
 // KeysRange list keys in a path and time range
 func (db *MemoryStorage) KeysRange(path string, from, to int64) ([]string, error) {
 	keys := []string{}
-	if !strings.Contains(path, "*") {
+	if !key.HasGlob(path) {
 		return keys, ErrInvalidPattern
 	}
 
@@ -112,13 +109,9 @@ func (db *MemoryStorage) KeysRange(path string, from, to int64) ([]string, error
 		if !key.Match(path, _key) {
 			return true
 		}
-		obj, err := meta.DecodePooled(value.([]byte))
-		if err != nil {
-			return true
-		}
-		created := obj.Created
-		meta.PutObject(obj)
-		if created < from || created > to {
+		// Direct struct access - no JSON decode needed
+		obj := value.(*meta.Object)
+		if obj.Created < from || obj.Created > to {
 			return true
 		}
 		keys = append(keys, _key)
@@ -128,15 +121,10 @@ func (db *MemoryStorage) KeysRange(path string, from, to int64) ([]string, error
 	return keys, nil
 }
 
-// get a key/pattern related value(s)
-func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
-	if !strings.Contains(path, "*") {
-		data, found := db.mem.Load(path)
-		if !found {
-			return []byte(""), ErrNotFound
-		}
-
-		return data.([]byte), nil
+// getList retrieves values matching a glob pattern
+func (db *MemoryStorage) getList(path string, order string) ([]meta.Object, error) {
+	if !key.HasGlob(path) {
+		return nil, ErrInvalidPattern
 	}
 
 	res := []meta.Object{}
@@ -144,13 +132,7 @@ func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
 		if !key.Match(path, k.(string)) {
 			return true
 		}
-
-		newObject, err := meta.Decode(value.([]byte))
-		if err != nil {
-			return true
-		}
-
-		res = append(res, newObject)
+		res = append(res, *value.(*meta.Object))
 		return true
 	})
 
@@ -160,42 +142,60 @@ func (db *MemoryStorage) get(path string, order string) ([]byte, error) {
 		sort.Slice(res, meta.SortAsc(res))
 	}
 
-	return meta.Encode(res)
+	return res, nil
 }
 
-// Get a key/pattern related value(s).
-// For glob-terminated paths (ending with /*), returns items in ascending order.
-// For specific keys, returns the single item.
-func (db *MemoryStorage) Get(path string) ([]byte, error) {
+// Get retrieves a single value by exact key (non-glob).
+func (db *MemoryStorage) Get(path string) (meta.Object, error) {
 	if db.beforeRead != nil {
 		db.beforeRead(path)
 	}
-	return db.get(path, "asc")
+	if key.HasGlob(path) {
+		return meta.Object{}, ErrGlobNotAllowed
+	}
+	data, found := db.mem.Load(path)
+	if !found {
+		return meta.Object{}, ErrNotFound
+	}
+	return *data.(*meta.Object), nil
 }
 
-// GetDescending retrieves a key/pattern related value(s) in descending order.
-// For glob-terminated paths, returns items sorted by created time descending.
-func (db *MemoryStorage) GetDescending(path string) ([]byte, error) {
+// GetList retrieves list of values matching a glob pattern (ascending order).
+func (db *MemoryStorage) GetList(path string) ([]meta.Object, error) {
 	if db.beforeRead != nil {
 		db.beforeRead(path)
 	}
-	return db.get(path, "desc")
+	return db.getList(path, "asc")
 }
 
-func (db *MemoryStorage) GetAndLock(path string) ([]byte, error) {
-	if strings.Contains(path, "*") {
-		return []byte{}, ErrCantLockGlob
+// GetListDescending retrieves list of values matching a glob pattern (descending order).
+func (db *MemoryStorage) GetListDescending(path string) ([]meta.Object, error) {
+	if db.beforeRead != nil {
+		db.beforeRead(path)
+	}
+	return db.getList(path, "desc")
+}
+
+// GetAndLock retrieves a single value and locks the key mutex.
+func (db *MemoryStorage) GetAndLock(path string) (meta.Object, error) {
+	if key.HasGlob(path) {
+		return meta.Object{}, ErrCantLockGlob
 	}
 	if db.beforeRead != nil {
 		db.beforeRead(path)
 	}
 	lock := db._getLock(path)
 	lock.Lock()
-	return db.get(path, "asc")
+	data, found := db.mem.Load(path)
+	if !found {
+		lock.Unlock()
+		return meta.Object{}, ErrNotFound
+	}
+	return *data.(*meta.Object), nil
 }
 
 func (db *MemoryStorage) SetAndUnlock(path string, data json.RawMessage) (string, error) {
-	if strings.Contains(path, "*") {
+	if key.HasGlob(path) {
 		return "", ErrCantLockGlob
 	}
 	lock, err := db._loadLock(path)
@@ -218,7 +218,7 @@ func (db *MemoryStorage) Unlock(path string) error {
 
 func (db *MemoryStorage) getN(path string, limit int, order string) ([]meta.Object, error) {
 	res := []meta.Object{}
-	if !strings.Contains(path, "*") {
+	if !key.HasGlob(path) {
 		return res, ErrInvalidPattern
 	}
 
@@ -226,13 +226,8 @@ func (db *MemoryStorage) getN(path string, limit int, order string) ([]meta.Obje
 		if !key.Match(path, k.(string)) {
 			return true
 		}
-
-		newObject, err := meta.Decode(value.([]byte))
-		if err != nil {
-			return true
-		}
-
-		res = append(res, newObject)
+		// Direct struct access - no JSON decode needed
+		res = append(res, *value.(*meta.Object))
 		return true
 	})
 
@@ -272,7 +267,7 @@ func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]me
 		db.beforeRead(path)
 	}
 	res := []meta.Object{}
-	if !strings.Contains(path, "*") {
+	if !key.HasGlob(path) {
 		return res, ErrInvalidPattern
 	}
 
@@ -285,18 +280,12 @@ func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]me
 		if !key.Match(path, current) {
 			return true
 		}
-		paths := strings.Split(current, "/")
-		created := key.Decode(paths[len(paths)-1])
-		if created < from || created > to {
+		// Direct struct access - no JSON decode needed
+		obj := value.(*meta.Object)
+		if obj.Created < from || obj.Created > to {
 			return true
 		}
-
-		newObject, err := meta.Decode(value.([]byte))
-		if err != nil {
-			return true
-		}
-
-		res = append(res, newObject)
+		res = append(res, *obj)
 		return true
 	})
 
@@ -311,20 +300,13 @@ func (db *MemoryStorage) GetNRange(path string, limit int, from, to int64) ([]me
 
 // Peek returns the created and updated timestamps for a key.
 // If the key doesn't exist, returns (now, 0) to indicate a new entry.
-func (db *MemoryStorage) Peek(key string, now int64) (int64, int64) {
-	previous, found := db.mem.Load(key)
+func (db *MemoryStorage) Peek(k string, now int64) (int64, int64) {
+	previous, found := db.mem.Load(k)
 	if !found {
 		return now, 0
 	}
-
-	oldObject, err := meta.DecodePooled(previous.([]byte))
-	if err != nil {
-		return now, 0
-	}
-	created := oldObject.Created
-	meta.PutObject(oldObject)
-
-	return created, now
+	// Direct struct access - no JSON decode needed
+	return previous.(*meta.Object).Created, now
 }
 
 // Set a value
@@ -335,7 +317,7 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 	if len(data) == 0 {
 		return path, ErrInvalidStorageData
 	}
-	if key.LastIndex(path) == "*" {
+	if key.IsGlob(path) {
 		return path, ErrGlobNotAllowed
 	}
 
@@ -343,13 +325,14 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 
 	index := key.LastIndex(path)
 	created, updated := db.Peek(path, now)
-	db.mem.Store(path, meta.New(&meta.Object{
+	// Store struct directly - no JSON encoding on write
+	db.mem.Store(path, &meta.Object{
 		Created: created,
 		Updated: updated,
 		Index:   index,
 		Path:    path,
 		Data:    data,
-	}))
+	})
 
 	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
 		db.watcher <- StorageEvent{Key: path, Operation: "set"}
@@ -367,9 +350,7 @@ func (db *MemoryStorage) Push(path string, data json.RawMessage) (string, error)
 		return "", ErrInvalidStorageData
 	}
 
-	// Path must end with glob pattern
-	lastPath := key.LastIndex(path)
-	if lastPath != "*" {
+	if !key.IsGlob(path) {
 		return "", ErrGlobRequired
 	}
 
@@ -378,13 +359,14 @@ func (db *MemoryStorage) Push(path string, data json.RawMessage) (string, error)
 	index := key.LastIndex(newPath)
 	now := monotonic.Now()
 
-	db.mem.Store(newPath, meta.New(&meta.Object{
+	// Store struct directly - no JSON encoding on write
+	db.mem.Store(newPath, &meta.Object{
 		Created: now,
 		Updated: now,
 		Index:   index,
 		Path:    newPath,
 		Data:    data,
-	}))
+	})
 
 	if !key.Contains(db.noBroadcastKeys, newPath) && db.Active() {
 		db.watcher <- StorageEvent{Key: newPath, Operation: "set"}
@@ -400,14 +382,10 @@ func (db *MemoryStorage) patchSingle(path string, data json.RawMessage, now int6
 		return path, ErrNotFound
 	}
 
-	obj, err := meta.DecodePooled(raw.([]byte))
-	if err != nil {
-		return path, err
-	}
-	objData := obj.Data
-	meta.PutObject(obj)
+	// Direct struct access - no JSON decode needed
+	obj := raw.(*meta.Object)
 
-	merged, info, err := merge.MergeBytes(objData, data)
+	merged, info, err := merge.MergeBytes(obj.Data, data)
 	if err != nil {
 		return path, err
 	}
@@ -418,13 +396,14 @@ func (db *MemoryStorage) patchSingle(path string, data json.RawMessage, now int6
 
 	index := key.LastIndex(path)
 	created, updated := db.Peek(path, now)
-	db.mem.Store(path, meta.New(&meta.Object{
+	// Store struct directly - no JSON encoding on write
+	db.mem.Store(path, &meta.Object{
 		Created: created,
 		Updated: updated,
 		Index:   index,
 		Path:    path,
 		Data:    merged,
-	}))
+	})
 
 	return path, nil
 }
@@ -439,7 +418,7 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 	}
 
 	now := monotonic.Now()
-	if !strings.Contains(path, "*") {
+	if !key.HasGlob(path) {
 		index, err := db.patchSingle(path, data, now)
 		if err != nil {
 			return path, err
@@ -478,13 +457,14 @@ func (db *MemoryStorage) SetWithMeta(path string, data json.RawMessage, created 
 		return path, ErrInvalidPath
 	}
 	index := key.LastIndex(path)
-	db.mem.Store(path, meta.New(&meta.Object{
+	// Store struct directly - no JSON encoding on write
+	db.mem.Store(path, &meta.Object{
 		Created: created,
 		Updated: updated,
 		Index:   index,
 		Path:    path,
 		Data:    data,
-	}))
+	})
 
 	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
 		db.watcher <- StorageEvent{Key: path, Operation: "set"}
@@ -494,7 +474,7 @@ func (db *MemoryStorage) SetWithMeta(path string, data json.RawMessage, created 
 
 // Del a key/pattern value(s)
 func (db *MemoryStorage) Del(path string) error {
-	if !strings.Contains(path, "*") {
+	if !key.HasGlob(path) {
 		_, found := db.mem.Load(path)
 		if !found {
 			return ErrNotFound

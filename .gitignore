@@ -11,3 +11,4 @@ ooo-fuzz.zip
 *.prof
 *.test
 ooo.test.exe
+coverage.out

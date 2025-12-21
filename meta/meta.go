@@ -34,25 +34,6 @@ var objectPool = sync.Pool{
 	},
 }
 
-// readerPool is a pool of bytes.Reader for reducing allocations in decode operations.
-var readerPool = sync.Pool{
-	New: func() any {
-		return new(bytes.Reader)
-	},
-}
-
-// getReader gets a reader from the pool and resets it with the given data.
-func getReader(data []byte) *bytes.Reader {
-	r := readerPool.Get().(*bytes.Reader)
-	r.Reset(data)
-	return r
-}
-
-// putReader returns a reader to the pool.
-func putReader(r *bytes.Reader) {
-	readerPool.Put(r)
-}
-
 // GetObject gets an Object from the pool. Call PutObject when done.
 func GetObject() *Object {
 	return objectPool.Get().(*Object)

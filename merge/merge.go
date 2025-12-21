@@ -4,6 +4,7 @@ package merge
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -11,6 +12,13 @@ import (
 	"sync"
 
 	"github.com/goccy/go-json"
+)
+
+var (
+	ErrDataJSON    = errors.New("merge: error in data JSON")
+	ErrPatchJSON   = errors.New("merge: error in patch JSON")
+	ErrMergedJSON  = errors.New("merge: error writing merged JSON")
+	ErrPatchObject = errors.New("merge: patch value must be object")
 )
 
 // bufferPool is a pool of bytes.Buffer for reducing allocations in merge operations.
@@ -30,28 +38,6 @@ func getBuffer() *bytes.Buffer {
 // putBuffer returns a buffer to the pool.
 func putBuffer(buf *bytes.Buffer) {
 	bufferPool.Put(buf)
-}
-
-// infoPool is a pool of Info structs for reducing allocations.
-var infoPool = sync.Pool{
-	New: func() any {
-		return &Info{
-			Replaced: make(map[string]any),
-		}
-	},
-}
-
-// getInfo gets an Info from the pool and resets it.
-func getInfo() *Info {
-	info := infoPool.Get().(*Info)
-	info.Errors = info.Errors[:0]
-	clear(info.Replaced)
-	return info
-}
-
-// putInfo returns an Info to the pool.
-func putInfo(info *Info) {
-	infoPool.Put(info)
 }
 
 // Info describes result of merge operation
@@ -82,7 +68,7 @@ func (info *Info) mergeValue(path []string, patch map[string]any, key string, va
 	_, ok := value.(map[string]any)
 	if ok {
 		if !patchValueIsObject {
-			err := fmt.Errorf("patch value must be object for key \"%v\"", pathStr)
+			err := fmt.Errorf("%w for key \"%v\"", ErrPatchObject, pathStr)
 			info.Errors = append(info.Errors, err)
 			return value
 		}
@@ -197,13 +183,13 @@ func MergeBytesIndent(dataBuff, patchBuff []byte, prefix, indent string) (merged
 
 	err = unmarshalJSON(dataBuff, &data)
 	if err != nil {
-		err = fmt.Errorf("error in data JSON: %v", err)
+		err = fmt.Errorf("%w: %w", ErrDataJSON, err)
 		return
 	}
 
 	err = unmarshalJSON(patchBuff, &patch)
 	if err != nil {
-		err = fmt.Errorf("error in patch JSON: %v", err)
+		err = fmt.Errorf("%w: %w", ErrPatchJSON, err)
 		return
 	}
 
@@ -211,7 +197,7 @@ func MergeBytesIndent(dataBuff, patchBuff []byte, prefix, indent string) (merged
 
 	mergedBuff, err = json.MarshalIndent(merged, prefix, indent)
 	if err != nil {
-		err = fmt.Errorf("error writing merged JSON: %v", err)
+		err = fmt.Errorf("%w: %w", ErrMergedJSON, err)
 	}
 
 	return
@@ -226,13 +212,13 @@ func MergeBytes(dataBuff, patchBuff []byte) (mergedBuff []byte, info *Info, err 
 
 	err = unmarshalJSON(dataBuff, &data)
 	if err != nil {
-		err = fmt.Errorf("error in data JSON: %v", err)
+		err = fmt.Errorf("%w: %w", ErrDataJSON, err)
 		return
 	}
 
 	err = unmarshalJSON(patchBuff, &patch)
 	if err != nil {
-		err = fmt.Errorf("error in patch JSON: %v", err)
+		err = fmt.Errorf("%w: %w", ErrPatchJSON, err)
 		return
 	}
 
@@ -244,7 +230,7 @@ func MergeBytes(dataBuff, patchBuff []byte) (mergedBuff []byte, info *Info, err 
 	err = encoder.Encode(merged)
 	if err != nil {
 		putBuffer(buf)
-		err = fmt.Errorf("error writing merged JSON: %v", err)
+		err = fmt.Errorf("%w: %w", ErrMergedJSON, err)
 		return
 	}
 
