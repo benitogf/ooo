@@ -40,6 +40,25 @@ func putBuffer(buf *bytes.Buffer) {
 	bufferPool.Put(buf)
 }
 
+// readerPool is a pool of bytes.Reader for reducing allocations in unmarshal operations.
+var readerPool = sync.Pool{
+	New: func() any {
+		return bytes.NewReader(nil)
+	},
+}
+
+// getReader gets a reader from the pool and resets it with the given data.
+func getReader(data []byte) *bytes.Reader {
+	r := readerPool.Get().(*bytes.Reader)
+	r.Reset(data)
+	return r
+}
+
+// putReader returns a reader to the pool.
+func putReader(r *bytes.Reader) {
+	readerPool.Put(r)
+}
+
 // Info describes result of merge operation
 type Info struct {
 	// Errors is slice of non-critical errors of merge operations
@@ -247,7 +266,9 @@ func MergeBytes(dataBuff, patchBuff []byte) (mergedBuff []byte, info *Info, err 
 }
 
 func unmarshalJSON(buff []byte, data any) error {
-	decoder := json.NewDecoder(bytes.NewReader(buff))
+	reader := getReader(buff)
+	defer putReader(reader)
+	decoder := json.NewDecoder(reader)
 	decoder.UseNumber()
 
 	return decoder.Decode(data)

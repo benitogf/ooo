@@ -304,3 +304,31 @@ func (r ListFilter) Check(path string, objs []meta.Object, static bool) ([]meta.
 
 	return r[match].apply(path, objs)
 }
+
+// Paths returns all unique registered filter paths.
+// This is useful for preallocating stream pools based on configured routes.
+func (f *Filters) Paths() []string {
+	seen := make(map[string]struct{})
+
+	for _, filter := range f.Write {
+		seen[filter.path] = struct{}{}
+	}
+	for _, filter := range f.ReadObject {
+		seen[filter.path] = struct{}{}
+	}
+	for _, filter := range f.ReadList {
+		seen[filter.path] = struct{}{}
+	}
+	for _, filter := range f.Delete {
+		seen[filter.path] = struct{}{}
+	}
+	for _, filter := range f.AfterWrite {
+		seen[filter.path] = struct{}{}
+	}
+
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	return paths
+}

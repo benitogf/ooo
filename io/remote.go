@@ -16,10 +16,12 @@ import (
 )
 
 var (
-	ErrClientRequired = errors.New("io: Client is required")
-	ErrHostRequired   = errors.New("io: Host is required")
-	ErrRequestFailed  = errors.New("io: request failed")
-	ErrEmptyKey       = errors.New("io: empty key")
+	ErrClientRequired     = errors.New("io: Client is required")
+	ErrHostRequired       = errors.New("io: Host is required")
+	ErrRequestFailed      = errors.New("io: request failed")
+	ErrEmptyKey           = errors.New("io: empty key")
+	ErrPathGlobRequired   = errors.New("io: path glob is required")
+	ErrPathGlobNotAllowed = errors.New("io: path glob is not allowed")
 )
 
 const (
@@ -58,6 +60,11 @@ type RemoteConfig struct {
 	Header          http.Header
 	Retry           RetryConfig
 	MaxResponseSize int64 // Maximum response body size in bytes (0 = use default)
+}
+
+// indexResponse is used to decode the server's POST response which only contains the index.
+type IndexResponse struct {
+	Index string `json:"index"`
 }
 
 // URL returns the full URL for a given path based on the config.
@@ -190,10 +197,107 @@ func RemoteSetWithContext[T any](ctx context.Context, cfg RemoteConfig, path str
 	return err
 }
 
+// RemoteSetWithResponse stores an item at the given path and returns the response.
+// After setting, it fetches the object to return the full metadata.
+func RemoteSetWithResponse[T any](cfg RemoteConfig, path string, item T) (IndexResponse, error) {
+	return RemoteSetWithResponseContext(context.Background(), cfg, path, item)
+}
+
+// RemoteSetWithResponseContext stores an item at the given path with context support and returns the response.
+// After setting, it fetches the object to return the full metadata.
+func RemoteSetWithResponseContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) (IndexResponse, error) {
+	if err := cfg.Validate(); err != nil {
+		return IndexResponse{}, err
+	}
+	if key.IsGlob(path) {
+		log.Println("RemoteSet["+path+"]: ", ErrPathGlobNotAllowed)
+		return IndexResponse{}, ErrPathGlobNotAllowed
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		log.Printf("RemoteSet[%s]: failed to marshal data: %v", path, err)
+		return IndexResponse{}, err
+	}
+
+	result, err := cfg.doWithRetry(ctx, "RemoteSet", path, func() (*http.Request, error) {
+		req, err := http.NewRequest("POST", cfg.URL(path), bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range cfg.Header {
+			req.Header[k] = v
+		}
+		return req, nil
+	})
+
+	// Parse the index from the response
+	var idxResp IndexResponse
+	err = json.Unmarshal(result.body, &idxResp)
+	if err != nil || idxResp.Index == "" {
+		log.Printf("RemotePushWithResponse[%s]: failed to decode index response: %v", path, err)
+		return IndexResponse{}, err
+	}
+
+	return idxResp, err
+}
+
 // RemotePush adds an item to a list path (glob path only).
 // Use RemotePushWithContext for cancellation support.
 func RemotePush[T any](cfg RemoteConfig, path string, item T) error {
 	return RemotePushWithContext(context.Background(), cfg, path, item)
+}
+
+// RemotePushWithResponse adds an item to a list path and returns the response.
+// After pushing, it fetches the created object to return the full metadata.
+func RemotePushWithResponse[T any](cfg RemoteConfig, path string, item T) (IndexResponse, error) {
+	return RemotePushWithResponseContext(context.Background(), cfg, path, item)
+}
+
+// RemotePushWithResponseContext adds an item to a list path with context support and returns the response.
+// After pushing, it fetches the created object to return the full metadata.
+func RemotePushWithResponseContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) (IndexResponse, error) {
+	if err := cfg.Validate(); err != nil {
+		return IndexResponse{}, err
+	}
+	if !key.IsGlob(path) {
+		log.Println("RemotePushWithResponse["+path+"]: ", ErrPathGlobRequired)
+		return IndexResponse{}, ErrPathGlobRequired
+	}
+
+	_path := key.Build(path)
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		log.Printf("RemotePushWithResponse[%s]: failed to marshal data: %v", path, err)
+		return IndexResponse{}, err
+	}
+
+	result, err := cfg.doWithRetry(ctx, "RemotePushWithResponse", path, func() (*http.Request, error) {
+		req, err := http.NewRequest("POST", cfg.URL(_path), bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range cfg.Header {
+			req.Header[k] = v
+		}
+		return req, nil
+	})
+	if err != nil {
+		return IndexResponse{}, err
+	}
+
+	// Parse the index from the response
+	var idxResp IndexResponse
+	err = json.Unmarshal(result.body, &idxResp)
+	if err != nil || idxResp.Index == "" {
+		log.Printf("RemotePushWithResponse[%s]: failed to decode index response: %v", path, err)
+		return IndexResponse{}, err
+	}
+
+	return idxResp, nil
 }
 
 // RemotePushWithContext adds an item to a list path with context support.

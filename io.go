@@ -1,10 +1,9 @@
-package io
+package ooo
 
 import (
 	"errors"
 	"log"
 
-	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
 	"github.com/goccy/go-json"
@@ -15,7 +14,7 @@ var (
 	ErrPathGlobNotAllowed = errors.New("io: path glob not allowed")
 )
 
-func GetList[T any](server *ooo.Server, path string) ([]client.Meta[T], error) {
+func GetList[T any](server *Server, path string) ([]client.Meta[T], error) {
 	var result []client.Meta[T]
 	if !key.IsGlob(path) {
 		log.Println("GetList["+path+"]: ", ErrPathGlobRequired)
@@ -46,7 +45,7 @@ func GetList[T any](server *ooo.Server, path string) ([]client.Meta[T], error) {
 	return result, nil
 }
 
-func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
+func Get[T any](server *Server, path string) (client.Meta[T], error) {
 	var result client.Meta[T]
 	if key.IsGlob(path) {
 		log.Println("Get["+path+"]: ", ErrPathGlobNotAllowed)
@@ -72,7 +71,7 @@ func Get[T any](server *ooo.Server, path string) (client.Meta[T], error) {
 	}, nil
 }
 
-func Set[T any](server *ooo.Server, path string, item T) error {
+func Set[T any](server *Server, path string, item T) error {
 	if key.IsGlob(path) {
 		log.Println("Set["+path+"]: ", ErrPathGlobNotAllowed)
 		return ErrPathGlobNotAllowed
@@ -87,7 +86,7 @@ func Set[T any](server *ooo.Server, path string, item T) error {
 	return err
 }
 
-func Push[T any](server *ooo.Server, path string, item T) (string, error) {
+func Push[T any](server *Server, path string, item T) (string, error) {
 	data, err := json.Marshal(item)
 	if err != nil {
 		log.Println("Push["+path+"]: failed to marshal data", err)

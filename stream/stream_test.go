@@ -4,7 +4,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"strconv"
 	"sync"
 	"testing"
 
@@ -112,32 +111,6 @@ func TestPatch(t *testing.T) {
 	require.Equal(t, 1, len(stream.pools))
 	require.Equal(t, testKey, stream.pools[testKey].Key)
 	require.Equal(t, 0, len(stream.pools[testKey].connections))
-}
-
-func BenchmarkBuildMessage(b *testing.B) {
-	data := `{"created":1234567890,"updated":1234567891,"index":"abc123","data":{"field":"value"}}`
-	snapshot := true
-	version := int64(0x1a2b3c4d5e6f)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Current implementation using string concatenation
-		_ = []byte("{" +
-			"\"snapshot\":" + strconv.FormatBool(snapshot) + "," +
-			"\"version\":\"" + strconv.FormatInt(version, 16) + "\"," +
-			"\"data\":" + data + "}")
-	}
-}
-
-func BenchmarkBuildMessageOptimized(b *testing.B) {
-	data := `{"created":1234567890,"updated":1234567891,"index":"abc123","data":{"field":"value"}}`
-	snapshot := true
-	version := int64(0x1a2b3c4d5e6f)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_ = buildMessage([]byte(data), snapshot, version)
-	}
 }
 
 func TestConcurrentBroadcast(t *testing.T) {

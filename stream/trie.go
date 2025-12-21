@@ -144,6 +144,36 @@ func (t *poolTrie) removeRecursive(node *trieNode, path string, numSegments, dep
 	return removed
 }
 
+// seenPool is a pool of maps for deduplicating results in findMatching.
+var seenPool = sync.Pool{
+	New: func() any {
+		return make(map[*Pool]struct{}, 8)
+	},
+}
+
+// getSeenMap gets a map from the pool and clears it.
+func getSeenMap() map[*Pool]struct{} {
+	m := seenPool.Get().(map[*Pool]struct{})
+	clear(m)
+	return m
+}
+
+// putSeenMap returns a map to the pool.
+func putSeenMap(m map[*Pool]struct{}) {
+	seenPool.Put(m)
+}
+
+// hasWildcardSegment checks if path contains a wildcard segment.
+// Uses a simple byte scan which is faster than strings.Contains for short paths.
+func hasWildcardSegment(path string) bool {
+	for i := 0; i < len(path); i++ {
+		if path[i] == '*' {
+			return true
+		}
+	}
+	return false
+}
+
 // findMatching finds all pools that match the given path using key.Peer logic.
 // This is the core optimization: instead of checking all pools, we traverse
 // only the relevant branches of the trie.
@@ -151,9 +181,10 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	// Use a map to deduplicate results
-	seen := make(map[*Pool]struct{})
+	// Use a pooled map to deduplicate results
+	seen := getSeenMap()
 	numSegments := countSegments(path)
+	hasWildcard := hasWildcardSegment(path)
 
 	// We need to find pools where:
 	// 1. pool.Key matches path (pool has wildcard that matches path)
@@ -162,17 +193,19 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 	// For case 1: traverse trie, at each level check both exact match and "*"
 	// For case 2: if path contains "*", we need to check all pools at that level
 
-	t.matchRecursive(t.root, path, numSegments, 0, seen)
+	t.matchRecursive(t.root, path, numSegments, 0, hasWildcard, seen)
 
 	results := make([]*Pool, 0, len(seen))
 	for pool := range seen {
 		results = append(results, pool)
 	}
+	putSeenMap(seen)
 	return results
 }
 
 // matchRecursive traverses the trie to find matching pools.
-func (t *poolTrie) matchRecursive(node *trieNode, path string, numSegments, depth int, seen map[*Pool]struct{}) {
+// hasWildcard indicates if the path contains any "*" segments (pre-computed for efficiency).
+func (t *poolTrie) matchRecursive(node *trieNode, path string, numSegments, depth int, hasWildcard bool, seen map[*Pool]struct{}) {
 	if depth == numSegments {
 		// We've consumed all path segments
 		// Check if there's a pool at this exact location
@@ -190,28 +223,29 @@ func (t *poolTrie) matchRecursive(node *trieNode, path string, numSegments, dept
 
 	// Case 1: Exact segment match
 	if child, exists := node.children[seg]; exists {
-		t.matchRecursive(child, path, numSegments, depth+1, seen)
+		t.matchRecursive(child, path, numSegments, depth+1, hasWildcard, seen)
 	}
 
 	// Case 2: Wildcard in trie matches any segment in path
 	// e.g., pool="users/*" should match path="users/123"
 	if seg != "*" {
 		if wildcard, exists := node.children["*"]; exists {
-			t.matchRecursive(wildcard, path, numSegments, depth+1, seen)
+			t.matchRecursive(wildcard, path, numSegments, depth+1, hasWildcard, seen)
 		}
 	}
 
 	// Case 3: Wildcard in path matches any segment in trie
 	// e.g., path="users/*" should match pool="users/123"
-	if seg == "*" {
+	// Only check this if the path actually contains wildcards (optimization)
+	if hasWildcard && seg == "*" {
 		for childSeg, child := range node.children {
 			if childSeg != "*" {
-				t.matchRecursive(child, path, numSegments, depth+1, seen)
+				t.matchRecursive(child, path, numSegments, depth+1, hasWildcard, seen)
 			}
 		}
 		// Also match wildcard to wildcard
 		if wildcard, exists := node.children["*"]; exists {
-			t.matchRecursive(wildcard, path, numSegments, depth+1, seen)
+			t.matchRecursive(wildcard, path, numSegments, depth+1, hasWildcard, seen)
 		}
 	}
 }

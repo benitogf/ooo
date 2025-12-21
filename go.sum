@@ -4,8 +4,6 @@ github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec h1:I2p/9YsiAMB+J2DrC
 github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec/go.mod h1:hl/Xd8DKuMgC/ClZ2dPZz6mvXaxdkjrt0mr0+jF4UkQ=
 github.com/benitogf/jsondiff v0.0.0-20220926080659-c3db9b84b559 h1:0ERndS9JkEvEq/yXjiZq41lMb3QfmQWUIXycjkRbWOc=
 github.com/benitogf/jsondiff v0.0.0-20220926080659-c3db9b84b559/go.mod h1:gg2qmcNCGq/FXh5kQpsaEIf6GebYe2JMKrDSqZkuImc=
-github.com/benitogf/jsonpatch v0.0.0-20250219100646-458e71efe70d h1:ZpQQZiG0Lca3Vb9EPVD2aOwRQiDBRXrpTCg1tF397Hk=
-github.com/benitogf/jsonpatch v0.0.0-20250219100646-458e71efe70d/go.mod h1:O1Z+hTPUrXzHUjmKlpmNYK9wcncZ5rS3K8PqItDO0x0=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=

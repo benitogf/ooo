@@ -109,6 +109,32 @@ func (sm *Stream) InitClock() {
 	}
 }
 
+// PreallocatePools pre-allocates Pool structs for known paths.
+// This avoids allocation overhead when the first connection arrives.
+// Useful when you know the set of paths that will be used upfront.
+func (sm *Stream) PreallocatePools(paths []string) {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	if sm.pools == nil {
+		sm.pools = make(map[string]*Pool, len(paths))
+	}
+	if sm.poolIndex == nil {
+		sm.poolIndex = newPoolTrie()
+	}
+
+	for _, path := range paths {
+		if _, exists := sm.pools[path]; !exists {
+			pool := &Pool{
+				Key:         path,
+				connections: make([]*Conn, 0, 4), // Pre-allocate small capacity
+			}
+			sm.pools[path] = pool
+			sm.poolIndex.insert(path, pool)
+		}
+	}
+}
+
 // New stream on a key
 func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request) (*Conn, error) {
 	err := sm.OnSubscribe(key)
@@ -140,8 +166,10 @@ func (sm *Stream) new(key string, wsClient *websocket.Conn) *Conn {
 		if sm.clockPool == nil {
 			sm.clockPool = &Pool{Key: ""}
 		}
+		sm.clockPool.mutex.Lock()
 		sm.clockPool.connections = append(sm.clockPool.connections, client)
 		sm.Console.Log("clock connections: ", len(sm.clockPool.connections))
+		sm.clockPool.mutex.Unlock()
 		return client
 	}
 
@@ -158,9 +186,11 @@ func (sm *Stream) new(key string, wsClient *websocket.Conn) *Conn {
 		return client
 	}
 
-	// use existing pool
+	// use existing pool - need pool.mutex to avoid race with broadcastPool
+	pool.mutex.Lock()
 	pool.connections = append(pool.connections, client)
 	sm.Console.Log("connections["+key+"]: ", len(pool.connections))
+	pool.mutex.Unlock()
 	return client
 }
 
@@ -185,12 +215,16 @@ func (sm *Stream) Close(key string, client *Conn) {
 	// Handle clock pool (empty key) specially
 	if key == "" {
 		if sm.clockPool != nil {
+			sm.clockPool.mutex.Lock()
 			sm.clockPool.connections = removeConn(sm.clockPool.connections, client)
+			sm.clockPool.mutex.Unlock()
 		}
 	} else {
 		pool := sm.getPool(key)
 		if pool != nil {
+			pool.mutex.Lock()
 			pool.connections = removeConn(pool.connections, client)
+			pool.mutex.Unlock()
 		}
 	}
 	sm.mutex.Unlock()
@@ -247,6 +281,7 @@ func (sm *Stream) patchPool(pool *Pool, data []byte) ([]byte, bool, int64) {
 		version := sm.setCachePool(pool, data)
 		return data, true, version
 	}
+
 	patch, err := jsonpatch.CreatePatch(pool.cache.Data, data)
 	if err != nil {
 		sm.Console.Err("patch create failed", err)

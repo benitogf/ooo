@@ -122,3 +122,13 @@ func TestStreamLimitFilter(t *testing.T) {
 	defer app.Close(os.Interrupt)
 	StreamLimitFilterTest(t, app)
 }
+
+func TestBeforeRead(t *testing.T) {
+	db := &MemoryStorage{}
+	err := db.Start(StorageOpt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	StorageBeforeReadTest(db, t)
+}

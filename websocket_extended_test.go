@@ -2,7 +2,6 @@ package ooo
 
 import (
 	"errors"
-	"log"
 	"net/url"
 	"os"
 	"strconv"
@@ -95,12 +94,12 @@ func TestWebSocketWithVersion(t *testing.T) {
 	require.NoError(t, err)
 
 	// wait for the broadcast of the write to generate a new version
-	time.Sleep(100 * time.Millisecond)
+	// time.Sleep(1 * time.Millisecond)
 	// Get current version
 	entry, err := app.fetch("versiontest")
 	require.NoError(t, err)
 
-	log.Println("versiontest", strconv.FormatInt(entry.Version, 16))
+	// log.Println("versiontest", strconv.FormatInt(entry.Version, 16))
 	// Connect with matching version (should not receive initial data)
 	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/versiontest"}
 	q := u.Query()
@@ -112,7 +111,7 @@ func TestWebSocketWithVersion(t *testing.T) {
 	defer c.Close()
 
 	// Set read deadline to avoid blocking
-	c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+	c.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
 
 	// Should not receive initial message due to version match
 	_, _, err = c.ReadMessage()

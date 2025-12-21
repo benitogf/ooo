@@ -16,7 +16,7 @@ func TestWsTime(t *testing.T) {
 	var wg sync.WaitGroup
 	app := Server{}
 	app.Silence = true
-	app.Tick = 100 * time.Millisecond
+	app.Tick = 1 * time.Millisecond
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
 	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/"}

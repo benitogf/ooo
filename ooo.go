@@ -427,6 +427,8 @@ func (app *Server) StartWithError(address string) error {
 	app.startErr = make(chan error, 1)
 	app.defaults()
 	app.setupRoutes()
+	// Preallocate stream pools for all registered filter paths
+	app.Stream.PreallocatePools(app.filters.Paths())
 	app.wg.Add(1)
 	go app.waitListen()
 	app.wg.Wait()

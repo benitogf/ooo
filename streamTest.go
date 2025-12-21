@@ -1,11 +1,8 @@
 package ooo
 
 import (
-	"bytes"
 	"context"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"sync"
@@ -18,6 +15,7 @@ import (
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/jsonpatch"
 	"github.com/benitogf/ooo/client"
+	ooio "github.com/benitogf/ooo/io"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
 	"github.com/gorilla/mux"
@@ -26,16 +24,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// remoteConfig creates a RemoteConfig for the given server
+func remoteConfig(server *Server) ooio.RemoteConfig {
+	return ooio.RemoteConfig{
+		Client: &http.Client{},
+		Host:   server.Address,
+	}
+}
+
 // StreamBroadcastTest testing stream function
-func StreamBroadcastTest(t *testing.T, app *Server) {
+func StreamBroadcastTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
 	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
 	var lk sync.Mutex
-	var postObject meta.Object
+	var postIndexResponse ooio.IndexResponse
 	var wsObject meta.Object
 	var wsEvent messages.Message
 	var wsCache json.RawMessage
-	wsURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test"}
+	cfg := remoteConfig(server)
+	wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test"}
 	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	require.NoError(t, err)
 	wg.Add(1)
@@ -49,7 +56,7 @@ func StreamBroadcastTest(t *testing.T, app *Server) {
 			wsEvent, err = messages.DecodeBuffer(message)
 			lk.Unlock()
 			expect.Nil(err)
-			app.Console.Log("read wsClient", wsEvent.Data)
+			server.Console.Log("read wsClient", wsEvent.Data)
 			wg.Done()
 		}
 	}()
@@ -60,18 +67,11 @@ func StreamBroadcastTest(t *testing.T, app *Server) {
 	wsVersion, err := strconv.ParseInt(wsEvent.Version, 16, 64)
 	lk.Unlock()
 	require.NoError(t, err)
-	streamCacheVersion, err := app.Stream.GetCacheVersion("test")
+	streamCacheVersion, err := server.Stream.GetCacheVersion("test")
 	require.NoError(t, err)
-	app.Console.Log("post data")
-	req := httptest.NewRequest("POST", "/test", bytes.NewBuffer(TEST_DATA))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	body, err := io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	postIndexResponse, err = ooio.RemoteSetWithResponse(cfg, "test", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	require.Equal(t, wsVersion, streamCacheVersion)
 	wg.Wait()
 	wg.Add(1)
@@ -90,15 +90,12 @@ func StreamBroadcastTest(t *testing.T, app *Server) {
 		wsCache = wsEvent.Data
 	}
 
-	require.Equal(t, wsObject.Index, postObject.Index)
+	require.Equal(t, wsObject.Index, postIndexResponse.Index)
 	same, _ := jsondiff.Compare(wsObject.Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 
-	req = httptest.NewRequest("DELETE", "/test", nil)
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	err = ooio.RemoteDelete(cfg, "test")
+	require.NoError(t, err)
 	wg.Wait()
 
 	if !wsEvent.Snapshot {
@@ -119,15 +116,16 @@ func StreamBroadcastTest(t *testing.T, app *Server) {
 }
 
 // StreamItemGlobBroadcastTest testing stream function
-func StreamItemGlobBroadcastTest(t *testing.T, app *Server) {
+func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
 	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
 	var lk sync.Mutex
-	var postObject meta.Object
+	var postIndexResponse ooio.IndexResponse
 	var wsObject meta.Object
 	var wsEvent messages.Message
 	var wsCache json.RawMessage
-	wsURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/1"}
+	cfg := remoteConfig(server)
+	wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/1"}
 	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	require.NoError(t, err)
 	wg.Add(1)
@@ -141,7 +139,7 @@ func StreamItemGlobBroadcastTest(t *testing.T, app *Server) {
 			wsEvent, err = messages.DecodeBuffer(message)
 			lk.Unlock()
 			expect.Nil(err)
-			app.Console.Log("read wsClient", wsEvent.Data)
+			server.Console.Log("read wsClient", wsEvent.Data)
 			wg.Done()
 		}
 	}()
@@ -150,16 +148,8 @@ func StreamItemGlobBroadcastTest(t *testing.T, app *Server) {
 	lk.Lock()
 	wsCache = wsEvent.Data
 	lk.Unlock()
-	var jsonStr = []byte(TEST_DATA)
-	req := httptest.NewRequest("POST", "/test/1", bytes.NewBuffer(jsonStr))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	body, err := io.ReadAll(resp.Body)
+	postIndexResponse, err = ooio.RemoteSetWithResponse[json.RawMessage](cfg, "test/1", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 	patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
 	require.NoError(t, err)
@@ -169,16 +159,13 @@ func StreamItemGlobBroadcastTest(t *testing.T, app *Server) {
 	require.NoError(t, err)
 	wsCache = modified
 
-	require.Equal(t, wsObject.Index, postObject.Index)
+	require.Equal(t, wsObject.Index, postIndexResponse.Index)
 	same, _ := jsondiff.Compare(wsObject.Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 
 	wg.Add(1)
-	req = httptest.NewRequest("DELETE", "/test/*", nil)
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	err = ooio.RemoteDelete(cfg, "test/*")
+	require.NoError(t, err)
 	wg.Wait()
 
 	patch, err = jsonpatch.DecodePatch([]byte(wsEvent.Data))
@@ -194,15 +181,16 @@ func StreamItemGlobBroadcastTest(t *testing.T, app *Server) {
 }
 
 // StreamGlobBroadcastTest testing stream function
-func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
+func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	var wg sync.WaitGroup
 	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
 	var lk sync.Mutex
-	var postObject meta.Object
+	var indexResponse ooio.IndexResponse
 	var wsObjects []meta.Object
 	var wsEvent messages.Message
 	var wsCache json.RawMessage
-	wsURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/*"}
+	cfg := remoteConfig(server)
+	wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/*"}
 	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	require.NoError(t, err)
 	wg.Add(1)
@@ -216,7 +204,7 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 			wsEvent, err = messages.DecodeBuffer(message)
 			lk.Unlock()
 			expect.Nil(err)
-			// app.Console.Log("read wsClient", wsEvent.Data)
+			// server.Console.Log("read wsClient", wsEvent.Data)
 			wg.Done()
 		}
 	}()
@@ -225,19 +213,12 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 	lk.Lock()
 	wsCache = wsEvent.Data
 	lk.Unlock()
-	app.Console.Log("post data")
+	server.Console.Log("post data")
 	keys := []string{}
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		req := httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-		w := httptest.NewRecorder()
-		app.Router.ServeHTTP(w, req)
-		resp := w.Result()
-		body, err := io.ReadAll(resp.Body)
+		indexResponse, err = ooio.RemotePushWithResponse(cfg, "test/*", TEST_DATA)
 		require.NoError(t, err)
-		err = json.Unmarshal(body, &postObject)
-		require.NoError(t, err)
-		require.Equal(t, 200, resp.StatusCode)
 		wg.Wait()
 		lk.Lock()
 		require.False(t, wsEvent.Snapshot)
@@ -249,14 +230,14 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 		require.NoError(t, err)
 		wsCache = modified
 		lk.Unlock()
-		keys = append(keys, postObject.Index)
+		keys = append(keys, indexResponse.Index)
 	}
 
-	require.Equal(t, wsObjects[len(wsObjects)-1].Index, postObject.Index)
+	require.Equal(t, wsObjects[len(wsObjects)-1].Index, indexResponse.Index)
 	same, _ := jsondiff.Compare(wsObjects[len(wsObjects)-1].Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 
-	app.Console.Log("post update data")
+	server.Console.Log("post update data")
 	nextGet := float64(0)
 	Q := 3
 	for i := 0; i < Q; i++ {
@@ -274,18 +255,11 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 			currentRaw := gjson.Get(string(testData), "search_metadata.count")
 			current := currentRaw.Value().(float64)
 			nextSet := current + 1
-			app.Console.Log("post", key, i, nextSet)
+			server.Console.Log("post", key, i, nextSet)
 			newData, err := sjson.Set(string(testData), "search_metadata.count", nextSet)
 			require.NoError(t, err)
-			req := httptest.NewRequest("POST", "/test/"+key, bytes.NewBuffer([]byte(newData)))
-			w := httptest.NewRecorder()
-			app.Router.ServeHTTP(w, req)
-			resp := w.Result()
-			body, err := io.ReadAll(resp.Body)
+			err = ooio.RemoteSet(cfg, "test/"+key, json.RawMessage(newData))
 			require.NoError(t, err)
-			err = json.Unmarshal(body, &postObject)
-			require.NoError(t, err)
-			require.Equal(t, 200, resp.StatusCode)
 			wg.Wait()
 			lk.Lock()
 			require.False(t, wsEvent.Snapshot)
@@ -314,11 +288,8 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 	require.Equal(t, float64(4+Q), nextGet)
 
 	wg.Add(1)
-	req := httptest.NewRequest("DELETE", "/test/*", nil)
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	err = ooio.RemoteDelete(cfg, "test/*")
+	require.NoError(t, err)
 	wg.Wait()
 
 	lk.Lock()
@@ -337,20 +308,20 @@ func StreamGlobBroadcastTest(t *testing.T, app *Server, n int) {
 }
 
 // StreamBroadcastFilterTest testing stream function
-func StreamBroadcastFilterTest(t *testing.T, app *Server) {
+func StreamBroadcastFilterTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
-	var postObject meta.Object
 	var wsExtraEvent messages.Message
 	// extra filter - returns modified list data
-	app.ReadListFilter("test/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+	server.ReadListFilter("test/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
 		// Return a single object with extra data
 		return []meta.Object{{Data: []byte(`{"extra": "extra"}`)}}, nil
 	})
 	// extra route
-	app.Router = mux.NewRouter()
-	app.Start("localhost:0")
-	app.Storage.Clear()
-	wsExtraURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/*"}
+	server.Router = mux.NewRouter()
+	server.Start("localhost:0")
+	server.Storage.Clear()
+	cfg := remoteConfig(server)
+	wsExtraURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/*"}
 	wsExtraClient, _, err := websocket.DefaultDialer.Dial(wsExtraURL.String(), nil)
 	require.NoError(t, err)
 	wg.Add(1)
@@ -362,22 +333,15 @@ func StreamBroadcastFilterTest(t *testing.T, app *Server) {
 			}
 			wsExtraEvent, err = messages.DecodeBuffer(message)
 			expect.Nil(err)
-			app.Console.Log("read wsClient", string(message))
+			server.Console.Log("read wsClient", string(message))
 			wg.Done()
 		}
 	}()
 	wg.Wait()
 	wg.Add(1)
-	app.Console.Log("post data")
-	req := httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	body, err := io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 	wsExtraClient.Close()
 
@@ -387,16 +351,16 @@ func StreamBroadcastFilterTest(t *testing.T, app *Server) {
 }
 
 // StreamBroadcastForcePatchTest testing stream function
-func StreamBroadcastForcePatchTest(t *testing.T, app *Server) {
+func StreamBroadcastForcePatchTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
-	var postObject meta.Object
 	var wsExtraEvent messages.Message
 	// extra route
-	app.Router = mux.NewRouter()
-	app.ForcePatch = true
-	app.Start("localhost:0")
-	app.Storage.Clear()
-	wsExtraURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/*"}
+	server.Router = mux.NewRouter()
+	server.ForcePatch = true
+	server.Start("localhost:0")
+	server.Storage.Clear()
+	cfg := remoteConfig(server)
+	wsExtraURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/*"}
 	wsExtraClient, _, err := websocket.DefaultDialer.Dial(wsExtraURL.String(), nil)
 	require.NoError(t, err)
 	firstMessage := true
@@ -413,77 +377,49 @@ func StreamBroadcastForcePatchTest(t *testing.T, app *Server) {
 				expect.True(!wsExtraEvent.Snapshot)
 			}
 			firstMessage = false
-			app.Console.Log("read wsClient", string(message))
+			server.Console.Log("read wsClient", string(message))
 			wg.Done()
 		}
 	}()
 	wg.Wait()
 	wg.Add(1)
-	app.Console.Log("post data")
-	req := httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	body, err := io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 
 	wg.Add(1)
-	app.Console.Log("post data")
-	req = httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	body, err = io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 
 	wg.Add(1)
-	app.Console.Log("post data")
-	req = httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	body, err = io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 
 	wg.Add(1)
-	app.Console.Log("post data")
-	req = httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	body, err = io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 
 	wsExtraClient.Close()
 }
 
 // StreamBroadcastNoPatchTest testing stream function
-func StreamBroadcastNoPatchTest(t *testing.T, app *Server) {
+func StreamBroadcastNoPatchTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
-	var postObject meta.Object
 	var wsExtraEvent messages.Message
 	// extra route
-	app.Router = mux.NewRouter()
-	app.NoPatch = true
-	app.Start("localhost:0")
-	app.Storage.Clear()
-	wsExtraURL := url.URL{Scheme: "ws", Host: app.Address, Path: "/test/*"}
+	server.Router = mux.NewRouter()
+	server.NoPatch = true
+	server.Start("localhost:0")
+	server.Storage.Clear()
+	cfg := remoteConfig(server)
+	wsExtraURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/*"}
 	wsExtraClient, _, err := websocket.DefaultDialer.Dial(wsExtraURL.String(), nil)
 	require.NoError(t, err)
 	wg.Add(1)
@@ -496,41 +432,27 @@ func StreamBroadcastNoPatchTest(t *testing.T, app *Server) {
 			wsExtraEvent, err = messages.DecodeBuffer(message)
 			expect.Nil(err)
 			expect.True(wsExtraEvent.Snapshot)
-			app.Console.Log("read wsClient", string(message))
+			server.Console.Log("read wsClient", string(message))
 			wg.Done()
 		}
 	}()
 	wg.Wait()
 	wg.Add(1)
-	app.Console.Log("post data")
-	req := httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	body, err := io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 
 	wg.Add(1)
-	app.Console.Log("post data")
-	req = httptest.NewRequest("POST", "/test/*", bytes.NewBuffer(TEST_DATA))
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	body, err = io.ReadAll(resp.Body)
+	server.Console.Log("post data")
+	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
 	require.NoError(t, err)
-	err = json.Unmarshal(body, &postObject)
-	require.NoError(t, err)
-	require.Equal(t, 200, resp.StatusCode)
 	wg.Wait()
 
 	wsExtraClient.Close()
 }
 
-func StreamConcurrentTest(t *testing.T, app *Server, n int) {
+func StreamConcurrentTest(t *testing.T, server *Server, n int) {
 	type TestData struct {
 		SearchMetadata struct {
 			Count float64 `json:"count"`
@@ -546,7 +468,8 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	go client.SubscribeList(client.SubscribeConfig{
 		Ctx:      context.Background(),
 		Protocol: "ws",
-		Host:     app.Address,
+		Host:     server.Address,
+		Silence:  true,
 	}, "/test/*", client.SubscribeListEvents[TestData]{
 		OnMessage: func(m []client.Meta[TestData]) {
 			entriesLock.Lock()
@@ -562,13 +485,13 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	require.Zero(t, len(entries))
 	entriesLock.Unlock()
 
-	app.Console.Log("push data")
+	server.Console.Log("push data")
 	keys := []string{}
 	for i := range n {
 		wg.Add(1)
 		// _key := key.Build("test/*")
 		_key := "test/" + strconv.Itoa(i)
-		_, err := app.Storage.Set(_key, TEST_DATA)
+		_, err := server.Storage.Set(_key, TEST_DATA)
 		require.NoError(t, err)
 		keys = append(keys, _key)
 	}
@@ -579,21 +502,21 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	require.Equal(t, float64(4), entries[0].Data.SearchMetadata.Count)
 	entriesLock.Unlock()
 
-	app.Console.Log("post update data", len(keys))
+	server.Console.Log("post update data", len(keys))
 	Q := 6
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
 			for range Q {
-				currentObj, err := app.Storage.GetAndLock(__key)
+				currentObj, err := server.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
 				nextSet := current + 1
-				app.Console.Log("up1", __key, nextSet)
+				server.Console.Log("up1", __key, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.count", nextSet)
 				expect.Nil(err)
-				_, err = app.Storage.SetAndUnlock(__key, json.RawMessage(newData))
+				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
 				expect.Nil(err)
 			}
 		}(_key)
@@ -603,7 +526,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 		wg.Add(Q)
 		go func(__key string) {
 			for range Q {
-				currentObj, err := app.Storage.GetAndLock(__key)
+				currentObj, err := server.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.something")
 				current := currentRaw.Value().(string)
@@ -611,16 +534,16 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 				if current == "popo" {
 					nextSet = "nopo"
 				}
-				app.Console.Log("up2", __key, nextSet)
+				server.Console.Log("up2", __key, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.something", nextSet)
 				expect.Nil(err)
-				_, err = app.Storage.SetAndUnlock(__key, json.RawMessage(newData))
+				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
 				expect.Nil(err)
 			}
 		}(_key)
 	}
 
-	app.Console.Log("wait update data")
+	server.Console.Log("wait update data")
 	wg.Wait() // updated
 	entriesLock.Lock()
 	require.Equal(t, len(keys), len(entries))
@@ -630,7 +553,7 @@ func StreamConcurrentTest(t *testing.T, app *Server, n int) {
 	entriesLock.Unlock()
 }
 
-func StreamBroadcastPatchTest(t *testing.T, app *Server) {
+func StreamBroadcastPatchTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
 	type TestSubField struct {
 		One   string `json:"one"`
@@ -647,7 +570,8 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 	go client.Subscribe(client.SubscribeConfig{
 		Ctx:      context.Background(),
 		Protocol: "ws",
-		Host:     app.Address,
+		Host:     server.Address,
+		Silence:  true,
 	}, "test", client.SubscribeEvents[TestData]{
 		OnMessage: func(m client.Meta[TestData]) {
 			current = m.Data
@@ -668,7 +592,7 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 	}
 	td, err := json.Marshal(_td)
 	require.NoError(t, err)
-	app.Storage.Set("test", td)
+	server.Storage.Set("test", td)
 	wg.Wait()
 
 	require.Equal(t, 1, len(current.SubFields))
@@ -690,7 +614,7 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 	}
 	td, err = json.Marshal(_td)
 	require.NoError(t, err)
-	app.Storage.Set("test", td)
+	server.Storage.Set("test", td)
 	wg.Wait()
 
 	require.Equal(t, 2, len(current.SubFields))
@@ -699,7 +623,7 @@ func StreamBroadcastPatchTest(t *testing.T, app *Server) {
 // StreamLimitFilterTest tests that the LimitFilter correctly maintains the limit
 // when items are inserted and broadcast to subscribed clients.
 // The client should never see more than the limit number of items due to ReadListFilter.
-func StreamLimitFilterTest(t *testing.T, app *Server) {
+func StreamLimitFilterTest(t *testing.T, server *Server) {
 	type TestItem struct {
 		Value int `json:"value"`
 	}
@@ -711,8 +635,9 @@ func StreamLimitFilterTest(t *testing.T, app *Server) {
 	maxSeen := 0
 
 	// Set up limit filter - uses ReadListFilter to limit view + AfterWrite to cleanup
-	app.LimitFilter("limited/*", limit)
-	app.OpenFilter("limited/*")
+	server.LimitFilter("limited/*", limit)
+	server.OpenFilter("limited/*")
+	cfg := remoteConfig(server)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -722,7 +647,8 @@ func StreamLimitFilterTest(t *testing.T, app *Server) {
 	go client.SubscribeList(client.SubscribeConfig{
 		Ctx:      ctx,
 		Protocol: "ws",
-		Host:     app.Address,
+		Host:     server.Address,
+		Silence:  true,
 	}, "limited/*", client.SubscribeListEvents[TestItem]{
 		OnMessage: func(m []client.Meta[TestItem]) {
 			if len(m) > maxSeen {
@@ -746,11 +672,8 @@ func StreamLimitFilterTest(t *testing.T, app *Server) {
 		} else {
 			wg.Add(2) // insert broadcast + delete broadcast
 		}
-		data, _ := json.Marshal(TestItem{Value: i})
-		req := httptest.NewRequest("POST", "/limited/*", bytes.NewBuffer(data))
-		w := httptest.NewRecorder()
-		app.Router.ServeHTTP(w, req)
-		require.Equal(t, 200, w.Result().StatusCode)
+		err := ooio.RemotePush(cfg, "limited/*", TestItem{Value: i})
+		require.NoError(t, err)
 		wg.Wait()
 	}
 
@@ -758,7 +681,7 @@ func StreamLimitFilterTest(t *testing.T, app *Server) {
 	require.LessOrEqual(t, maxSeen, limit, "client should never see more than limit items")
 
 	// Verify storage has exactly 'limit' items after cleanup
-	stored, err := app.Storage.GetList("limited/*")
+	stored, err := server.Storage.GetList("limited/*")
 	require.NoError(t, err)
 	require.Equal(t, limit, len(stored), "storage should have exactly limit items")
 }

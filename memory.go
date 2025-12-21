@@ -500,5 +500,7 @@ func (db *MemoryStorage) Del(path string) error {
 
 // Watch the storage set/del events
 func (db *MemoryStorage) Watch() StorageChan {
+	db.mutex.RLock()
+	defer db.mutex.RUnlock()
 	return db.watcher
 }
