@@ -41,7 +41,7 @@ func (app *Server) ws(w http.ResponseWriter, r *http.Request) error {
 
 	// log.Println("version", version, "entry.Version", strconv.FormatInt(entry.Version, 16), version != strconv.FormatInt(entry.Version, 16))
 	if version != strconv.FormatInt(entry.Version, 16) {
-		go app.Stream.Write(client, string(entry.Data), true, entry.Version)
+		go app.Stream.Write(client, entry.Data, true, entry.Version)
 	}
 	app.Stream.Read(_key, client)
 	return nil

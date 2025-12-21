@@ -53,18 +53,22 @@ type Pool struct {
 // DefaultWriteTimeout is the default timeout for WebSocket write operations.
 const DefaultWriteTimeout = 15 * time.Second
 
+// DefaultParallelThreshold is the minimum number of connections before parallel broadcast is used.
+const DefaultParallelThreshold = 6
+
 // Stream a group of pools
 type Stream struct {
-	mutex         sync.RWMutex
-	OnSubscribe   Subscribe
-	OnUnsubscribe Unsubscribe
-	ForcePatch    bool
-	NoPatch       bool
-	WriteTimeout  time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
-	clockPool     *Pool            // dedicated clock pool (was index 0)
-	pools         map[string]*Pool // O(1) lookup by key
-	poolIndex     *poolTrie        // trie for O(k) path matching in Broadcast
-	Console       *coat.Console
+	mutex             sync.RWMutex
+	OnSubscribe       Subscribe
+	OnUnsubscribe     Unsubscribe
+	ForcePatch        bool
+	NoPatch           bool
+	WriteTimeout      time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
+	ParallelThreshold int              // minimum connections for parallel broadcast, defaults to DefaultParallelThreshold
+	clockPool         *Pool            // dedicated clock pool (was index 0)
+	pools             map[string]*Pool // O(1) lookup by key
+	poolIndex         *poolTrie        // trie for O(k) path matching in Broadcast
+	Console           *coat.Console
 }
 
 type BroadcastOpt struct {
@@ -263,10 +267,47 @@ func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
 	}
 }
 
-// broadcastPool sends message to all connections in a pool
+// broadcastPool sends message to all connections in a pool.
+// Uses parallel goroutines for large pools to improve throughput.
 func (sm *Stream) broadcastPool(pool *Pool, data []byte, snapshot bool, version int64) {
+	numConns := len(pool.connections)
+	threshold := sm.ParallelThreshold
+	if threshold == 0 {
+		threshold = DefaultParallelThreshold
+	}
+
+	// For small pools, sequential is faster (no goroutine overhead)
+	if numConns < threshold {
+		for _, client := range pool.connections {
+			sm.Write(client, data, snapshot, version)
+		}
+		return
+	}
+
+	// For large pools, use parallel broadcast
+	// Pre-build the message once to avoid rebuilding per connection
+	msg := buildMessage(data, snapshot, version)
+	var wg sync.WaitGroup
+	wg.Add(numConns)
 	for _, client := range pool.connections {
-		sm.Write(client, string(data), snapshot, version)
+		go func(c *Conn) {
+			defer wg.Done()
+			sm.writeBytesPrebuilt(c, msg)
+		}(client)
+	}
+	wg.Wait()
+}
+
+// writeBytesPrebuilt writes a pre-built message to a connection.
+// This avoids rebuilding the message for each connection in parallel broadcast.
+func (sm *Stream) writeBytesPrebuilt(client *Conn, msg []byte) {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
+	err := client.conn.WriteMessage(websocket.BinaryMessage, msg)
+	if err != nil {
+		client.conn.Close()
+		sm.Console.Log("writeStreamErr: ", err)
 	}
 }
 
@@ -322,12 +363,13 @@ func buildMessage(data []byte, snapshot bool, version int64) []byte {
 	return buf
 }
 
-// Write will write data to a ws connection
-func (sm *Stream) Write(client *Conn, data string, snapshot bool, version int64) {
+// WriteBytes will write data to a ws connection without string conversion.
+// This is more efficient when data is already a []byte.
+func (sm *Stream) Write(client *Conn, data []byte, snapshot bool, version int64) {
 	client.mutex.Lock()
 	defer client.mutex.Unlock()
 	client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
-	err := client.conn.WriteMessage(websocket.BinaryMessage, buildMessage([]byte(data), snapshot, version))
+	err := client.conn.WriteMessage(websocket.BinaryMessage, buildMessage(data, snapshot, version))
 
 	if err != nil {
 		client.conn.Close()

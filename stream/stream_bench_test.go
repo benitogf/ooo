@@ -16,7 +16,7 @@ const benchDomain = "http://example.com"
 // BenchmarkPatchPool benchmarks the patchPool function which creates JSON patches
 func BenchmarkPatchPool(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -43,7 +43,7 @@ func BenchmarkPatchPool(b *testing.B) {
 // BenchmarkPatchPoolAppend benchmarks patchPool with append-only optimization (now always enabled in jsonpatch)
 func BenchmarkPatchPoolAppend(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -70,7 +70,7 @@ func BenchmarkPatchPoolAppend(b *testing.B) {
 // BenchmarkPatchPoolSnapshot benchmarks patchPool when snapshot is forced (NoPatch=true)
 func BenchmarkPatchPoolSnapshot(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		NoPatch:   true,
@@ -97,7 +97,7 @@ func BenchmarkPatchPoolSnapshot(b *testing.B) {
 // BenchmarkPatchPoolUpdateSingleItem benchmarks patching when a single item in a list is updated
 func BenchmarkPatchPoolUpdateSingleItem(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -124,7 +124,7 @@ func BenchmarkPatchPoolUpdateSingleItem(b *testing.B) {
 // BenchmarkPatchPoolUpdateMultipleItems benchmarks patching when multiple items in a list are updated
 func BenchmarkPatchPoolUpdateMultipleItems(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -151,7 +151,7 @@ func BenchmarkPatchPoolUpdateMultipleItems(b *testing.B) {
 // BenchmarkPatchPoolRemoveItem benchmarks patching when an item is removed from a list
 func BenchmarkPatchPoolRemoveItem(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -178,7 +178,7 @@ func BenchmarkPatchPoolRemoveItem(b *testing.B) {
 // BenchmarkPatchPoolLargeList benchmarks patching a large list with a single update
 func BenchmarkPatchPoolLargeList(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -224,7 +224,7 @@ func BenchmarkPatchPoolLargeList(b *testing.B) {
 // BenchmarkPatchPoolLargeListAppend benchmarks appending to a large list
 func BenchmarkPatchPoolLargeListAppend(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -265,7 +265,7 @@ func BenchmarkPatchPoolLargeListAppend(b *testing.B) {
 // BenchmarkPatchPoolNestedObjects benchmarks patching nested objects in a list
 func BenchmarkPatchPoolNestedObjects(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -295,7 +295,7 @@ func BenchmarkPatchPoolNestedObjects(b *testing.B) {
 // BenchmarkSetCacheNew benchmarks setting cache for a new key
 func BenchmarkSetCacheNew(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -312,7 +312,7 @@ func BenchmarkSetCacheNew(b *testing.B) {
 // BenchmarkSetCacheExisting benchmarks updating cache for an existing key
 func BenchmarkSetCacheExisting(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -332,7 +332,7 @@ func BenchmarkSetCacheExisting(b *testing.B) {
 // BenchmarkGetCacheVersion benchmarks getting cache version
 func BenchmarkGetCacheVersion(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -354,7 +354,7 @@ func BenchmarkGetCacheVersion(b *testing.B) {
 // BenchmarkBroadcastSinglePool benchmarks broadcasting to a single pool
 func BenchmarkBroadcastSinglePool(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		NoPatch:   true, // Use snapshot to isolate broadcast overhead
@@ -390,7 +390,7 @@ func BenchmarkBroadcastSinglePool(b *testing.B) {
 // BenchmarkBroadcastWildcard benchmarks broadcasting with wildcard matching
 func BenchmarkBroadcastWildcard(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		NoPatch:   true,
@@ -442,7 +442,7 @@ func BenchmarkBroadcastWildcard(b *testing.B) {
 // BenchmarkBroadcastToWildcard benchmarks broadcasting with a wildcard path
 func BenchmarkBroadcastToWildcard(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		NoPatch:   true,
@@ -482,7 +482,7 @@ func BenchmarkBroadcastToWildcard(b *testing.B) {
 // BenchmarkBroadcastWithPatch benchmarks broadcasting with JSON patch generation
 func BenchmarkBroadcastWithPatch(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
@@ -520,7 +520,7 @@ func BenchmarkBroadcastWithPatch(b *testing.B) {
 // BenchmarkBroadcastListAppend benchmarks broadcasting when appending to a list
 func BenchmarkBroadcastListAppend(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
@@ -561,7 +561,7 @@ func BenchmarkBroadcastListAppend(b *testing.B) {
 // BenchmarkNewConnection benchmarks creating a new stream connection
 func BenchmarkNewConnection(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
@@ -581,7 +581,7 @@ func BenchmarkNewConnection(b *testing.B) {
 // BenchmarkNewConnectionPreallocated benchmarks adding connection to pre-allocated pools
 func BenchmarkNewConnectionPreallocated(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
@@ -607,7 +607,7 @@ func BenchmarkNewConnectionPreallocated(b *testing.B) {
 // BenchmarkNewConnectionExistingPool benchmarks adding connection to existing pool
 func BenchmarkNewConnectionExistingPool(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
@@ -633,7 +633,7 @@ func BenchmarkNewConnectionExistingPool(b *testing.B) {
 // BenchmarkRefresh benchmarks the Refresh function
 func BenchmarkRefresh(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -653,7 +653,7 @@ func BenchmarkRefresh(b *testing.B) {
 // BenchmarkRefreshExisting benchmarks Refresh for existing cache
 func BenchmarkRefreshExisting(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
@@ -680,7 +680,7 @@ func BenchmarkRefreshExisting(b *testing.B) {
 // BenchmarkConcurrentBroadcast benchmarks concurrent broadcasts to different pools
 func BenchmarkConcurrentBroadcast(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		NoPatch:   true,
@@ -724,7 +724,7 @@ func BenchmarkConcurrentBroadcast(b *testing.B) {
 // BenchmarkConcurrentBroadcastWithPatch benchmarks concurrent broadcasts with patch generation
 func BenchmarkConcurrentBroadcastWithPatch(b *testing.B) {
 	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, false),
+		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {

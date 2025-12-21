@@ -28,11 +28,6 @@ func newPoolTrie() *poolTrie {
 	}
 }
 
-// pathSegment represents a segment of a path without allocation.
-type pathSegment struct {
-	start, end int
-}
-
 // countSegments counts the number of segments in a path (zero-alloc).
 func countSegments(path string) int {
 	if path == "" {
@@ -163,6 +158,36 @@ func putSeenMap(m map[*Pool]struct{}) {
 	seenPool.Put(m)
 }
 
+// segmentsPool is a pool of segment slices for findMatching.
+var segmentsPool = sync.Pool{
+	New: func() any {
+		// Pre-allocate for typical path depth (e.g., "users/123/posts")
+		return make([]string, 0, 8)
+	},
+}
+
+// getSegments extracts all segments from a path into a pooled slice.
+func getSegments(path string) []string {
+	segs := segmentsPool.Get().([]string)
+	segs = segs[:0]
+	if path == "" {
+		return segs
+	}
+	start := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '/' {
+			segs = append(segs, path[start:i])
+			start = i + 1
+		}
+	}
+	return segs
+}
+
+// putSegments returns a segment slice to the pool.
+func putSegments(segs []string) {
+	segmentsPool.Put(segs)
+}
+
 // hasWildcardSegment checks if path contains a wildcard segment.
 // Uses a simple byte scan which is faster than strings.Contains for short paths.
 func hasWildcardSegment(path string) bool {
@@ -181,9 +206,9 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	// Use a pooled map to deduplicate results
+	// Use pooled resources to minimize allocations
 	seen := getSeenMap()
-	numSegments := countSegments(path)
+	segments := getSegments(path)
 	hasWildcard := hasWildcardSegment(path)
 
 	// We need to find pools where:
@@ -193,59 +218,56 @@ func (t *poolTrie) findMatching(path string) []*Pool {
 	// For case 1: traverse trie, at each level check both exact match and "*"
 	// For case 2: if path contains "*", we need to check all pools at that level
 
-	t.matchRecursive(t.root, path, numSegments, 0, hasWildcard, seen)
+	t.matchRecursiveSegments(t.root, segments, 0, hasWildcard, seen)
 
 	results := make([]*Pool, 0, len(seen))
 	for pool := range seen {
 		results = append(results, pool)
 	}
 	putSeenMap(seen)
+	putSegments(segments)
 	return results
 }
 
-// matchRecursive traverses the trie to find matching pools.
-// hasWildcard indicates if the path contains any "*" segments (pre-computed for efficiency).
-func (t *poolTrie) matchRecursive(node *trieNode, path string, numSegments, depth int, hasWildcard bool, seen map[*Pool]struct{}) {
-	if depth == numSegments {
+// matchRecursiveSegments traverses the trie using pre-computed segments.
+// This avoids repeated getSegment calls which parse the path string.
+func (t *poolTrie) matchRecursiveSegments(node *trieNode, segments []string, depth int, hasWildcard bool, seen map[*Pool]struct{}) {
+	if depth == len(segments) {
 		// We've consumed all path segments
-		// Check if there's a pool at this exact location
 		if node.pool != nil {
 			seen[node.pool] = struct{}{}
 		}
-		// Also check for wildcard pools at this level (e.g., path="users/123", pool="users/*")
+		// Also check for wildcard pools at this level
 		if wildcard, exists := node.children["*"]; exists && wildcard.pool != nil {
 			seen[wildcard.pool] = struct{}{}
 		}
 		return
 	}
 
-	seg := getSegment(path, depth)
+	seg := segments[depth]
 
 	// Case 1: Exact segment match
 	if child, exists := node.children[seg]; exists {
-		t.matchRecursive(child, path, numSegments, depth+1, hasWildcard, seen)
+		t.matchRecursiveSegments(child, segments, depth+1, hasWildcard, seen)
 	}
 
 	// Case 2: Wildcard in trie matches any segment in path
-	// e.g., pool="users/*" should match path="users/123"
 	if seg != "*" {
 		if wildcard, exists := node.children["*"]; exists {
-			t.matchRecursive(wildcard, path, numSegments, depth+1, hasWildcard, seen)
+			t.matchRecursiveSegments(wildcard, segments, depth+1, hasWildcard, seen)
 		}
 	}
 
 	// Case 3: Wildcard in path matches any segment in trie
-	// e.g., path="users/*" should match pool="users/123"
-	// Only check this if the path actually contains wildcards (optimization)
 	if hasWildcard && seg == "*" {
 		for childSeg, child := range node.children {
 			if childSeg != "*" {
-				t.matchRecursive(child, path, numSegments, depth+1, hasWildcard, seen)
+				t.matchRecursiveSegments(child, segments, depth+1, hasWildcard, seen)
 			}
 		}
 		// Also match wildcard to wildcard
 		if wildcard, exists := node.children["*"]; exists {
-			t.matchRecursive(wildcard, path, numSegments, depth+1, hasWildcard, seen)
+			t.matchRecursiveSegments(wildcard, segments, depth+1, hasWildcard, seen)
 		}
 	}
 }

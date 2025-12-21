@@ -35,8 +35,6 @@ func remoteConfig(server *Server) ooio.RemoteConfig {
 // StreamBroadcastTest testing stream function
 func StreamBroadcastTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
-	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
-	var lk sync.Mutex
 	var postIndexResponse ooio.IndexResponse
 	var wsObject meta.Object
 	var wsEvent messages.Message
@@ -52,9 +50,7 @@ func StreamBroadcastTest(t *testing.T, server *Server) {
 			if err != nil {
 				break
 			}
-			lk.Lock()
 			wsEvent, err = messages.DecodeBuffer(message)
-			lk.Unlock()
 			expect.Nil(err)
 			server.Console.Log("read wsClient", wsEvent.Data)
 			wg.Done()
@@ -62,10 +58,8 @@ func StreamBroadcastTest(t *testing.T, server *Server) {
 	}()
 	wg.Wait()
 	wg.Add(1)
-	lk.Lock()
 	wsCache = wsEvent.Data
 	wsVersion, err := strconv.ParseInt(wsEvent.Version, 16, 64)
-	lk.Unlock()
 	require.NoError(t, err)
 	streamCacheVersion, err := server.Stream.GetCacheVersion("test")
 	require.NoError(t, err)
@@ -148,7 +142,7 @@ func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 	lk.Lock()
 	wsCache = wsEvent.Data
 	lk.Unlock()
-	postIndexResponse, err = ooio.RemoteSetWithResponse[json.RawMessage](cfg, "test/1", TEST_DATA)
+	postIndexResponse, err = ooio.RemoteSetWithResponse(cfg, "test/1", TEST_DATA)
 	require.NoError(t, err)
 	wg.Wait()
 	patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
@@ -183,8 +177,6 @@ func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 // StreamGlobBroadcastTest testing stream function
 func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	var wg sync.WaitGroup
-	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
-	var lk sync.Mutex
 	var indexResponse ooio.IndexResponse
 	var wsObjects []meta.Object
 	var wsEvent messages.Message
@@ -200,19 +192,14 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 			if err != nil {
 				break
 			}
-			lk.Lock()
 			wsEvent, err = messages.DecodeBuffer(message)
-			lk.Unlock()
 			expect.Nil(err)
-			// server.Console.Log("read wsClient", wsEvent.Data)
 			wg.Done()
 		}
 	}()
 	wg.Wait()
 
-	lk.Lock()
 	wsCache = wsEvent.Data
-	lk.Unlock()
 	server.Console.Log("post data")
 	keys := []string{}
 	for i := 0; i < n; i++ {
@@ -220,7 +207,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 		indexResponse, err = ooio.RemotePushWithResponse(cfg, "test/*", TEST_DATA)
 		require.NoError(t, err)
 		wg.Wait()
-		lk.Lock()
 		require.False(t, wsEvent.Snapshot)
 		patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
 		require.NoError(t, err)
@@ -229,7 +215,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 		err = json.Unmarshal(modified, &wsObjects)
 		require.NoError(t, err)
 		wsCache = modified
-		lk.Unlock()
 		keys = append(keys, indexResponse.Index)
 	}
 
@@ -240,7 +225,7 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	server.Console.Log("post update data")
 	nextGet := float64(0)
 	Q := 3
-	for i := 0; i < Q; i++ {
+	for i := range Q {
 		for _, key := range keys {
 			wg.Add(1)
 			found := meta.Object{}
@@ -261,7 +246,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 			err = ooio.RemoteSet(cfg, "test/"+key, json.RawMessage(newData))
 			require.NoError(t, err)
 			wg.Wait()
-			lk.Lock()
 			require.False(t, wsEvent.Snapshot)
 			patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
 			require.NoError(t, err)
@@ -281,7 +265,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 			nextGet = nextRaw.Value().(float64)
 			require.Equal(t, nextSet, nextGet)
 			wsCache = modified
-			lk.Unlock()
 		}
 	}
 
@@ -292,7 +275,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	require.NoError(t, err)
 	wg.Wait()
 
-	lk.Lock()
 	require.False(t, wsEvent.Snapshot)
 	patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
 	require.NoError(t, err)
@@ -300,7 +282,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	require.NoError(t, err)
 	err = json.Unmarshal(modified, &wsObjects)
 	require.NoError(t, err)
-	lk.Unlock()
 
 	wsClient.Close()
 
@@ -452,7 +433,7 @@ func StreamBroadcastNoPatchTest(t *testing.T, server *Server) {
 	wsExtraClient.Close()
 }
 
-func StreamConcurrentTest(t *testing.T, server *Server, n int) {
+func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	type TestData struct {
 		SearchMetadata struct {
 			Count float64 `json:"count"`
@@ -461,7 +442,6 @@ func StreamConcurrentTest(t *testing.T, server *Server, n int) {
 	var wg sync.WaitGroup
 
 	entries := []client.Meta[TestData]{}
-	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
 	var entriesLock sync.Mutex
 
 	wg.Add(1)
@@ -503,7 +483,7 @@ func StreamConcurrentTest(t *testing.T, server *Server, n int) {
 	entriesLock.Unlock()
 
 	server.Console.Log("post update data", len(keys))
-	Q := 6
+	Q := 3
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {

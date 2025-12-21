@@ -24,8 +24,12 @@ func TestWsTime(t *testing.T) {
 	require.NoError(t, err)
 	c2, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
-	wg.Add(3)
+
+	// Wait for 2 messages on c1 and 1 message on c2
+	c1Count := 0
+	wg.Add(1) // For c1 goroutine completion
 	go func() {
+		defer wg.Done()
 		for {
 			_, message, err := c1.ReadMessage()
 			if err != nil {
@@ -33,21 +37,18 @@ func TestWsTime(t *testing.T) {
 				break
 			}
 			app.Console.Log("time c1", string(message))
-			wg.Done()
+			c1Count++
+			if c1Count >= 2 {
+				break
+			}
 		}
 	}()
 
-	for {
-		_, message, err := c2.ReadMessage()
-		if err != nil {
-			app.Console.Err("read c2", err)
-			break
-		}
-		app.Console.Log("time c2", string(message))
-		err = c2.Close()
-		require.NoError(t, err)
-		wg.Done()
-	}
+	// Read one message from c2
+	_, message, err := c2.ReadMessage()
+	require.NoError(t, err)
+	app.Console.Log("time c2", string(message))
+	c2.Close()
 
 	wg.Wait()
 
