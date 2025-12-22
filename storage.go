@@ -13,6 +13,7 @@ type StorageChan chan StorageEvent
 type StorageEvent struct {
 	Key       string
 	Operation string
+	Done      chan struct{} // Closed when broadcast completes, nil for fire-and-forget
 }
 
 // StorageOpt options of the storage instance
@@ -98,7 +99,11 @@ type Stats struct {
 // WatchStorageNoop a noop reader of the watch channel
 func WatchStorageNoop(dataStore Database) {
 	for {
-		<-dataStore.Watch()
+		ev := <-dataStore.Watch()
+		// Signal completion if synchronous broadcast is expected
+		if ev.Done != nil {
+			close(ev.Done)
+		}
 		if !dataStore.Active() {
 			break
 		}

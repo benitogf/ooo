@@ -293,10 +293,12 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 func StreamBroadcastFilterTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
 	var wsExtraEvent messages.Message
-	// extra filter - returns modified list data
+	var callCount int
+	// extra filter - returns modified list data that changes each call
 	server.ReadListFilter("test/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
-		// Return a single object with extra data
-		return []meta.Object{{Data: []byte(`{"extra": "extra"}`)}}, nil
+		callCount++
+		// Return data that changes each time to ensure broadcasts aren't skipped
+		return []meta.Object{{Data: []byte(`{"extra": "` + strconv.Itoa(callCount) + `"}`)}}, nil
 	})
 	// extra route
 	server.Router = mux.NewRouter()
@@ -320,6 +322,10 @@ func StreamBroadcastFilterTest(t *testing.T, server *Server) {
 		}
 	}()
 	wg.Wait()
+	// First message should be a snapshot with the filtered data
+	require.Equal(t, true, wsExtraEvent.Snapshot)
+	require.Contains(t, string(wsExtraEvent.Data), `"extra"`)
+
 	wg.Add(1)
 	server.Console.Log("post data")
 	err = ooio.RemotePush(cfg, "test/*", TEST_DATA)
@@ -327,9 +333,8 @@ func StreamBroadcastFilterTest(t *testing.T, server *Server) {
 	wg.Wait()
 	wsExtraClient.Close()
 
-	// empty operations for a broadcast with no changes
+	// Second message should be a patch (not snapshot) since data changed
 	require.Equal(t, false, wsExtraEvent.Snapshot)
-	require.Equal(t, "[]", string(wsExtraEvent.Data))
 }
 
 // StreamBroadcastForcePatchTest testing stream function
@@ -645,11 +650,10 @@ func StreamLimitFilterTest(t *testing.T, server *Server) {
 
 	// Insert items via HTTP (triggers AfterWrite for LimitFilter cleanup)
 	// Each insert triggers 1 broadcast for the insert
-	// When over limit, AfterWrite deletes old items which triggers additional broadcasts
-	// First 'limit' inserts: 1 broadcast each
-	// Remaining inserts: 2 broadcasts each (insert + delete)
+	// When over limit, AfterWrite deletes old items but the delete broadcast
+	// is skipped by bytes.Equal optimization since filtered data is unchanged
 	for i := range totalInserts {
-		wg.Add(1) // just the insert broadcast
+		wg.Add(1) // just the insert broadcast (delete broadcast is skipped)
 		err := ooio.RemotePush(cfg, "limited/*", TestItem{Value: i})
 		require.NoError(t, err)
 		wg.Wait()

@@ -88,15 +88,16 @@ func (lf *LimitFilter) ReadFilter(path string, data json.RawMessage) (json.RawMe
 // ReadListFilter returns a meta-based filter function that limits the list to the most recent entries.
 // This is more efficient than ReadFilter as it avoids JSON encoding/decoding.
 func (lf *LimitFilter) ReadListFilter(path string, objs []meta.Object) ([]meta.Object, error) {
-	// If under limit, return as-is
-	if len(objs) <= lf.limit {
-		return objs, nil
-	}
-
-	// Sort by created timestamp descending to get most recent
+	// Always sort by created timestamp descending for consistent ordering
+	// This ensures bytes.Equal optimization works correctly
 	sort.Slice(objs, func(i, j int) bool {
 		return objs[i].Created > objs[j].Created
 	})
+
+	// If under limit, return all (now sorted)
+	if len(objs) <= lf.limit {
+		return objs, nil
+	}
 
 	// Take only the most recent 'limit' entries
 	return objs[:lf.limit], nil

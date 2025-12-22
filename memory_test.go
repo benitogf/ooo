@@ -47,7 +47,6 @@ func TestStreamGlobBroadcastConcurrent(t *testing.T) {
 }
 
 func TestStreamBroadcastFilter(t *testing.T) {
-	t.Skip()
 	// t.Parallel()
 	app := Server{}
 	app.Silence = true
@@ -133,4 +132,14 @@ func TestBeforeRead(t *testing.T) {
 	}
 	defer db.Close()
 	StorageBeforeReadTest(db, t)
+}
+
+func TestWatchStorageNoop(t *testing.T) {
+	db := &MemoryStorage{}
+	err := db.Start(StorageOpt{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	WatchStorageNoopTest(db, t)
 }
