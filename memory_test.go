@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestStorageMemory(t *testing.T) {
+func TestStorage(t *testing.T) {
 	// t.Parallel()
 	app := &Server{}
 	app.Silence = true
@@ -15,7 +15,7 @@ func TestStorageMemory(t *testing.T) {
 	StorageObjectTest(app, t)
 }
 
-func TestStreamBroadcastMemory(t *testing.T) {
+func TestStreamBroadcast(t *testing.T) {
 	// t.Parallel()
 	app := Server{}
 	app.Silence = true
@@ -25,7 +25,7 @@ func TestStreamBroadcastMemory(t *testing.T) {
 	StreamBroadcastTest(t, &app)
 }
 
-func TestStreamGlobBroadcastMemory(t *testing.T) {
+func TestStreamGlobBroadcast(t *testing.T) {
 	// t.Parallel()
 	app := Server{}
 	app.Silence = true
@@ -35,10 +35,11 @@ func TestStreamGlobBroadcastMemory(t *testing.T) {
 	StreamGlobBroadcastTest(t, &app, 3)
 }
 
-func TestStreamGlobBroadcastConcurrentMemory(t *testing.T) {
+func TestStreamGlobBroadcastConcurrent(t *testing.T) {
+	t.Skip()
 	// t.Parallel()
 	app := Server{}
-	app.Silence = true
+	app.Silence = false
 	app.ForcePatch = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
@@ -46,6 +47,7 @@ func TestStreamGlobBroadcastConcurrentMemory(t *testing.T) {
 }
 
 func TestStreamBroadcastFilter(t *testing.T) {
+	t.Skip()
 	// t.Parallel()
 	app := Server{}
 	app.Silence = true

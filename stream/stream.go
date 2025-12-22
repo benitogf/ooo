@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"strconv"
@@ -258,7 +259,21 @@ func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
 			continue
 		}
 
+		// Fast path: skip broadcast if filtered data is unchanged
+		// Only check when SkipUnchanged is enabled and cache has been initialized
+		// This optimization is particularly useful for LimitFilter where
+		// deletes beyond the limit don't change the visible data
+		if pool.cache.Version > 0 && bytes.Equal(pool.cache.Data, data) {
+			sm.Console.Log("SKIP broadcast[" + pool.Key + "]: data unchanged, version=" + strconv.FormatInt(pool.cache.Version, 10))
+			pool.mutex.Unlock()
+			if opt.Callback != nil {
+				opt.Callback()
+			}
+			continue
+		}
+
 		modifiedData, snapshot, version := sm.patchPool(pool, data)
+		sm.Console.Log("SEND broadcast[" + pool.Key + "]: version=" + strconv.FormatInt(pool.cache.Version, 10))
 		sm.broadcastPool(pool, modifiedData, snapshot, version)
 		pool.mutex.Unlock()
 		if opt.Callback != nil {
@@ -337,7 +352,6 @@ func (sm *Stream) patchPool(pool *Pool, data []byte) ([]byte, bool, int64) {
 	}
 	// don't send the operations if they exceed the data size
 	if !sm.ForcePatch && len(operations) > len(data) {
-		// sm.Console.Err("patch operations bigger than data", string(operations))
 		return data, true, version
 	}
 

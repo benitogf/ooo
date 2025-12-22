@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -465,7 +466,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	require.Zero(t, len(entries))
 	entriesLock.Unlock()
 
-	server.Console.Log("push data")
+	log.Println("push data")
 	keys := []string{}
 	for i := range n {
 		wg.Add(1)
@@ -477,12 +478,13 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	}
 
 	wg.Wait() // created
+
 	entriesLock.Lock()
 	require.Equal(t, len(keys), len(entries))
 	require.Equal(t, float64(4), entries[0].Data.SearchMetadata.Count)
 	entriesLock.Unlock()
 
-	server.Console.Log("post update data", len(keys))
+	log.Println("post update data", len(keys))
 	Q := 3
 	for _, _key := range keys {
 		wg.Add(Q)
@@ -493,7 +495,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
 				nextSet := current + 1
-				server.Console.Log("up1", __key, nextSet)
+				log.Println("up1", __key, current, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.count", nextSet)
 				expect.Nil(err)
 				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -514,7 +516,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 				if current == "popo" {
 					nextSet = "nopo"
 				}
-				server.Console.Log("up2", __key, nextSet)
+				// log.Println("up2", __key, current, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.something", nextSet)
 				expect.Nil(err)
 				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -523,7 +525,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		}(_key)
 	}
 
-	server.Console.Log("wait update data")
+	log.Println("wait update data")
 	wg.Wait() // updated
 	entriesLock.Lock()
 	require.Equal(t, len(keys), len(entries))
@@ -647,11 +649,7 @@ func StreamLimitFilterTest(t *testing.T, server *Server) {
 	// First 'limit' inserts: 1 broadcast each
 	// Remaining inserts: 2 broadcasts each (insert + delete)
 	for i := range totalInserts {
-		if i < limit {
-			wg.Add(1) // just the insert broadcast
-		} else {
-			wg.Add(2) // insert broadcast + delete broadcast
-		}
+		wg.Add(1) // just the insert broadcast
 		err := ooio.RemotePush(cfg, "limited/*", TestItem{Value: i})
 		require.NoError(t, err)
 		wg.Wait()

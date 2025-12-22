@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -14,13 +13,6 @@ import (
 	"github.com/benitogf/ooo/key"
 	"github.com/stretchr/testify/require"
 )
-
-// sleepAfterWrite sleeps only on Windows to allow file system operations to complete
-func sleepAfterWrite() {
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
-}
 
 // Test types
 type TestUser struct {
@@ -111,13 +103,11 @@ func TestSubscribeMultiple2_BasicFunctionality(t *testing.T) {
 	// Create user and wait for callback
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create post and wait for callback
 	wg.Add(1)
 	createPost(t, &server, 1, "Test Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Verify we received exactly 1 user
@@ -169,13 +159,11 @@ func TestSubscribeMultiple2_StateAggregation(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		wg.Add(1)
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
 		wg.Wait()
 	}
 	for i := 1; i <= 2; i++ {
 		wg.Add(1)
 		createPost(t, &server, i, "Post")
-		sleepAfterWrite()
 		wg.Wait()
 	}
 
@@ -223,7 +211,6 @@ func TestSubscribeMultiple2_ContextCancellation(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		wg.Add(1)
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
 		wg.Wait()
 	}
 
@@ -239,7 +226,6 @@ func TestSubscribeMultiple2_ContextCancellation(t *testing.T) {
 	// Create more data (should NOT be received after cancellation)
 	for i := 4; i <= 6; i++ {
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
 	}
 
 	time.Sleep(200 * time.Millisecond)
@@ -285,19 +271,16 @@ func TestSubscribeMultiple3_BasicFunctionality(t *testing.T) {
 	// Create user and wait for callback
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create post and wait for callback
 	wg.Add(1)
 	createPost(t, &server, 1, "Test Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create comment and wait for callback
 	wg.Add(1)
 	createComment(t, &server, 1, "Great post!")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Verify exactly 1 user
@@ -355,25 +338,21 @@ func TestSubscribeMultiple4_BasicFunctionality(t *testing.T) {
 	// Create user and wait for callback
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create post and wait for callback
 	wg.Add(1)
 	createPost(t, &server, 1, "Test Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create comment and wait for callback
 	wg.Add(1)
 	createComment(t, &server, 1, "Great!")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create like and wait for callback
 	wg.Add(1)
 	createLike(t, &server, 1, 1)
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Verify exactly 1 user
@@ -436,19 +415,17 @@ func TestSubscribeMultiple2_ConcurrentUpdates(t *testing.T) {
 	// Wait for initial callbacks from both paths
 	wg.Wait()
 
-	// Create data rapidly, waiting after each write
+	// Create data sequentially, waiting for each broadcast
 	for i := range 5 {
 		wg.Add(1)
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
+		wg.Wait()
 	}
 	for i := range 5 {
 		wg.Add(1)
 		createPost(t, &server, i, "Post")
-		sleepAfterWrite()
+		wg.Wait()
 	}
-
-	wg.Wait()
 
 	// Should receive: 2 initial + 10 writes (5 users + 5 posts) = 12 total
 	require.Len(t, allStates, 12, "Expected exactly 12 state updates")
@@ -531,7 +508,6 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 	// Create data and verify derived state updates
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Read current state from a separate context (simulating external read)
@@ -543,7 +519,6 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 
 	wg.Add(1)
 	createPost(t, &server, 1, "First Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	mu.RLock()
