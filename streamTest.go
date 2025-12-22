@@ -2,7 +2,6 @@ package ooo
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -461,13 +460,10 @@ func StreamBroadcastNoPatchTest(t *testing.T, server *Server) {
 func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	type TestData struct {
 		SearchMetadata struct {
-			Count     float64 `json:"count"`
-			Something string  `json:"something"`
+			Count float64 `json:"count"`
 		} `json:"search_metadata"`
 	}
 	var wg sync.WaitGroup
-	var messageCount int
-	var messageCountLock sync.Mutex
 
 	entries := []client.Meta[TestData]{}
 	var entriesLock sync.Mutex
@@ -482,15 +478,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		OnMessage: func(m []client.Meta[TestData]) {
 			entriesLock.Lock()
 			entries = m
-			messageCountLock.Lock()
-			messageCount++
-			currentMsgCount := messageCount
-			messageCountLock.Unlock()
-			if len(m) > 0 {
-				log.Printf("CLIENT msg#%d: len=%d, first.count=%.0f, first.something=%s", currentMsgCount, len(m), m[0].Data.SearchMetadata.Count, m[0].Data.SearchMetadata.Something)
-			} else {
-				log.Printf("CLIENT msg#%d: len=%d", currentMsgCount, len(m))
-			}
+			// log.Println("CLIENT", len(m))
 			wg.Done()
 			entriesLock.Unlock()
 		},
@@ -519,17 +507,16 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	entriesLock.Unlock()
 
 	Q := 3
-	log.Printf("Starting %d count updates per key (total %d updates)", Q, Q*len(keys))
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
-			for i := range Q {
+			for range Q {
 				currentObj, err := server.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
 				nextSet := current + 1
-				log.Printf("COUNT[%s] iter=%d: read=%.0f, writing=%.0f", __key, i, current, nextSet)
+				// log.Println("up1", __key, current, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.count", nextSet)
 				expect.Nil(err)
 				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -538,11 +525,10 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		}(_key)
 	}
 
-	log.Printf("Starting %d something updates per key (total %d updates)", Q, Q*len(keys))
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
-			for i := range Q {
+			for range Q {
 				currentObj, err := server.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.something")
@@ -551,9 +537,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 				if current == "popo" {
 					nextSet = "nopo"
 				}
-				countRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
-				countVal := countRaw.Value().(float64)
-				log.Printf("SOMETHING[%s] iter=%d: something=%s->%s, count=%.0f (will preserve)", __key, i, current, nextSet, countVal)
+				// log.Println("up2", __key, current, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.something", nextSet)
 				expect.Nil(err)
 				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -562,13 +546,10 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		}(_key)
 	}
 
-	log.Println("Waiting for all updates to complete...")
 	wg.Wait() // updated
 	entriesLock.Lock()
-	log.Printf("Final state: len(entries)=%d, total messages received=%d", len(entries), messageCount)
 	require.Equal(t, len(keys), len(entries))
-	for i, obj := range entries {
-		log.Printf("Final entry[%d]: index=%s, count=%.0f, something=%s", i, obj.Index, obj.Data.SearchMetadata.Count, obj.Data.SearchMetadata.Something)
+	for _, obj := range entries {
 		require.Equal(t, float64(4+Q), obj.Data.SearchMetadata.Count)
 	}
 	entriesLock.Unlock()

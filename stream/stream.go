@@ -2,7 +2,6 @@ package stream
 
 import (
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/tidwall/gjson"
 
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
@@ -424,9 +422,6 @@ func (sm *Stream) broadcastList(pool *Pool, opt BroadcastOpt) {
 					break
 				}
 			}
-			// Extract count for debugging
-			countVal := gjson.Get(string(filtered.Data), "search_metadata.count")
-			log.Printf("BROADCAST[%s] update path=%s count=%v", pool.Key, filtered.Path, countVal.Value())
 			sm.sendListBroadcast(pool, "replace", actualPos, &filtered)
 		} else {
 			// Insert new item
