@@ -1,14 +1,16 @@
 package stream
 
 import (
-	"bytes"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/tidwall/gjson"
 
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
@@ -30,11 +32,11 @@ type Subscribe func(key string) error
 // Unsubscribe : function callback on subscription closing
 type Unsubscribe func(key string)
 
-// GetFn is a function type for retrieving data by key from storage.
-type GetFn func(key string) ([]byte, error)
+// FilterObjectFn is a function type for filtering single objects.
+type FilterObjectFn func(key string, obj meta.Object) (meta.Object, error)
 
-// EncodeFn is a function type for encoding data to a string format.
-type EncodeFn func(data []byte) string
+// FilterListFn is a function type for filtering object lists.
+type FilterListFn func(key string, objs []meta.Object) ([]meta.Object, error)
 
 // Conn extends the websocket connection with a mutex
 // https://godoc.org/github.com/gorilla/websocket#hdr-Concurrency
@@ -72,15 +74,131 @@ type Stream struct {
 	Console           *coat.Console
 }
 
+// BroadcastOpt options for broadcasting storage events
 type BroadcastOpt struct {
-	Get      GetFn
-	Callback func()
+	Key          string
+	Operation    string       // "set" or "del"
+	Object       *meta.Object // The object that was set/deleted
+	FilterObject FilterObjectFn
+	FilterList   FilterListFn
+	Static       bool
 }
 
-// Cache holds version and data
+// Cache holds version and decoded objects for efficient broadcast
 type Cache struct {
 	Version int64
-	Data    []byte
+	Objects []meta.Object // For list subscriptions (glob paths)
+	Object  *meta.Object  // For single object subscriptions (non-glob)
+}
+
+// insertSorted inserts obj into list maintaining ascending Created order (oldest first).
+// Returns new list and position where inserted.
+func insertSorted(list []meta.Object, obj meta.Object) ([]meta.Object, int) {
+	// Find position for ascending order (oldest first, newest at end)
+	pos := len(list)
+	for i, item := range list {
+		if obj.Created < item.Created {
+			pos = i
+			break
+		}
+	}
+	// Insert at pos
+	list = append(list, meta.Object{})
+	copy(list[pos+1:], list[pos:])
+	list[pos] = obj
+	return list, pos
+}
+
+// updateInList finds and updates obj in list by matching Path.
+// Returns new list, position, and whether it was found.
+func updateInList(list []meta.Object, obj meta.Object) ([]meta.Object, int, bool) {
+	for i, item := range list {
+		if item.Path == obj.Path {
+			list[i] = obj
+			return list, i, true
+		}
+	}
+	return list, -1, false
+}
+
+// removeFromList removes obj from list by matching Path.
+// Returns new list, position where removed, and whether it was found.
+func removeFromList(list []meta.Object, obj meta.Object) ([]meta.Object, int, bool) {
+	for i, item := range list {
+		if item.Path == obj.Path {
+			return append(list[:i], list[i+1:]...), i, true
+		}
+	}
+	return list, -1, false
+}
+
+// generateListPatch creates a JSON patch for a single list operation.
+func generateListPatch(op string, pos int, obj *meta.Object) ([]byte, error) {
+	switch op {
+	case "add":
+		objBytes, err := meta.Encode(*obj)
+		if err != nil {
+			return nil, err
+		}
+		// Use json.Marshal for proper escaping
+		patch := []jsonpatch.Operation{{Operation: "add", Path: "/" + strconv.Itoa(pos), Value: json.RawMessage(objBytes)}}
+		return json.Marshal(patch)
+	case "replace":
+		objBytes, err := meta.Encode(*obj)
+		if err != nil {
+			return nil, err
+		}
+		patch := []jsonpatch.Operation{{Operation: "replace", Path: "/" + strconv.Itoa(pos), Value: json.RawMessage(objBytes)}}
+		return json.Marshal(patch)
+	case "remove":
+		patch := []jsonpatch.Operation{{Operation: "remove", Path: "/" + strconv.Itoa(pos)}}
+		return json.Marshal(patch)
+	}
+	return nil, errors.New("stream: unknown patch operation")
+}
+
+// generateAddRemovePatch creates a JSON patch that adds an item and removes another.
+// The remove is applied first (at removePos), then add (at addPos).
+// Since remove happens first, if addPos > removePos, the actual add position is addPos.
+// If addPos <= removePos, the add position is still addPos since remove shifts items down.
+func generateAddRemovePatch(addPos int, obj *meta.Object, removePos int) ([]byte, error) {
+	objBytes, err := meta.Encode(*obj)
+	if err != nil {
+		return nil, err
+	}
+	// Order matters: remove first, then add
+	// After remove at removePos, indices >= removePos shift down by 1
+	// So if addPos > removePos, the effective add position is addPos (since we're adding to the new shorter list)
+	patch := []jsonpatch.Operation{
+		{Operation: "remove", Path: "/" + strconv.Itoa(removePos)},
+		{Operation: "add", Path: "/" + strconv.Itoa(addPos), Value: json.RawMessage(objBytes)},
+	}
+	return json.Marshal(patch)
+}
+
+// generateObjectPatch creates a JSON patch for a single object change.
+func generateObjectPatch(oldObj, newObj *meta.Object) ([]byte, bool, error) {
+	if oldObj == nil || oldObj.Created == 0 {
+		// No previous object - send as snapshot
+		return nil, true, nil
+	}
+	oldBytes, err := meta.Encode(*oldObj)
+	if err != nil {
+		return nil, true, nil
+	}
+	newBytes, err := meta.Encode(*newObj)
+	if err != nil {
+		return nil, true, nil
+	}
+	patch, err := jsonpatch.CreatePatch(oldBytes, newBytes)
+	if err != nil {
+		return nil, true, nil
+	}
+	patchBytes, err := json.Marshal(patch)
+	if err != nil {
+		return nil, true, nil
+	}
+	return patchBytes, false, nil
 }
 
 var StreamUpgrader = websocket.Upgrader{
@@ -251,35 +369,228 @@ func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
 	// Process each pool with only per-pool locking
 	for _, pool := range matchingPools {
 		pool.mutex.Lock()
-		data, err := opt.Get(pool.Key)
-		// this error means that the broadcast was filtered
-		if err != nil {
-			sm.Console.Err("broadcast["+pool.Key+"]: failed to get data", err)
-			pool.mutex.Unlock()
-			continue
+		if isGlobKey(pool.Key) {
+			sm.broadcastList(pool, opt)
+		} else {
+			sm.broadcastObject(pool, opt)
 		}
-
-		// Fast path: skip broadcast if filtered data is unchanged
-		// Only check when SkipUnchanged is enabled and cache has been initialized
-		// This optimization is particularly useful for LimitFilter where
-		// deletes beyond the limit don't change the visible data
-		if pool.cache.Version > 0 && bytes.Equal(pool.cache.Data, data) {
-			sm.Console.Log("SKIP broadcast[" + pool.Key + "]: data unchanged, version=" + strconv.FormatInt(pool.cache.Version, 10))
-			pool.mutex.Unlock()
-			if opt.Callback != nil {
-				opt.Callback()
-			}
-			continue
-		}
-
-		modifiedData, snapshot, version := sm.patchPool(pool, data)
-		sm.Console.Log("SEND broadcast[" + pool.Key + "]: version=" + strconv.FormatInt(pool.cache.Version, 10))
-		sm.broadcastPool(pool, modifiedData, snapshot, version)
 		pool.mutex.Unlock()
-		if opt.Callback != nil {
-			opt.Callback()
+	}
+}
+
+// isGlobKey checks if a pool key contains a glob pattern
+func isGlobKey(key string) bool {
+	return strings.Contains(key, "*")
+}
+
+// broadcastList handles broadcasting to list subscriptions (glob paths)
+func (sm *Stream) broadcastList(pool *Pool, opt BroadcastOpt) {
+	obj := opt.Object
+	if obj == nil {
+		return
+	}
+
+	// Apply object filter first to see if this object passes
+	filtered, filterErr := opt.FilterObject(pool.Key, *obj)
+
+	switch opt.Operation {
+	case "set":
+		if filterErr != nil {
+			// Object filtered out - remove from list if it exists
+			newList, pos, found := removeFromList(pool.cache.Objects, *obj)
+			if found {
+				pool.cache.Objects = newList
+				// Apply list filter after removal
+				finalList, _ := opt.FilterList(pool.Key, pool.cache.Objects)
+				pool.cache.Objects = finalList
+				sm.sendListBroadcast(pool, "remove", pos, nil)
+			}
+			return
+		}
+
+		// Check if this is an update or insert
+		newList, _, found := updateInList(pool.cache.Objects, filtered)
+		if found {
+			// Update existing item
+			pool.cache.Objects = newList
+			// Apply list filter (may re-sort)
+			finalList, _ := opt.FilterList(pool.Key, pool.cache.Objects)
+			pool.cache.Objects = finalList
+			// Find actual position after filter (may have re-sorted)
+			actualPos := 0
+			for i, item := range finalList {
+				if item.Path == filtered.Path {
+					actualPos = i
+					break
+				}
+			}
+			// Extract count for debugging
+			countVal := gjson.Get(string(filtered.Data), "search_metadata.count")
+			log.Printf("BROADCAST[%s] update path=%s count=%v", pool.Key, filtered.Path, countVal.Value())
+			sm.sendListBroadcast(pool, "replace", actualPos, &filtered)
+		} else {
+			// Insert new item
+			oldLen := len(pool.cache.Objects)
+			newList, _ := insertSorted(pool.cache.Objects, filtered)
+			// Apply list filter (may limit size and re-sort)
+			finalList, _ := opt.FilterList(pool.Key, newList)
+			pool.cache.Objects = finalList
+
+			// Find actual position of our item in the filtered list
+			// (FilterList may have re-sorted the list)
+			actualPos := -1
+			for i, item := range finalList {
+				if item.Path == filtered.Path {
+					actualPos = i
+					break
+				}
+			}
+
+			// Check if an item was pushed out due to limit
+			itemPushedOut := len(finalList) < len(newList)
+
+			if actualPos >= 0 && itemPushedOut {
+				// Item is in the filtered list AND another was pushed out
+				// Send combined add+remove patch
+				// The pushed-out item was at the last position in the old list (oldLen - 1)
+				// since the filter keeps the newest items and removes the oldest
+				sm.sendAddRemoveBroadcast(pool, actualPos, &filtered, oldLen-1)
+			} else if actualPos >= 0 {
+				// Item is in the filtered list, no item pushed out
+				sm.sendListBroadcast(pool, "add", actualPos, &filtered)
+			} else if itemPushedOut && len(finalList) == oldLen {
+				// Item was added but filtered out, and another was pushed out due to limit
+				sm.sendListBroadcast(pool, "remove", len(finalList), nil)
+			}
+		}
+
+	case "del":
+		newList, pos, found := removeFromList(pool.cache.Objects, *obj)
+		if found {
+			pool.cache.Objects = newList
+			sm.sendListBroadcast(pool, "remove", pos, nil)
 		}
 	}
+}
+
+// sendListBroadcast sends a list broadcast, using snapshot if NoPatch is enabled
+func (sm *Stream) sendListBroadcast(pool *Pool, op string, pos int, obj *meta.Object) {
+	version := sm.nextVersion(pool)
+
+	if sm.NoPatch {
+		// Send full snapshot
+		data, err := meta.Encode(pool.cache.Objects)
+		if err != nil {
+			return
+		}
+		sm.Console.Log("SEND broadcast[" + pool.Key + "]: snapshot (NoPatch)")
+		sm.broadcastPool(pool, data, true, version)
+		return
+	}
+
+	patch, err := generateListPatch(op, pos, obj)
+	if err != nil {
+		sm.Console.Err("generateListPatch failed", err)
+		return
+	}
+	sm.Console.Log("SEND broadcast[" + pool.Key + "]: " + op + " at " + strconv.Itoa(pos))
+	sm.broadcastPool(pool, patch, false, version)
+}
+
+// sendAddRemoveBroadcast sends a combined add+remove broadcast for when an item is added
+// and another is pushed out due to a limit filter.
+func (sm *Stream) sendAddRemoveBroadcast(pool *Pool, addPos int, obj *meta.Object, removePos int) {
+	version := sm.nextVersion(pool)
+
+	if sm.NoPatch {
+		// Send full snapshot
+		data, err := meta.Encode(pool.cache.Objects)
+		if err != nil {
+			return
+		}
+		sm.Console.Log("SEND broadcast[" + pool.Key + "]: snapshot (NoPatch)")
+		sm.broadcastPool(pool, data, true, version)
+		return
+	}
+
+	patch, err := generateAddRemovePatch(addPos, obj, removePos)
+	if err != nil {
+		sm.Console.Err("generateAddRemovePatch failed", err)
+		return
+	}
+	sm.Console.Log("SEND broadcast[" + pool.Key + "]: add at " + strconv.Itoa(addPos) + " + remove at " + strconv.Itoa(removePos))
+	sm.broadcastPool(pool, patch, false, version)
+}
+
+// broadcastObject handles broadcasting to single object subscriptions (non-glob paths)
+func (sm *Stream) broadcastObject(pool *Pool, opt BroadcastOpt) {
+	obj := opt.Object
+
+	switch opt.Operation {
+	case "set":
+		if obj == nil {
+			return
+		}
+		filtered, err := opt.FilterObject(pool.Key, *obj)
+		if err != nil {
+			// Filtered out - send empty object
+			filtered = meta.Object{}
+		}
+
+		// Save old object before updating cache
+		oldObj := pool.cache.Object
+		pool.cache.Object = &filtered
+		version := sm.nextVersion(pool)
+
+		// Encode the filtered object
+		data, encErr := meta.Encode(filtered)
+		if encErr != nil {
+			data = meta.EmptyObject
+		}
+
+		// NoPatch mode - send snapshot
+		if sm.NoPatch {
+			sm.Console.Log("SEND broadcast[" + pool.Key + "]: snapshot (NoPatch)")
+			sm.broadcastPool(pool, data, true, version)
+			return
+		}
+
+		patch, snapshot, _ := generateObjectPatch(oldObj, &filtered)
+		if snapshot || patch == nil {
+			sm.Console.Log("SEND broadcast[" + pool.Key + "]: snapshot")
+			sm.broadcastPool(pool, data, true, version)
+		} else {
+			sm.Console.Log("SEND broadcast[" + pool.Key + "]: patch")
+			sm.broadcastPool(pool, patch, false, version)
+		}
+
+	case "del":
+		empty := meta.Object{}
+		oldObj := pool.cache.Object
+		pool.cache.Object = &empty
+		version := sm.nextVersion(pool)
+
+		if sm.NoPatch {
+			sm.Console.Log("SEND broadcast[" + pool.Key + "]: del snapshot (NoPatch)")
+			sm.broadcastPool(pool, meta.EmptyObject, true, version)
+			return
+		}
+
+		patch, snapshot, _ := generateObjectPatch(oldObj, &empty)
+		if snapshot || patch == nil {
+			sm.Console.Log("SEND broadcast[" + pool.Key + "]: del snapshot")
+			sm.broadcastPool(pool, meta.EmptyObject, true, version)
+		} else {
+			sm.Console.Log("SEND broadcast[" + pool.Key + "]: del patch")
+			sm.broadcastPool(pool, patch, false, version)
+		}
+	}
+}
+
+// nextVersion generates a new version number for a pool
+func (sm *Stream) nextVersion(pool *Pool) int64 {
+	pool.cache.Version = monotonic.Now()
+	return pool.cache.Version
 }
 
 // broadcastPool sends message to all connections in a pool.
@@ -324,38 +635,6 @@ func (sm *Stream) writeBytesPrebuilt(client *Conn, msg []byte) {
 		client.conn.Close()
 		sm.Console.Log("writeStreamErr: ", err)
 	}
-}
-
-// patchPool will return either the snapshot or the patch for a pool
-//
-// patch, false (patch)
-//
-// snapshot, true (snapshot)
-func (sm *Stream) patchPool(pool *Pool, data []byte) ([]byte, bool, int64) {
-	// no patch, only snapshot
-	if sm.NoPatch {
-		version := sm.setCachePool(pool, data)
-		return data, true, version
-	}
-
-	patch, err := jsonpatch.CreatePatch(pool.cache.Data, data)
-	if err != nil {
-		sm.Console.Err("patch create failed", err)
-		version := sm.setCachePool(pool, data)
-		return data, true, version
-	}
-	version := sm.setCachePool(pool, data)
-	operations, err := json.Marshal(patch)
-	if err != nil {
-		sm.Console.Err("patch decode failed", err)
-		return data, true, version
-	}
-	// don't send the operations if they exceed the data size
-	if !sm.ForcePatch && len(operations) > len(data) {
-		return data, true, version
-	}
-
-	return operations, false, version
 }
 
 // buildMessage constructs the WebSocket message JSON using append for efficiency.
@@ -403,36 +682,98 @@ func (sm *Stream) Read(key string, client *Conn) {
 	}
 }
 
-// setCachePool will store data in a pool's cache
-func (sm *Stream) setCachePool(pool *Pool, data []byte) int64 {
-	// log.Println("SET cache version ", pool.Key, strconv.FormatInt(monotonic.Now(), 16))
-	now := monotonic.Now()
-	pool.cache.Version = now
-	pool.cache.Data = data
-	return now
-}
-
-// setCache by key
-func (sm *Stream) setCache(key string, data []byte) int64 {
+// InitCacheObjects initializes a pool's cache with decoded objects for list subscriptions.
+// Only sets version if cache was not previously initialized.
+func (sm *Stream) InitCacheObjects(key string, objects []meta.Object) {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 	pool := sm.getPool(key)
 	if pool == nil {
+		return
+	}
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.cache.Objects = objects
+	if pool.cache.Version == 0 {
+		pool.cache.Version = monotonic.Now()
+	}
+}
+
+// InitCacheObjectsWithVersion initializes a pool's cache and returns the version.
+// Creates the pool if it doesn't exist.
+func (sm *Stream) InitCacheObjectsWithVersion(key string, objects []meta.Object) int64 {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	pool := sm.getPool(key)
+	if pool == nil {
+		// Create pool
 		now := monotonic.Now()
-		// create a pool
 		pool = &Pool{
 			Key: key,
 			cache: Cache{
 				Version: now,
-				Data:    data,
+				Objects: objects,
 			},
 			connections: []*Conn{},
 		}
 		sm.pools[key] = pool
+		sm.poolIndex.insert(key, pool)
 		return now
 	}
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.cache.Objects = objects
+	if pool.cache.Version == 0 {
+		pool.cache.Version = monotonic.Now()
+	}
+	return pool.cache.Version
+}
 
-	return sm.setCachePool(pool, data)
+// InitCacheObject initializes a pool's cache with a decoded object for single object subscriptions.
+// Only sets version if cache was not previously initialized.
+func (sm *Stream) InitCacheObject(key string, obj *meta.Object) {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	pool := sm.getPool(key)
+	if pool == nil {
+		return
+	}
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.cache.Object = obj
+	if pool.cache.Version == 0 {
+		pool.cache.Version = monotonic.Now()
+	}
+}
+
+// InitCacheObjectWithVersion initializes a pool's cache and returns the version.
+// Creates the pool if it doesn't exist.
+func (sm *Stream) InitCacheObjectWithVersion(key string, obj *meta.Object) int64 {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	pool := sm.getPool(key)
+	if pool == nil {
+		// Create pool
+		now := monotonic.Now()
+		pool = &Pool{
+			Key: key,
+			cache: Cache{
+				Version: now,
+				Object:  obj,
+			},
+			connections: []*Conn{},
+		}
+		sm.pools[key] = pool
+		sm.poolIndex.insert(key, pool)
+		return now
+	}
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+	pool.cache.Object = obj
+	if pool.cache.Version == 0 {
+		pool.cache.Version = monotonic.Now()
+	}
+	return pool.cache.Version
 }
 
 // GetCacheVersion by key
@@ -445,33 +786,9 @@ func (sm *Stream) GetCacheVersion(key string) (int64, error) {
 	}
 	pool.mutex.RLock()
 	defer pool.mutex.RUnlock()
-	if len(pool.cache.Data) == 0 {
+	if pool.cache.Version == 0 {
 		return 0, ErrPoolCacheEmpty
 	}
 
 	return pool.cache.Version, nil
-}
-
-func (sm *Stream) Refresh(path string, getDataFn GetFn) (Cache, error) {
-	raw, err := getDataFn(path)
-	if err != nil {
-		return Cache{}, err
-	}
-	if len(raw) == 0 {
-		raw = meta.EmptyObject
-	}
-	cache := Cache{
-		Data: raw,
-	}
-	cacheVersion, err := sm.GetCacheVersion(path)
-	if err != nil {
-		newVersion := sm.setCache(path, raw)
-		// log.Println("NEW version", path, strconv.FormatInt(newVersion, 16))
-		cache.Version = newVersion
-		return cache, nil
-	}
-
-	// log.Println("READ version", path, strconv.FormatInt(cacheVersion, 16))
-	cache.Version = cacheVersion
-	return cache, nil
 }

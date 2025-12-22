@@ -1,6 +1,7 @@
 package stream
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/benitogf/coat"
+	"github.com/benitogf/ooo/meta"
 	hjhttptest "github.com/getlantern/httptest"
 	"github.com/stretchr/testify/require"
 )
@@ -25,10 +27,8 @@ func makeStreamRequestMock(url string) (*http.Request, *hjhttptest.HijackableRes
 
 const domain = "http://example.com"
 
-func TestSnapshot(t *testing.T) {
+func TestInitCacheObject(t *testing.T) {
 	const testKey = "testing"
-	const testData = `{"one": 2}`
-	const testDataUpdated = `{"one": 1}`
 	stream := Stream{
 		Console:   coat.NewConsole(domain, false),
 		pools:     make(map[string]*Pool),
@@ -50,17 +50,18 @@ func TestSnapshot(t *testing.T) {
 	require.Equal(t, testKey, stream.pools[testKey].Key)
 	require.Equal(t, 1, len(stream.pools[testKey].connections))
 
-	stream.setCache(testKey, []byte(testData))
+	obj := &meta.Object{
+		Created: 1000,
+		Index:   "test",
+		Path:    testKey,
+		Data:    json.RawMessage(`{"one": 2}`),
+	}
+	version := stream.InitCacheObjectWithVersion(testKey, obj)
+	require.NotZero(t, version)
 
 	cacheVersion, err := stream.GetCacheVersion(testKey)
 	require.NoError(t, err)
-	require.NotZero(t, cacheVersion)
-
-	pool := stream.getPool(testKey)
-	modifiedData, snapshot, version := stream.patchPool(pool, []byte(testDataUpdated))
-	require.True(t, snapshot)
-	require.NotZero(t, version)
-	require.Equal(t, testDataUpdated, string(modifiedData))
+	require.Equal(t, version, cacheVersion)
 
 	stream.Close(testKey, wsConn)
 	require.Equal(t, 1, len(stream.pools))
@@ -68,53 +69,56 @@ func TestSnapshot(t *testing.T) {
 	require.Equal(t, 0, len(stream.pools[testKey].connections))
 }
 
-func TestPatch(t *testing.T) {
-	const testKey = "testing/*"
-	const testData = `[{"one": 11111111111111111},{"two": 222222222222222},{"three":3333333333333333333333}]`
-	const testDataUpdated = `[{"one":11111111111111111},{"two":222222222222222},{"three":3333333333333333333333},{"four":4}]`
-	const patchOperations = `[{"op":"add","path":"/3","value":{"four":4}}]`
+func TestGenerateListPatch(t *testing.T) {
+	// Test add patch
+	obj := meta.Object{
+		Created: 1000,
+		Index:   "new",
+		Path:    "test/new",
+		Data:    json.RawMessage(`{"four":4}`),
+	}
+	patch, err := generateListPatch("add", 3, &obj)
+	require.NoError(t, err)
+	require.Contains(t, string(patch), `"op":"add"`)
+	require.Contains(t, string(patch), `"path":"/3"`)
 
-	stream := Stream{
-		Console:   coat.NewConsole(domain, false),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-		OnSubscribe: func(key string) error {
-			log.Println("sub", key)
-			return nil
-		},
-		OnUnsubscribe: func(key string) {
-			log.Println("unsub", key)
-		},
+	// Test replace patch
+	patch, err = generateListPatch("replace", 2, &obj)
+	require.NoError(t, err)
+	require.Contains(t, string(patch), `"op":"replace"`)
+	require.Contains(t, string(patch), `"path":"/2"`)
+
+	// Test remove patch
+	patch, err = generateListPatch("remove", 1, nil)
+	require.NoError(t, err)
+	require.Contains(t, string(patch), `"op":"remove"`)
+	require.Contains(t, string(patch), `"path":"/1"`)
+}
+
+func TestGenerateObjectPatch(t *testing.T) {
+	oldObj := &meta.Object{
+		Created: 1000,
+		Updated: 1000,
+		Index:   "test",
+		Path:    "test/1",
+		Data:    json.RawMessage(`{"name":"Alice","status":"active"}`),
+	}
+	newObj := &meta.Object{
+		Created: 1000,
+		Updated: 2000,
+		Index:   "test",
+		Path:    "test/1",
+		Data:    json.RawMessage(`{"name":"Alice","status":"inactive"}`),
 	}
 
-	req, w := makeStreamRequestMock(domain + "/" + testKey)
-
-	wsConn, err := stream.New(testKey, w, req)
+	patch, snapshot, err := generateObjectPatch(oldObj, newObj)
 	require.NoError(t, err)
-	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[testKey].Key)
-	require.Equal(t, 1, len(stream.pools[testKey].connections))
-
-	stream.setCache(testKey, []byte(testData))
-
-	cacheVersion, err := stream.GetCacheVersion(testKey)
-	require.NoError(t, err)
-	require.NotZero(t, cacheVersion)
-
-	pool := stream.getPool(testKey)
-	modifiedData, snapshot, version := stream.patchPool(pool, []byte(testDataUpdated))
 	require.False(t, snapshot)
-	require.NotZero(t, version)
-	require.Equal(t, patchOperations, string(modifiedData))
-
-	stream.Close(testKey, wsConn)
-	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[testKey].Key)
-	require.Equal(t, 0, len(stream.pools[testKey].connections))
+	require.Contains(t, string(patch), `"op":"replace"`)
+	require.Contains(t, string(patch), `/data/status`)
 }
 
 func TestConcurrentBroadcast(t *testing.T) {
-	const testData = `[{"one": 11111111111111111},{"two": 222222222222222},{"three":3333333333333333333333}]`
 	var wg sync.WaitGroup
 
 	stream := Stream{
@@ -151,32 +155,45 @@ func TestConcurrentBroadcast(t *testing.T) {
 	require.Equal(t, "b", stream.pools["b"].Key)
 	require.Equal(t, 1, len(stream.pools["b"].connections))
 
-	stream.setCache("a", []byte(testData))
-	stream.setCache("b", []byte(testData))
+	// Initialize caches with objects
+	objA := &meta.Object{Created: 1000, Index: "a", Path: "a", Data: json.RawMessage(`{"key":"a"}`)}
+	objB := &meta.Object{Created: 1000, Index: "b", Path: "b", Data: json.RawMessage(`{"key":"b"}`)}
+	stream.InitCacheObjectWithVersion("a", objA)
+	stream.InitCacheObjectWithVersion("b", objB)
 
-	fakeGet := func(key string) ([]byte, error) {
-		return []byte(testData), nil
-	}
-
+	// Concurrent broadcasts
+	wg.Add(20)
 	for i := 0; i < 10; i++ {
-		wg.Add(1)
 		go func() {
+			defer wg.Done()
+			newObj := &meta.Object{Created: 1000, Updated: 2000, Index: "a", Path: "a", Data: json.RawMessage(`{"key":"a","updated":true}`)}
 			stream.Broadcast("a", BroadcastOpt{
-				Get: fakeGet,
-				Callback: func() {
-					wg.Done()
+				Key:       "a",
+				Operation: "set",
+				Object:    newObj,
+				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+					return obj, nil
+				},
+				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+					return objs, nil
 				},
 			})
 		}()
 	}
 
 	for y := 0; y < 10; y++ {
-		wg.Add(1)
 		go func() {
-			go stream.Broadcast("b", BroadcastOpt{
-				Get: fakeGet,
-				Callback: func() {
-					wg.Done()
+			defer wg.Done()
+			newObj := &meta.Object{Created: 1000, Updated: 2000, Index: "b", Path: "b", Data: json.RawMessage(`{"key":"b","updated":true}`)}
+			stream.Broadcast("b", BroadcastOpt{
+				Key:       "b",
+				Operation: "set",
+				Object:    newObj,
+				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+					return obj, nil
+				},
+				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+					return objs, nil
 				},
 			})
 		}()

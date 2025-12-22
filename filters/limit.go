@@ -20,6 +20,7 @@ var (
 type Database interface {
 	GetList(path string) ([]meta.Object, error)
 	Del(path string) error
+	DelSilent(path string) error
 }
 
 // LimitFilter maintains a maximum number of entries for a glob pattern path.
@@ -105,6 +106,8 @@ func (lf *LimitFilter) ReadListFilter(path string, objs []meta.Object) ([]meta.O
 
 // Check deletes the oldest entries if over limit.
 // This should be called via AfterWrite to clean up old entries.
+// Uses DelSilent to avoid broadcasting since the broadcast is handled
+// by the add operation's FilterList which already removes the item from the view.
 func (lf *LimitFilter) Check() {
 	lf.mu.Lock()
 	defer lf.mu.Unlock()
@@ -125,10 +128,10 @@ func (lf *LimitFilter) Check() {
 		return entries[i].Created < entries[j].Created
 	})
 
-	// Delete oldest entries to enforce limit
+	// Delete oldest entries to enforce limit (silent - no broadcast)
 	toDelete := len(entries) - lf.limit
 	for i := 0; i < toDelete; i++ {
-		err = lf.db.Del(entries[i].Path)
+		err = lf.db.DelSilent(entries[i].Path)
 		if err != nil {
 			log.Println("LimitFilter["+lf.path+"]: failed to delete entry", entries[i].Path, err)
 			return

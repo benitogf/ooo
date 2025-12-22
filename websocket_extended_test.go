@@ -84,37 +84,66 @@ func TestWebSocketSubscriptionDenied(t *testing.T) {
 }
 
 func TestWebSocketWithVersion(t *testing.T) {
+	var wg sync.WaitGroup
 	app := Server{}
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
 
-	// Set initial data
-	_, err := app.Storage.Set("versiontest", json.RawMessage(`{"version":1}`))
+	// First connect to get initial version and wait for broadcast to update cache
+	app.OpenFilter("versiontest")
+	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/versiontest"}
+	c1, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
 
-	// wait for the broadcast of the write to generate a new version
-	// time.Sleep(1 * time.Millisecond)
-	// Get current version
+	wg.Add(1)
+	go func() {
+		_, _, _ = c1.ReadMessage() // Wait for initial snapshot
+		wg.Done()
+	}()
+	wg.Wait()
+	c1.Close()
+
+	// Set data - this will trigger a broadcast
+	wg.Add(1)
+	c2, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+
+	go func() {
+		_, _, _ = c2.ReadMessage() // Initial snapshot
+		wg.Done()
+	}()
+	wg.Wait()
+
+	wg.Add(1)
+	go func() {
+		_, _, _ = c2.ReadMessage() // Wait for broadcast from Set
+		wg.Done()
+	}()
+
+	_, err = app.Storage.Set("versiontest", json.RawMessage(`{"version":1}`))
+	require.NoError(t, err)
+	wg.Wait()
+	c2.Close()
+
+	// Get current version (after broadcast has updated it)
 	entry, err := app.fetch("versiontest")
 	require.NoError(t, err)
 
-	// log.Println("versiontest", strconv.FormatInt(entry.Version, 16))
 	// Connect with matching version (should not receive initial data)
-	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/versiontest"}
 	q := u.Query()
 	q.Set("v", strconv.FormatInt(entry.Version, 16))
 	u.RawQuery = q.Encode()
 
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	c3, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
-	defer c.Close()
+	defer c3.Close()
 
 	// Set read deadline to avoid blocking
-	c.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+	c3.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
 
 	// Should not receive initial message due to version match
-	_, _, err = c.ReadMessage()
+	_, _, err = c3.ReadMessage()
 	require.Error(t, err) // Should timeout
 }
 

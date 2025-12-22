@@ -204,71 +204,89 @@ func (app *Server) waitStart() error {
 	return nil
 }
 
+// FetchResult holds the result of a fetch operation for initial WebSocket message
+type FetchResult struct {
+	Data    []byte
+	Version int64
+}
+
 // Fetch data, update cache and apply filter
-func (app *Server) fetch(path string) (stream.Cache, error) {
+func (app *Server) fetch(path string) (FetchResult, error) {
 	// Check if any filter exists for static mode validation
 	if app.Static {
 		hasFilter := app.filters.ReadObject.HasMatch(path) != -1 ||
 			app.filters.ReadList.HasMatch(path) != -1
 		if !hasFilter {
-			return stream.Cache{}, filters.ErrRouteNotDefined
+			return FetchResult{}, filters.ErrRouteNotDefined
 		}
 	}
-	return app.Stream.Refresh(path, app.getFilteredData)
-}
 
-// getFilteredData retrieves and filters data for broadcast.
-// Handles both glob (list) and non-glob (single) paths.
-// Uses meta.Object-based filters when available for better performance.
-func (app *Server) getFilteredData(path string) ([]byte, error) {
 	if key.HasGlob(path) {
-		return app.getFilteredList(path)
+		// List subscription
+		objs, err := app.Storage.GetList(path)
+		if err != nil {
+			return FetchResult{}, err
+		}
+		filtered, err := app.filters.ReadList.Check(path, objs, app.Static)
+		if err != nil {
+			return FetchResult{}, err
+		}
+		// Initialize decoded cache (creates pool if needed)
+		version := app.Stream.InitCacheObjectsWithVersion(path, filtered)
+		// Encode for sending
+		data, err := meta.Encode(filtered)
+		if err != nil {
+			return FetchResult{}, err
+		}
+		return FetchResult{Data: data, Version: version}, nil
 	}
-	return app.getFilteredObject(path)
-}
 
-// getFilteredList retrieves and filters list data.
-func (app *Server) getFilteredList(path string) ([]byte, error) {
-	objs, err := app.Storage.GetList(path)
-	if err != nil {
-		return []byte(""), err
-	}
-
-	filtered, err := app.filters.ReadList.Check(path, objs, app.Static)
-	if err != nil {
-		return []byte(""), err
-	}
-	return meta.Encode(filtered)
-}
-
-// getFilteredObject retrieves and filters single object data.
-func (app *Server) getFilteredObject(path string) ([]byte, error) {
+	// Single object subscription
 	obj, err := app.Storage.Get(path)
 	if err != nil {
 		// Object not found - return empty object
 		obj = meta.Object{}
 	}
-
 	filtered, err := app.filters.ReadObject.Check(path, obj, app.Static)
 	if err != nil {
-		return []byte(""), err
+		return FetchResult{}, err
 	}
+	// Initialize decoded cache (creates pool if needed)
+	version := app.Stream.InitCacheObjectWithVersion(path, &filtered)
+	// Encode for sending
+	var data []byte
 	if filtered.Created == 0 && filtered.Index == "" {
-		return meta.EmptyObject, nil
+		data = meta.EmptyObject
+	} else {
+		data, err = meta.Encode(filtered)
+		if err != nil {
+			return FetchResult{}, err
+		}
 	}
-	return meta.Encode(filtered)
+	return FetchResult{Data: data, Version: version}, nil
 }
 
 func (app *Server) watch(sc StorageChan) {
-	broadcastOpt := stream.BroadcastOpt{
-		Get:      app.getFilteredData,
-		Callback: nil,
-	}
 	for {
-		ev := <-sc
+		ev, ok := <-sc
+		if !ok {
+			// Channel closed
+			break
+		}
 		if ev.Key != "" {
 			app.Console.Log("broadcast[" + ev.Key + "]")
-			app.Stream.Broadcast(ev.Key, broadcastOpt)
+			app.Stream.Broadcast(ev.Key, stream.BroadcastOpt{
+				Key:       ev.Key,
+				Operation: ev.Operation,
+				Object:    ev.Object,
+				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+					return app.filters.ReadObject.Check(key, obj, app.Static)
+				},
+				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+					return app.filters.ReadList.Check(key, objs, app.Static)
+				},
+				Static: app.Static,
+			})
 			if app.OnStorageEvent != nil {
 				app.OnStorageEvent(ev)
 			}

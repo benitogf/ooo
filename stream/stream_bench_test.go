@@ -1,290 +1,215 @@
 package stream
 
 import (
+	"encoding/json"
 	"strconv"
 	"testing"
 
 	"github.com/benitogf/coat"
+	"github.com/benitogf/ooo/meta"
 )
 
 const benchDomain = "http://example.com"
 
 // =============================================================================
-// Patch Pool Benchmarks
+// List Manipulation Benchmarks
 // =============================================================================
 
-// BenchmarkPatchPool benchmarks the patchPool function which creates JSON patches
-func BenchmarkPatchPool(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// Simulate a list with objects
-	oldData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"}]`)
-	newData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"},{"id":"3","name":"Charlie"}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
-	}
-}
-
-// BenchmarkPatchPoolAppend benchmarks patchPool with append-only optimization (now always enabled in jsonpatch)
-func BenchmarkPatchPoolAppend(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// Simulate a list with objects - append case
-	oldData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"}]`)
-	newData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"},{"id":"3","name":"Charlie"}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
-	}
-}
-
-// BenchmarkPatchPoolSnapshot benchmarks patchPool when snapshot is forced (NoPatch=true)
-func BenchmarkPatchPoolSnapshot(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-		NoPatch:   true,
-	}
-
-	oldData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"}]`)
-	newData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"},{"id":"3","name":"Charlie"}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
-	}
-}
-
-// BenchmarkPatchPoolUpdateSingleItem benchmarks patching when a single item in a list is updated
-func BenchmarkPatchPoolUpdateSingleItem(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// List with 10 items, update one item's field
-	oldData := []byte(`[{"id":"1","name":"Alice","status":"active"},{"id":"2","name":"Bob","status":"active"},{"id":"3","name":"Charlie","status":"active"},{"id":"4","name":"David","status":"active"},{"id":"5","name":"Eve","status":"active"},{"id":"6","name":"Frank","status":"active"},{"id":"7","name":"Grace","status":"active"},{"id":"8","name":"Henry","status":"active"},{"id":"9","name":"Ivy","status":"active"},{"id":"10","name":"Jack","status":"active"}]`)
-	newData := []byte(`[{"id":"1","name":"Alice","status":"active"},{"id":"2","name":"Bob","status":"active"},{"id":"3","name":"Charlie","status":"active"},{"id":"4","name":"David","status":"active"},{"id":"5","name":"Eve","status":"inactive"},{"id":"6","name":"Frank","status":"active"},{"id":"7","name":"Grace","status":"active"},{"id":"8","name":"Henry","status":"active"},{"id":"9","name":"Ivy","status":"active"},{"id":"10","name":"Jack","status":"active"}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
-	}
-}
-
-// BenchmarkPatchPoolUpdateMultipleItems benchmarks patching when multiple items in a list are updated
-func BenchmarkPatchPoolUpdateMultipleItems(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// List with 10 items, update 3 items
-	oldData := []byte(`[{"id":"1","name":"Alice","status":"active"},{"id":"2","name":"Bob","status":"active"},{"id":"3","name":"Charlie","status":"active"},{"id":"4","name":"David","status":"active"},{"id":"5","name":"Eve","status":"active"},{"id":"6","name":"Frank","status":"active"},{"id":"7","name":"Grace","status":"active"},{"id":"8","name":"Henry","status":"active"},{"id":"9","name":"Ivy","status":"active"},{"id":"10","name":"Jack","status":"active"}]`)
-	newData := []byte(`[{"id":"1","name":"Alice","status":"inactive"},{"id":"2","name":"Bob","status":"active"},{"id":"3","name":"Charlie","status":"active"},{"id":"4","name":"David","status":"active"},{"id":"5","name":"Eve","status":"inactive"},{"id":"6","name":"Frank","status":"active"},{"id":"7","name":"Grace","status":"active"},{"id":"8","name":"Henry","status":"active"},{"id":"9","name":"Ivy","status":"inactive"},{"id":"10","name":"Jack","status":"active"}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
-	}
-}
-
-// BenchmarkPatchPoolRemoveItem benchmarks patching when an item is removed from a list
-func BenchmarkPatchPoolRemoveItem(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// List with 5 items, remove one
-	oldData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"},{"id":"3","name":"Charlie"},{"id":"4","name":"David"},{"id":"5","name":"Eve"}]`)
-	newData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"},{"id":"4","name":"David"},{"id":"5","name":"Eve"}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
-	}
-}
-
-// BenchmarkPatchPoolLargeList benchmarks patching a large list with a single update
-func BenchmarkPatchPoolLargeList(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// Build a list with 100 items
-	oldItems := make([]byte, 0, 10000)
-	newItems := make([]byte, 0, 10000)
-	oldItems = append(oldItems, '[')
-	newItems = append(newItems, '[')
-
+// BenchmarkInsertSorted benchmarks inserting into a sorted list
+func BenchmarkInsertSorted(b *testing.B) {
+	// Create a base list of 100 objects
+	baseList := make([]meta.Object, 100)
 	for i := 0; i < 100; i++ {
-		if i > 0 {
-			oldItems = append(oldItems, ',')
-			newItems = append(newItems, ',')
-		}
-		item := `{"id":"` + strconv.Itoa(i) + `","name":"User` + strconv.Itoa(i) + `","status":"active"}`
-		oldItems = append(oldItems, item...)
-		if i == 50 {
-			// Update item 50
-			newItems = append(newItems, `{"id":"50","name":"User50","status":"inactive"}`...)
-		} else {
-			newItems = append(newItems, item...)
+		baseList[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
 		}
 	}
-	oldItems = append(oldItems, ']')
-	newItems = append(newItems, ']')
 
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldItems,
-			Version: 1,
-		},
+	newObj := meta.Object{
+		Created: 50500, // Insert in the middle
+		Index:   "new",
+		Path:    "users/new",
+		Data:    json.RawMessage(`{"id":"new"}`),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldItems
-		_, _, _ = stream.patchPool(pool, newItems)
+		list := make([]meta.Object, len(baseList))
+		copy(list, baseList)
+		_, _ = insertSorted(list, newObj)
 	}
 }
 
-// BenchmarkPatchPoolLargeListAppend benchmarks appending to a large list
-func BenchmarkPatchPoolLargeListAppend(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	// Build a list with 100 items
-	oldItems := make([]byte, 0, 10000)
-	oldItems = append(oldItems, '[')
+// BenchmarkInsertSortedAppend benchmarks appending to end of sorted list
+func BenchmarkInsertSortedAppend(b *testing.B) {
+	baseList := make([]meta.Object, 100)
 	for i := 0; i < 100; i++ {
-		if i > 0 {
-			oldItems = append(oldItems, ',')
+		baseList[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
 		}
-		item := `{"id":"` + strconv.Itoa(i) + `","name":"User` + strconv.Itoa(i) + `"}`
-		oldItems = append(oldItems, item...)
 	}
-	oldItems = append(oldItems, ']')
 
-	// New list with 101 items (append one)
-	newItems := make([]byte, len(oldItems)+50)
-	copy(newItems, oldItems[:len(oldItems)-1]) // Copy without closing bracket
-	newItems = newItems[:len(oldItems)-1]
-	newItems = append(newItems, `,{"id":"100","name":"User100"}]`...)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldItems,
-			Version: 1,
-		},
+	newObj := meta.Object{
+		Created: 200000, // Append at end
+		Index:   "new",
+		Path:    "users/new",
+		Data:    json.RawMessage(`{"id":"new"}`),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldItems
-		_, _, _ = stream.patchPool(pool, newItems)
+		list := make([]meta.Object, len(baseList))
+		copy(list, baseList)
+		_, _ = insertSorted(list, newObj)
 	}
 }
 
-// BenchmarkPatchPoolNestedObjects benchmarks patching nested objects in a list
-func BenchmarkPatchPoolNestedObjects(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
+// BenchmarkUpdateInList benchmarks updating an item in a list
+func BenchmarkUpdateInList(b *testing.B) {
+	baseList := make([]meta.Object, 100)
+	for i := 0; i < 100; i++ {
+		baseList[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `","status":"active"}`),
+		}
 	}
 
-	oldData := []byte(`[{"id":"1","profile":{"name":"Alice","settings":{"theme":"dark","notifications":true}}},{"id":"2","profile":{"name":"Bob","settings":{"theme":"light","notifications":false}}}]`)
-	newData := []byte(`[{"id":"1","profile":{"name":"Alice","settings":{"theme":"light","notifications":true}}},{"id":"2","profile":{"name":"Bob","settings":{"theme":"light","notifications":false}}}]`)
-
-	pool := &Pool{
-		Key: "users/*",
-		cache: Cache{
-			Data:    oldData,
-			Version: 1,
-		},
+	updatedObj := meta.Object{
+		Created: 50000,
+		Index:   "50",
+		Path:    "users/50",
+		Data:    json.RawMessage(`{"id":"50","status":"inactive"}`),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		_, _, _ = stream.patchPool(pool, newData)
+		list := make([]meta.Object, len(baseList))
+		copy(list, baseList)
+		_, _, _ = updateInList(list, updatedObj)
+	}
+}
+
+// BenchmarkRemoveFromList benchmarks removing an item from a list
+func BenchmarkRemoveFromList(b *testing.B) {
+	baseList := make([]meta.Object, 100)
+	for i := 0; i < 100; i++ {
+		baseList[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
+		}
+	}
+
+	objToRemove := meta.Object{
+		Path: "users/50",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		list := make([]meta.Object, len(baseList))
+		copy(list, baseList)
+		_, _, _ = removeFromList(list, objToRemove)
+	}
+}
+
+// =============================================================================
+// Patch Generation Benchmarks
+// =============================================================================
+
+// BenchmarkGenerateListPatchAdd benchmarks generating an add patch for lists
+func BenchmarkGenerateListPatchAdd(b *testing.B) {
+	obj := meta.Object{
+		Created: 1000,
+		Index:   "new",
+		Path:    "users/new",
+		Data:    json.RawMessage(`{"id":"new","name":"New User","status":"active"}`),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = generateListPatch("add", 5, &obj)
+	}
+}
+
+// BenchmarkGenerateListPatchReplace benchmarks generating a replace patch for lists
+func BenchmarkGenerateListPatchReplace(b *testing.B) {
+	obj := meta.Object{
+		Created: 1000,
+		Index:   "50",
+		Path:    "users/50",
+		Data:    json.RawMessage(`{"id":"50","name":"Updated User","status":"inactive"}`),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = generateListPatch("replace", 50, &obj)
+	}
+}
+
+// BenchmarkGenerateListPatchRemove benchmarks generating a remove patch for lists
+func BenchmarkGenerateListPatchRemove(b *testing.B) {
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = generateListPatch("remove", 50, nil)
+	}
+}
+
+// BenchmarkGenerateObjectPatch benchmarks generating a patch for single objects
+func BenchmarkGenerateObjectPatch(b *testing.B) {
+	oldObj := &meta.Object{
+		Created: 1000,
+		Updated: 1000,
+		Index:   "user1",
+		Path:    "users/user1",
+		Data:    json.RawMessage(`{"id":"user1","name":"Alice","status":"active"}`),
+	}
+	newObj := &meta.Object{
+		Created: 1000,
+		Updated: 2000,
+		Index:   "user1",
+		Path:    "users/user1",
+		Data:    json.RawMessage(`{"id":"user1","name":"Alice","status":"inactive"}`),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = generateObjectPatch(oldObj, newObj)
+	}
+}
+
+// BenchmarkGenerateObjectPatchLarge benchmarks patch generation for large objects
+func BenchmarkGenerateObjectPatchLarge(b *testing.B) {
+	// Build large nested object
+	largeData := `{"id":"user1","profile":{"name":"Alice","email":"alice@example.com","settings":{"theme":"dark","notifications":true,"language":"en","timezone":"UTC"}},"metadata":{"created":"2024-01-01","updated":"2024-01-02","version":1}}`
+	oldObj := &meta.Object{
+		Created: 1000,
+		Updated: 1000,
+		Index:   "user1",
+		Path:    "users/user1",
+		Data:    json.RawMessage(largeData),
+	}
+
+	updatedData := `{"id":"user1","profile":{"name":"Alice","email":"alice@example.com","settings":{"theme":"light","notifications":true,"language":"en","timezone":"UTC"}},"metadata":{"created":"2024-01-01","updated":"2024-01-02","version":2}}`
+	newObj := &meta.Object{
+		Created: 1000,
+		Updated: 2000,
+		Index:   "user1",
+		Path:    "users/user1",
+		Data:    json.RawMessage(updatedData),
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _, _ = generateObjectPatch(oldObj, newObj)
 	}
 }
 
@@ -292,40 +217,50 @@ func BenchmarkPatchPoolNestedObjects(b *testing.B) {
 // Cache Benchmarks
 // =============================================================================
 
-// BenchmarkSetCacheNew benchmarks setting cache for a new key
-func BenchmarkSetCacheNew(b *testing.B) {
+// BenchmarkInitCacheObject benchmarks initializing cache for a single object
+func BenchmarkInitCacheObject(b *testing.B) {
 	stream := &Stream{
 		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
 
-	data := []byte(`{"id":"1","name":"test"}`)
+	obj := &meta.Object{
+		Created: 1000,
+		Index:   "1",
+		Path:    "test/1",
+		Data:    json.RawMessage(`{"id":"1","name":"test"}`),
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := "test/" + strconv.Itoa(i)
-		_ = stream.setCache(key, data)
+		_ = stream.InitCacheObjectWithVersion(key, obj)
 	}
 }
 
-// BenchmarkSetCacheExisting benchmarks updating cache for an existing key
-func BenchmarkSetCacheExisting(b *testing.B) {
+// BenchmarkInitCacheObjects benchmarks initializing cache for a list
+func BenchmarkInitCacheObjects(b *testing.B) {
 	stream := &Stream{
 		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 	}
 
-	key := "test/existing"
-	data := []byte(`{"id":"1","name":"test"}`)
-	stream.setCache(key, data)
-
-	newData := []byte(`{"id":"1","name":"updated"}`)
+	objects := make([]meta.Object, 10)
+	for i := 0; i < 10; i++ {
+		objects[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "test/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
+		}
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = stream.setCache(key, newData)
+		key := "test/*"
+		_ = stream.InitCacheObjectsWithVersion(key, objects)
 	}
 }
 
@@ -338,8 +273,13 @@ func BenchmarkGetCacheVersion(b *testing.B) {
 	}
 
 	key := "test/version"
-	data := []byte(`{"id":"1","name":"test"}`)
-	stream.setCache(key, data)
+	obj := &meta.Object{
+		Created: 1000,
+		Index:   "version",
+		Path:    key,
+		Data:    json.RawMessage(`{"id":"1","name":"test"}`),
+	}
+	stream.InitCacheObjectWithVersion(key, obj)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -351,136 +291,63 @@ func BenchmarkGetCacheVersion(b *testing.B) {
 // Broadcast Benchmarks
 // =============================================================================
 
-// BenchmarkBroadcastSinglePool benchmarks broadcasting to a single pool
+// BenchmarkBroadcastSinglePool benchmarks broadcasting to a single pool (object)
 func BenchmarkBroadcastSinglePool(b *testing.B) {
 	stream := &Stream{
 		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
-		NoPatch:   true, // Use snapshot to isolate broadcast overhead
+		NoPatch:   true,
 		OnSubscribe: func(key string) error {
 			return nil
 		},
 		OnUnsubscribe: func(key string) {},
 	}
 
-	// Create a pool without actual websocket connections
+	obj := &meta.Object{
+		Created: 1000,
+		Index:   "single",
+		Path:    "test/single",
+		Data:    json.RawMessage(`{"id":"1"}`),
+	}
+
 	pool := &Pool{
 		Key:         "test/single",
-		connections: []*Conn{}, // Empty connections to avoid websocket writes
+		connections: []*Conn{},
 		cache: Cache{
-			Data:    []byte(`{"id":"1"}`),
+			Object:  obj,
 			Version: 1,
 		},
 	}
 	stream.pools["test/single"] = pool
 	stream.poolIndex.insert("test/single", pool)
 
-	data := []byte(`{"id":"1","updated":true}`)
-	getFn := func(key string) ([]byte, error) {
-		return data, nil
+	newObj := &meta.Object{
+		Created: 1000,
+		Updated: 2000,
+		Index:   "single",
+		Path:    "test/single",
+		Data:    json.RawMessage(`{"id":"1","updated":true}`),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		stream.Broadcast("test/single", BroadcastOpt{Get: getFn})
-	}
-}
-
-// BenchmarkBroadcastWildcard benchmarks broadcasting with wildcard matching
-func BenchmarkBroadcastWildcard(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-		NoPatch:   true,
-		OnSubscribe: func(key string) error {
-			return nil
-		},
-		OnUnsubscribe: func(key string) {},
-	}
-
-	// Create 100 pools under users/*
-	for i := 0; i < 100; i++ {
-		key := "users/" + strconv.Itoa(i)
-		pool := &Pool{
-			Key:         key,
-			connections: []*Conn{},
-			cache: Cache{
-				Data:    []byte(`{"id":"` + strconv.Itoa(i) + `"}`),
-				Version: 1,
+		stream.Broadcast("test/single", BroadcastOpt{
+			Key:       "test/single",
+			Operation: "set",
+			Object:    newObj,
+			FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+				return obj, nil
 			},
-		}
-		stream.pools[key] = pool
-		stream.poolIndex.insert(key, pool)
-	}
-
-	// Also add a wildcard pool
-	wildcardPool := &Pool{
-		Key:         "users/*",
-		connections: []*Conn{},
-		cache: Cache{
-			Data:    []byte(`[]`),
-			Version: 1,
-		},
-	}
-	stream.pools["users/*"] = wildcardPool
-	stream.poolIndex.insert("users/*", wildcardPool)
-
-	data := []byte(`{"id":"50","updated":true}`)
-	getFn := func(key string) ([]byte, error) {
-		return data, nil
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Broadcast to a specific user - should match both exact and wildcard pool
-		stream.Broadcast("users/50", BroadcastOpt{Get: getFn})
-	}
-}
-
-// BenchmarkBroadcastToWildcard benchmarks broadcasting with a wildcard path
-func BenchmarkBroadcastToWildcard(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-		NoPatch:   true,
-		OnSubscribe: func(key string) error {
-			return nil
-		},
-		OnUnsubscribe: func(key string) {},
-	}
-
-	// Create 100 pools under users/*
-	for i := 0; i < 100; i++ {
-		key := "users/" + strconv.Itoa(i)
-		pool := &Pool{
-			Key:         key,
-			connections: []*Conn{},
-			cache: Cache{
-				Data:    []byte(`{"id":"` + strconv.Itoa(i) + `"}`),
-				Version: 1,
+			FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+				return objs, nil
 			},
-		}
-		stream.pools[key] = pool
-		stream.poolIndex.insert(key, pool)
-	}
-
-	data := []byte(`[{"id":"1"},{"id":"2"}]`)
-	getFn := func(key string) ([]byte, error) {
-		return data, nil
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Broadcast with wildcard - should match all 100 pools
-		stream.Broadcast("users/*", BroadcastOpt{Get: getFn})
+		})
 	}
 }
 
-// BenchmarkBroadcastWithPatch benchmarks broadcasting with JSON patch generation
-func BenchmarkBroadcastWithPatch(b *testing.B) {
+// BenchmarkBroadcastListAdd benchmarks broadcasting an add to a list pool
+func BenchmarkBroadcastListAdd(b *testing.B) {
 	stream := &Stream{
 		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
@@ -491,34 +358,57 @@ func BenchmarkBroadcastWithPatch(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	// Create a pool with initial data
+	// Create initial list
+	objects := make([]meta.Object, 10)
+	for i := 0; i < 10; i++ {
+		objects[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
+		}
+	}
+
 	pool := &Pool{
 		Key:         "users/*",
 		connections: []*Conn{},
 		cache: Cache{
-			Data:    []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"}]`),
+			Objects: objects,
 			Version: 1,
 		},
 	}
 	stream.pools["users/*"] = pool
 	stream.poolIndex.insert("users/*", pool)
 
-	// Simulate updating one item in the list
-	newData := []byte(`[{"id":"1","name":"Alice Updated"},{"id":"2","name":"Bob"}]`)
-	getFn := func(key string) ([]byte, error) {
-		return newData, nil
+	newObj := &meta.Object{
+		Created: 20000,
+		Index:   "new",
+		Path:    "users/new",
+		Data:    json.RawMessage(`{"id":"new","name":"New User"}`),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// Reset cache to original state
-		pool.cache.Data = []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"}]`)
-		stream.Broadcast("users/*", BroadcastOpt{Get: getFn})
+		// Reset cache
+		pool.cache.Objects = make([]meta.Object, len(objects))
+		copy(pool.cache.Objects, objects)
+
+		stream.Broadcast("users/new", BroadcastOpt{
+			Key:       "users/new",
+			Operation: "set",
+			Object:    newObj,
+			FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+				return obj, nil
+			},
+			FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+				return objs, nil
+			},
+		})
 	}
 }
 
-// BenchmarkBroadcastListAppend benchmarks broadcasting when appending to a list
-func BenchmarkBroadcastListAppend(b *testing.B) {
+// BenchmarkBroadcastListUpdate benchmarks broadcasting an update to a list pool
+func BenchmarkBroadcastListUpdate(b *testing.B) {
 	stream := &Stream{
 		Console:   coat.NewConsole(benchDomain, true),
 		pools:     make(map[string]*Pool),
@@ -529,28 +419,109 @@ func BenchmarkBroadcastListAppend(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	oldData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"}]`)
+	objects := make([]meta.Object, 100)
+	for i := 0; i < 100; i++ {
+		objects[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `","status":"active"}`),
+		}
+	}
+
 	pool := &Pool{
 		Key:         "users/*",
 		connections: []*Conn{},
 		cache: Cache{
-			Data:    oldData,
+			Objects: objects,
 			Version: 1,
 		},
 	}
 	stream.pools["users/*"] = pool
 	stream.poolIndex.insert("users/*", pool)
 
-	// Append a new item
-	newData := []byte(`[{"id":"1","name":"Alice"},{"id":"2","name":"Bob"},{"id":"3","name":"Charlie"}]`)
-	getFn := func(key string) ([]byte, error) {
-		return newData, nil
+	updatedObj := &meta.Object{
+		Created: 50000,
+		Updated: 60000,
+		Index:   "50",
+		Path:    "users/50",
+		Data:    json.RawMessage(`{"id":"50","status":"inactive"}`),
 	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		pool.cache.Data = oldData
-		stream.Broadcast("users/*", BroadcastOpt{Get: getFn})
+		// Reset cache
+		pool.cache.Objects = make([]meta.Object, len(objects))
+		copy(pool.cache.Objects, objects)
+
+		stream.Broadcast("users/50", BroadcastOpt{
+			Key:       "users/50",
+			Operation: "set",
+			Object:    updatedObj,
+			FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+				return obj, nil
+			},
+			FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+				return objs, nil
+			},
+		})
+	}
+}
+
+// BenchmarkBroadcastListRemove benchmarks broadcasting a remove from a list pool
+func BenchmarkBroadcastListRemove(b *testing.B) {
+	stream := &Stream{
+		Console:   coat.NewConsole(benchDomain, true),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
+		OnSubscribe: func(key string) error {
+			return nil
+		},
+		OnUnsubscribe: func(key string) {},
+	}
+
+	objects := make([]meta.Object, 100)
+	for i := 0; i < 100; i++ {
+		objects[i] = meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    "users/" + strconv.Itoa(i),
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
+		}
+	}
+
+	pool := &Pool{
+		Key:         "users/*",
+		connections: []*Conn{},
+		cache: Cache{
+			Objects: objects,
+			Version: 1,
+		},
+	}
+	stream.pools["users/*"] = pool
+	stream.poolIndex.insert("users/*", pool)
+
+	objToRemove := &meta.Object{
+		Path: "users/50",
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Reset cache
+		pool.cache.Objects = make([]meta.Object, len(objects))
+		copy(pool.cache.Objects, objects)
+
+		stream.Broadcast("users/50", BroadcastOpt{
+			Key:       "users/50",
+			Operation: "del",
+			Object:    objToRemove,
+			FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+				return obj, nil
+			},
+			FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+				return objs, nil
+			},
+		})
 	}
 }
 
@@ -572,8 +543,7 @@ func BenchmarkNewConnection(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		key := "test/" + strconv.Itoa(i%1000) // Cycle through 1000 keys
-		// Directly call internal new() to avoid websocket upgrade
+		key := "test/" + strconv.Itoa(i%1000)
 		stream.new(key, nil)
 	}
 }
@@ -590,7 +560,6 @@ func BenchmarkNewConnectionPreallocated(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	// Pre-allocate 1000 pools
 	paths := make([]string, 1000)
 	for i := 0; i < 1000; i++ {
 		paths[i] = "test/" + strconv.Itoa(i)
@@ -616,60 +585,12 @@ func BenchmarkNewConnectionExistingPool(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	// Create the pool first
 	key := "test/existing"
 	stream.new(key, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		stream.new(key, nil)
-	}
-}
-
-// =============================================================================
-// Refresh Benchmarks
-// =============================================================================
-
-// BenchmarkRefresh benchmarks the Refresh function
-func BenchmarkRefresh(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	data := []byte(`{"id":"1","name":"test"}`)
-	getFn := func(key string) ([]byte, error) {
-		return data, nil
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := "test/" + strconv.Itoa(i%100) // Cycle through 100 keys
-		_, _ = stream.Refresh(key, getFn)
-	}
-}
-
-// BenchmarkRefreshExisting benchmarks Refresh for existing cache
-func BenchmarkRefreshExisting(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-	}
-
-	key := "test/existing"
-	data := []byte(`{"id":"1","name":"test"}`)
-	getFn := func(key string) ([]byte, error) {
-		return data, nil
-	}
-
-	// Prime the cache
-	stream.setCache(key, data)
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = stream.Refresh(key, getFn)
 	}
 }
 
@@ -690,14 +611,19 @@ func BenchmarkConcurrentBroadcast(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	// Create 10 pools
 	for i := 0; i < 10; i++ {
 		key := "pool/" + strconv.Itoa(i)
+		obj := &meta.Object{
+			Created: int64(i * 1000),
+			Index:   strconv.Itoa(i),
+			Path:    key,
+			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
+		}
 		pool := &Pool{
 			Key:         key,
 			connections: []*Conn{},
 			cache: Cache{
-				Data:    []byte(`{"id":"` + strconv.Itoa(i) + `"}`),
+				Object:  obj,
 				Version: 1,
 			},
 		}
@@ -705,60 +631,28 @@ func BenchmarkConcurrentBroadcast(b *testing.B) {
 		stream.poolIndex.insert(key, pool)
 	}
 
-	data := []byte(`{"updated":true}`)
-	getFn := func(key string) ([]byte, error) {
-		return data, nil
-	}
-
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
 			key := "pool/" + strconv.Itoa(i%10)
-			stream.Broadcast(key, BroadcastOpt{Get: getFn})
-			i++
-		}
-	})
-}
-
-// BenchmarkConcurrentBroadcastWithPatch benchmarks concurrent broadcasts with patch generation
-func BenchmarkConcurrentBroadcastWithPatch(b *testing.B) {
-	stream := &Stream{
-		Console:   coat.NewConsole(benchDomain, true),
-		pools:     make(map[string]*Pool),
-		poolIndex: newPoolTrie(),
-		OnSubscribe: func(key string) error {
-			return nil
-		},
-		OnUnsubscribe: func(key string) {},
-	}
-
-	// Create 10 pools with list data
-	for i := 0; i < 10; i++ {
-		key := "pool/" + strconv.Itoa(i)
-		pool := &Pool{
-			Key:         key,
-			connections: []*Conn{},
-			cache: Cache{
-				Data:    []byte(`[{"id":"1"},{"id":"2"}]`),
-				Version: 1,
-			},
-		}
-		stream.pools[key] = pool
-		stream.poolIndex.insert(key, pool)
-	}
-
-	newData := []byte(`[{"id":"1"},{"id":"2"},{"id":"3"}]`)
-	getFn := func(key string) ([]byte, error) {
-		return newData, nil
-	}
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		i := 0
-		for pb.Next() {
-			key := "pool/" + strconv.Itoa(i%10)
-			stream.Broadcast(key, BroadcastOpt{Get: getFn})
+			obj := &meta.Object{
+				Created: int64(i * 1000),
+				Index:   strconv.Itoa(i % 10),
+				Path:    key,
+				Data:    json.RawMessage(`{"updated":true}`),
+			}
+			stream.Broadcast(key, BroadcastOpt{
+				Key:       key,
+				Operation: "set",
+				Object:    obj,
+				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+					return obj, nil
+				},
+				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+					return objs, nil
+				},
+			})
 			i++
 		}
 	})
@@ -780,7 +674,6 @@ func BenchmarkBuildMessage(b *testing.B) {
 
 // BenchmarkBuildMessageLarge benchmarks buildMessage with large data
 func BenchmarkBuildMessageLarge(b *testing.B) {
-	// Build a large JSON array
 	data := make([]byte, 0, 10000)
 	data = append(data, '[')
 	for i := 0; i < 100; i++ {

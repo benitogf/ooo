@@ -2,11 +2,14 @@ package ooo
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
 func TestStorage(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := &Server{}
 	app.Silence = true
 	app.Start("localhost:0")
@@ -16,7 +19,9 @@ func TestStorage(t *testing.T) {
 }
 
 func TestStreamBroadcast(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
 	app.Silence = true
 	app.ForcePatch = true
@@ -26,7 +31,9 @@ func TestStreamBroadcast(t *testing.T) {
 }
 
 func TestStreamGlobBroadcast(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
 	app.Silence = true
 	app.ForcePatch = true
@@ -36,10 +43,11 @@ func TestStreamGlobBroadcast(t *testing.T) {
 }
 
 func TestStreamGlobBroadcastConcurrent(t *testing.T) {
-	t.Skip()
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
-	app.Silence = false
+	app.Silence = true
 	app.ForcePatch = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
@@ -47,7 +55,9 @@ func TestStreamGlobBroadcastConcurrent(t *testing.T) {
 }
 
 func TestStreamBroadcastFilter(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
 	app.Silence = true
 	app.ForcePatch = true
@@ -56,7 +66,9 @@ func TestStreamBroadcastFilter(t *testing.T) {
 }
 
 func TestStreamForcePatch(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
 	app.Silence = true
 	defer app.Close(os.Interrupt)
@@ -64,7 +76,9 @@ func TestStreamForcePatch(t *testing.T) {
 }
 
 func TestStreamNoPatch(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
 	app.Silence = true
 	defer app.Close(os.Interrupt)
@@ -72,7 +86,9 @@ func TestStreamNoPatch(t *testing.T) {
 }
 
 func TestGetN(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := &Server{}
 	app.Silence = true
 	app.Start("localhost:0")
@@ -81,7 +97,9 @@ func TestGetN(t *testing.T) {
 }
 
 func TestKeysRange(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := &Server{}
 	app.Silence = true
 	app.Start("localhost:0")
@@ -90,7 +108,9 @@ func TestKeysRange(t *testing.T) {
 }
 
 func TestStreamItemGlobBroadcastLevel(t *testing.T) {
-	// t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := Server{}
 	app.Silence = true
 	app.ForcePatch = true
@@ -101,6 +121,9 @@ func TestStreamItemGlobBroadcastLevel(t *testing.T) {
 }
 
 func TestBatchSet(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := &Server{}
 	app.Silence = true
 	app.Start("localhost:0")
@@ -109,6 +132,9 @@ func TestBatchSet(t *testing.T) {
 }
 
 func TestStreamPatch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := &Server{}
 	app.Silence = true
 	app.Start("localhost:0")
@@ -117,6 +143,9 @@ func TestStreamPatch(t *testing.T) {
 }
 
 func TestStreamLimitFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	app := &Server{}
 	app.Silence = true
 	app.Start("localhost:0")
@@ -125,6 +154,9 @@ func TestStreamLimitFilter(t *testing.T) {
 }
 
 func TestBeforeRead(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	db := &MemoryStorage{}
 	err := db.Start(StorageOpt{})
 	if err != nil {
@@ -135,6 +167,9 @@ func TestBeforeRead(t *testing.T) {
 }
 
 func TestWatchStorageNoop(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	db := &MemoryStorage{}
 	err := db.Start(StorageOpt{})
 	if err != nil {

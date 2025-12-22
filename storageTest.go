@@ -1163,28 +1163,14 @@ func StorageBeforeReadTest(db Database, t *testing.T) {
 	db.Clear()
 }
 
-// WatchStorageNoopTest tests that WatchStorageNoop properly closes Done channels
+// WatchStorageNoopTest tests that WatchStorageNoop properly drains events
 func WatchStorageNoopTest(db Database, t *testing.T) {
 	// Start a goroutine to drain the watcher
 	go WatchStorageNoop(db)
 
-	// Send an event with a Done channel and verify it gets closed
-	done := make(chan struct{})
-	db.Watch() <- StorageEvent{Key: "test/1", Operation: "set", Done: done}
-
-	// Wait for Done to be closed (with timeout)
-	select {
-	case <-done:
-		// Success - Done was closed
-	case <-time.After(time.Second):
-		t.Fatal("WatchStorageNoop did not close Done channel within timeout")
-	}
-
-	// Send an event without Done channel (fire-and-forget) - should not panic
-	db.Watch() <- StorageEvent{Key: "test/2", Operation: "set", Done: nil}
-
-	// Give it a moment to process
-	time.Sleep(10 * time.Millisecond)
+	// Send events and verify they are drained without blocking
+	db.Watch() <- StorageEvent{Key: "test/1", Operation: "set"}
+	db.Watch() <- StorageEvent{Key: "test/2", Operation: "set"}
 }
 
 func StorageBatchSetTest(server *Server, t *testing.T, n int) {

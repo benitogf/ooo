@@ -33,15 +33,15 @@ func (app *Server) ws(w http.ResponseWriter, r *http.Request) error {
 	}
 
 	// send initial msg
-	entry, err := app.fetch(_key)
+	result, err := app.fetch(_key)
 	if err != nil {
 		app.Console.Err("ooo: filtered route", err)
 		return err
 	}
 
-	// log.Println("version", version, "entry.Version", strconv.FormatInt(entry.Version, 16), version != strconv.FormatInt(entry.Version, 16))
-	if version != strconv.FormatInt(entry.Version, 16) {
-		go app.Stream.Write(client, entry.Data, true, entry.Version)
+	// log.Println("version", version, "result.Version", strconv.FormatInt(result.Version, 16), version != strconv.FormatInt(result.Version, 16))
+	if version != strconv.FormatInt(result.Version, 16) {
+		go app.Stream.Write(client, result.Data, true, result.Version)
 	}
 	app.Stream.Read(_key, client)
 	return nil

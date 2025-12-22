@@ -325,17 +325,17 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 
 	index := key.LastIndex(path)
 	created, updated := db.Peek(path, now)
-	// Store struct directly - no JSON encoding on write
-	db.mem.Store(path, &meta.Object{
+	obj := &meta.Object{
 		Created: created,
 		Updated: updated,
 		Index:   index,
 		Path:    path,
 		Data:    data,
-	})
+	}
+	db.mem.Store(path, obj)
 
 	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-		db.watcher <- StorageEvent{Key: path, Operation: "set"}
+		db.watcher <- StorageEvent{Key: path, Operation: "set", Object: obj}
 	}
 	return index, nil
 }
@@ -359,27 +359,28 @@ func (db *MemoryStorage) Push(path string, data json.RawMessage) (string, error)
 	index := key.LastIndex(newPath)
 	now := monotonic.Now()
 
-	// Store struct directly - no JSON encoding on write
-	db.mem.Store(newPath, &meta.Object{
+	obj := &meta.Object{
 		Created: now,
 		Updated: now,
 		Index:   index,
 		Path:    newPath,
 		Data:    data,
-	})
+	}
+	db.mem.Store(newPath, obj)
 
 	if !key.Contains(db.noBroadcastKeys, newPath) && db.Active() {
-		db.watcher <- StorageEvent{Key: newPath, Operation: "set"}
+		db.watcher <- StorageEvent{Key: newPath, Operation: "set", Object: obj}
 	}
 
 	return index, nil
 }
 
 // patchSingle applies a patch to a single key (non-glob path).
-func (db *MemoryStorage) patchSingle(path string, data json.RawMessage, now int64) (string, error) {
+// Returns the patched object for broadcast.
+func (db *MemoryStorage) patchSingle(path string, data json.RawMessage, now int64) (*meta.Object, error) {
 	raw, found := db.mem.Load(path)
 	if !found {
-		return path, ErrNotFound
+		return nil, ErrNotFound
 	}
 
 	// Direct struct access - no JSON decode needed
@@ -387,25 +388,25 @@ func (db *MemoryStorage) patchSingle(path string, data json.RawMessage, now int6
 
 	merged, info, err := merge.MergeBytes(obj.Data, data)
 	if err != nil {
-		return path, err
+		return nil, err
 	}
 
 	if len(info.Replaced) == 0 {
-		return path, ErrNoop
+		return nil, ErrNoop
 	}
 
 	index := key.LastIndex(path)
 	created, updated := db.Peek(path, now)
-	// Store struct directly - no JSON encoding on write
-	db.mem.Store(path, &meta.Object{
+	newObj := &meta.Object{
 		Created: created,
 		Updated: updated,
 		Index:   index,
 		Path:    path,
 		Data:    merged,
-	})
+	}
+	db.mem.Store(path, newObj)
 
-	return path, nil
+	return newObj, nil
 }
 
 // Set a value to matching keys
@@ -419,15 +420,15 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 
 	now := monotonic.Now()
 	if !key.HasGlob(path) {
-		index, err := db.patchSingle(path, data, now)
+		obj, err := db.patchSingle(path, data, now)
 		if err != nil {
 			return path, err
 		}
 
 		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-			db.watcher <- StorageEvent{Key: path, Operation: "set"}
+			db.watcher <- StorageEvent{Key: path, Operation: "set", Object: obj}
 		}
-		return index, nil
+		return path, nil
 	}
 
 	keys := []string{}
@@ -440,11 +441,14 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 		return true
 	})
 
-	// batch patch
-	for _, key := range keys {
-		_, err := db.patchSingle(key, data, now)
+	// batch patch - broadcast each patched object
+	for _, k := range keys {
+		obj, err := db.patchSingle(k, data, now)
 		if err != nil {
 			return path, err
+		}
+		if !key.Contains(db.noBroadcastKeys, k) && db.Active() {
+			db.watcher <- StorageEvent{Key: k, Operation: "set", Object: obj}
 		}
 	}
 
@@ -457,17 +461,17 @@ func (db *MemoryStorage) SetWithMeta(path string, data json.RawMessage, created 
 		return path, ErrInvalidPath
 	}
 	index := key.LastIndex(path)
-	// Store struct directly - no JSON encoding on write
-	db.mem.Store(path, &meta.Object{
+	obj := &meta.Object{
 		Created: created,
 		Updated: updated,
 		Index:   index,
 		Path:    path,
 		Data:    data,
-	})
+	}
+	db.mem.Store(path, obj)
 
 	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-		db.watcher <- StorageEvent{Key: path, Operation: "set"}
+		db.watcher <- StorageEvent{Key: path, Operation: "set", Object: obj}
 	}
 	return index, nil
 }
@@ -475,26 +479,53 @@ func (db *MemoryStorage) SetWithMeta(path string, data json.RawMessage, created 
 // Del a key/pattern value(s)
 func (db *MemoryStorage) Del(path string) error {
 	if !key.HasGlob(path) {
+		raw, found := db.mem.Load(path)
+		if !found {
+			return ErrNotFound
+		}
+		obj := raw.(*meta.Object)
+		db.mem.Delete(path)
+		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
+			db.watcher <- StorageEvent{Key: path, Operation: "del", Object: obj}
+		}
+		return nil
+	}
+
+	// For glob deletes, collect and delete each matching key
+	db.mem.Range(func(k any, value any) bool {
+		current := k.(string)
+		if key.Match(path, current) {
+			obj := value.(*meta.Object)
+			db.mem.Delete(current)
+			if !key.Contains(db.noBroadcastKeys, current) && db.Active() {
+				db.watcher <- StorageEvent{Key: current, Operation: "del", Object: obj}
+			}
+		}
+		return true
+	})
+	return nil
+}
+
+// DelSilent deletes a key/pattern value(s) without broadcasting.
+// This is useful for cleanup operations where the broadcast is handled elsewhere.
+func (db *MemoryStorage) DelSilent(path string) error {
+	if !key.HasGlob(path) {
 		_, found := db.mem.Load(path)
 		if !found {
 			return ErrNotFound
 		}
 		db.mem.Delete(path)
-		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-			db.watcher <- StorageEvent{Key: path, Operation: "del"}
-		}
 		return nil
 	}
 
+	// For glob deletes, delete each matching key
 	db.mem.Range(func(k any, value any) bool {
-		if key.Match(path, k.(string)) {
-			db.mem.Delete(k.(string))
+		current := k.(string)
+		if key.Match(path, current) {
+			db.mem.Delete(current)
 		}
 		return true
 	})
-	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-		db.watcher <- StorageEvent{Key: path, Operation: "del"}
-	}
 	return nil
 }
 

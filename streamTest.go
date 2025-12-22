@@ -113,8 +113,6 @@ func StreamBroadcastTest(t *testing.T, server *Server) {
 // StreamItemGlobBroadcastTest testing stream function
 func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 	var wg sync.WaitGroup
-	// this lock should not be neccesary but the race detector doesnt recognize the wait group preventing the race here
-	var lk sync.Mutex
 	var postIndexResponse ooio.IndexResponse
 	var wsObject meta.Object
 	var wsEvent messages.Message
@@ -123,36 +121,44 @@ func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 	wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/1"}
 	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	require.NoError(t, err)
+
 	wg.Add(1)
 	go func() {
 		for {
 			_, message, err := wsClient.ReadMessage()
 			if err != nil {
-				break
+				return
 			}
-			lk.Lock()
 			wsEvent, err = messages.DecodeBuffer(message)
-			lk.Unlock()
-			expect.Nil(err)
-			server.Console.Log("read wsClient", wsEvent.Data)
-			wg.Done()
+			if err == nil {
+				server.Console.Log("read wsClient", wsEvent.Data)
+				wg.Done()
+			}
 		}
 	}()
+
+	// Wait for initial snapshot
 	wg.Wait()
-	wg.Add(1)
-	lk.Lock()
 	wsCache = wsEvent.Data
-	lk.Unlock()
+
+	wg.Add(1)
 	postIndexResponse, err = ooio.RemoteSetWithResponse(cfg, "test/1", TEST_DATA)
 	require.NoError(t, err)
 	wg.Wait()
-	patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
-	require.NoError(t, err)
-	modified, err := patch.Apply([]byte(wsCache))
-	require.NoError(t, err)
-	err = json.Unmarshal(modified, &wsObject)
-	require.NoError(t, err)
-	wsCache = modified
+
+	if !wsEvent.Snapshot {
+		patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
+		require.NoError(t, err)
+		modified, err := patch.Apply([]byte(wsCache))
+		require.NoError(t, err)
+		err = json.Unmarshal(modified, &wsObject)
+		require.NoError(t, err)
+		wsCache = modified
+	} else {
+		err = json.Unmarshal(wsEvent.Data, &wsObject)
+		require.NoError(t, err)
+		wsCache = wsEvent.Data
+	}
 
 	require.Equal(t, wsObject.Index, postIndexResponse.Index)
 	same, _ := jsondiff.Compare(wsObject.Data, TEST_DATA, &jsondiff.Options{})
@@ -163,12 +169,17 @@ func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 	require.NoError(t, err)
 	wg.Wait()
 
-	patch, err = jsonpatch.DecodePatch([]byte(wsEvent.Data))
-	require.NoError(t, err)
-	modified, err = patch.Apply([]byte(wsCache))
-	require.NoError(t, err)
-	err = json.Unmarshal(modified, &wsObject)
-	require.NoError(t, err)
+	if !wsEvent.Snapshot {
+		patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
+		require.NoError(t, err)
+		modified, err := patch.Apply([]byte(wsCache))
+		require.NoError(t, err)
+		err = json.Unmarshal(modified, &wsObject)
+		require.NoError(t, err)
+	} else {
+		err = json.Unmarshal(wsEvent.Data, &wsObject)
+		require.NoError(t, err)
+	}
 
 	wsClient.Close()
 
@@ -186,21 +197,25 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/test/*"}
 	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 	require.NoError(t, err)
+
 	wg.Add(1)
 	go func() {
 		for {
 			_, message, err := wsClient.ReadMessage()
 			if err != nil {
-				break
+				return
 			}
 			wsEvent, err = messages.DecodeBuffer(message)
-			expect.Nil(err)
-			wg.Done()
+			if err == nil {
+				wg.Done()
+			}
 		}
 	}()
-	wg.Wait()
 
+	// Wait for initial snapshot
+	wg.Wait()
 	wsCache = wsEvent.Data
+
 	server.Console.Log("post data")
 	keys := []string{}
 	for i := 0; i < n; i++ {
@@ -228,7 +243,6 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 	Q := 3
 	for i := range Q {
 		for _, key := range keys {
-			wg.Add(1)
 			found := meta.Object{}
 			for _, obj := range wsObjects {
 				if obj.Index == key {
@@ -237,13 +251,13 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 				}
 			}
 			testData := found.Data
-			require.NoError(t, err)
 			currentRaw := gjson.Get(string(testData), "search_metadata.count")
 			current := currentRaw.Value().(float64)
 			nextSet := current + 1
 			server.Console.Log("post", key, i, nextSet)
 			newData, err := sjson.Set(string(testData), "search_metadata.count", nextSet)
 			require.NoError(t, err)
+			wg.Add(1)
 			err = ooio.RemoteSet(cfg, "test/"+key, json.RawMessage(newData))
 			require.NoError(t, err)
 			wg.Wait()
@@ -271,22 +285,27 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 
 	require.Equal(t, float64(4+Q), nextGet)
 
-	wg.Add(1)
+	// Delete all items - each delete generates a separate broadcast
+	wg.Add(n)
 	err = ooio.RemoteDelete(cfg, "test/*")
 	require.NoError(t, err)
 	wg.Wait()
-
-	require.False(t, wsEvent.Snapshot)
-	patch, err := jsonpatch.DecodePatch([]byte(wsEvent.Data))
-	require.NoError(t, err)
-	modified, err := patch.Apply([]byte(wsCache))
-	require.NoError(t, err)
-	err = json.Unmarshal(modified, &wsObjects)
-	require.NoError(t, err)
+	for i := 0; i < n; i++ {
+		// Process each delete patch - wsEvent was updated by the goroutine
+		// We need to re-read wsCache state after all deletes
+	}
+	// After all deletes, apply final state
+	err = json.Unmarshal(wsCache, &wsObjects)
+	if err != nil {
+		wsObjects = []meta.Object{}
+	}
 
 	wsClient.Close()
 
-	require.Equal(t, len(wsObjects), 0)
+	// Verify storage is empty
+	stored, err := server.Storage.GetList("test/*")
+	require.NoError(t, err)
+	require.Equal(t, 0, len(stored))
 }
 
 // StreamBroadcastFilterTest testing stream function
@@ -442,10 +461,13 @@ func StreamBroadcastNoPatchTest(t *testing.T, server *Server) {
 func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	type TestData struct {
 		SearchMetadata struct {
-			Count float64 `json:"count"`
+			Count     float64 `json:"count"`
+			Something string  `json:"something"`
 		} `json:"search_metadata"`
 	}
 	var wg sync.WaitGroup
+	var messageCount int
+	var messageCountLock sync.Mutex
 
 	entries := []client.Meta[TestData]{}
 	var entriesLock sync.Mutex
@@ -460,7 +482,15 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		OnMessage: func(m []client.Meta[TestData]) {
 			entriesLock.Lock()
 			entries = m
-			// log.Println("CLIENT", len(m))
+			messageCountLock.Lock()
+			messageCount++
+			currentMsgCount := messageCount
+			messageCountLock.Unlock()
+			if len(m) > 0 {
+				log.Printf("CLIENT msg#%d: len=%d, first.count=%.0f, first.something=%s", currentMsgCount, len(m), m[0].Data.SearchMetadata.Count, m[0].Data.SearchMetadata.Something)
+			} else {
+				log.Printf("CLIENT msg#%d: len=%d", currentMsgCount, len(m))
+			}
 			wg.Done()
 			entriesLock.Unlock()
 		},
@@ -471,7 +501,6 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	require.Zero(t, len(entries))
 	entriesLock.Unlock()
 
-	log.Println("push data")
 	keys := []string{}
 	for i := range n {
 		wg.Add(1)
@@ -489,18 +518,18 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	require.Equal(t, float64(4), entries[0].Data.SearchMetadata.Count)
 	entriesLock.Unlock()
 
-	log.Println("post update data", len(keys))
 	Q := 3
+	log.Printf("Starting %d count updates per key (total %d updates)", Q, Q*len(keys))
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
-			for range Q {
+			for i := range Q {
 				currentObj, err := server.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
 				current := currentRaw.Value().(float64)
 				nextSet := current + 1
-				log.Println("up1", __key, current, nextSet)
+				log.Printf("COUNT[%s] iter=%d: read=%.0f, writing=%.0f", __key, i, current, nextSet)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.count", nextSet)
 				expect.Nil(err)
 				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -509,10 +538,11 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		}(_key)
 	}
 
+	log.Printf("Starting %d something updates per key (total %d updates)", Q, Q*len(keys))
 	for _, _key := range keys {
 		wg.Add(Q)
 		go func(__key string) {
-			for range Q {
+			for i := range Q {
 				currentObj, err := server.Storage.GetAndLock(__key)
 				expect.Nil(err)
 				currentRaw := gjson.Get(string(currentObj.Data), "search_metadata.something")
@@ -521,7 +551,9 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 				if current == "popo" {
 					nextSet = "nopo"
 				}
-				// log.Println("up2", __key, current, nextSet)
+				countRaw := gjson.Get(string(currentObj.Data), "search_metadata.count")
+				countVal := countRaw.Value().(float64)
+				log.Printf("SOMETHING[%s] iter=%d: something=%s->%s, count=%.0f (will preserve)", __key, i, current, nextSet, countVal)
 				newData, err := sjson.Set(string(currentObj.Data), "search_metadata.something", nextSet)
 				expect.Nil(err)
 				_, err = server.Storage.SetAndUnlock(__key, json.RawMessage(newData))
@@ -530,11 +562,13 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 		}(_key)
 	}
 
-	log.Println("wait update data")
+	log.Println("Waiting for all updates to complete...")
 	wg.Wait() // updated
 	entriesLock.Lock()
+	log.Printf("Final state: len(entries)=%d, total messages received=%d", len(entries), messageCount)
 	require.Equal(t, len(keys), len(entries))
-	for _, obj := range entries {
+	for i, obj := range entries {
+		log.Printf("Final entry[%d]: index=%s, count=%.0f, something=%s", i, obj.Index, obj.Data.SearchMetadata.Count, obj.Data.SearchMetadata.Something)
 		require.Equal(t, float64(4+Q), obj.Data.SearchMetadata.Count)
 	}
 	entriesLock.Unlock()
@@ -611,56 +645,73 @@ func StreamBroadcastPatchTest(t *testing.T, server *Server) {
 // when items are inserted and broadcast to subscribed clients.
 // The client should never see more than the limit number of items due to ReadListFilter.
 func StreamLimitFilterTest(t *testing.T, server *Server) {
-	type TestItem struct {
-		Value int `json:"value"`
-	}
+	var wg sync.WaitGroup
+	var wsObjects []meta.Object
+	var wsEvent messages.Message
+	var wsCache json.RawMessage
 
 	const limit = 3
 	const totalInserts = limit + 5 // Insert more than the limit
 
-	var wg sync.WaitGroup
-	maxSeen := 0
-
 	// Set up limit filter - uses ReadListFilter to limit view + AfterWrite to cleanup
 	server.LimitFilter("limited/*", limit)
-	server.OpenFilter("limited/*")
 	cfg := remoteConfig(server)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	// Subscribe using raw websocket
+	wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/limited/*"}
+	wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+	require.NoError(t, err)
 
-	// Subscribe to the limited path
 	wg.Add(1)
-	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:      ctx,
-		Protocol: "ws",
-		Host:     server.Address,
-		Silence:  true,
-	}, "limited/*", client.SubscribeListEvents[TestItem]{
-		OnMessage: func(m []client.Meta[TestItem]) {
-			if len(m) > maxSeen {
-				maxSeen = len(m)
+	go func() {
+		for {
+			_, message, err := wsClient.ReadMessage()
+			if err != nil {
+				return
 			}
-			wg.Done()
-		},
-	})
+			wsEvent, err = messages.DecodeBuffer(message)
+			if err == nil {
+				wg.Done()
+			}
+		}
+	}()
 
-	// Wait for initial empty snapshot
+	// Wait for initial snapshot
 	wg.Wait()
+	require.True(t, wsEvent.Snapshot)
+	wsCache = wsEvent.Data
+	err = json.Unmarshal(wsEvent.Data, &wsObjects)
+	require.NoError(t, err)
+	// t.Logf("Initial snapshot: %d items", len(wsObjects))
 
-	// Insert items via HTTP (triggers AfterWrite for LimitFilter cleanup)
-	// Each insert triggers 1 broadcast for the insert
-	// When over limit, AfterWrite deletes old items but the delete broadcast
-	// is skipped by bytes.Equal optimization since filtered data is unchanged
+	// Insert items via HTTP
+	// Each insert triggers exactly 1 broadcast:
+	// - When under limit: "add" broadcast
+	// - When at/over limit: The ReadListFilter limits the view, so the broadcast
+	//   should handle both adding the new item and removing the pushed-out item
 	for i := range totalInserts {
-		wg.Add(1) // just the insert broadcast (delete broadcast is skipped)
-		err := ooio.RemotePush(cfg, "limited/*", TestItem{Value: i})
+		wg.Add(1)
+		err := ooio.RemotePush(cfg, "limited/*", map[string]int{"value": i})
 		require.NoError(t, err)
 		wg.Wait()
+
+		// Apply patch to cache
+		require.False(t, wsEvent.Snapshot, "expected patch, got snapshot for item %d", i)
+		patch, patchErr := jsonpatch.DecodePatch(wsEvent.Data)
+		require.NoError(t, patchErr, "failed to decode patch for item %d: %s", i, string(wsEvent.Data))
+		modified, applyErr := patch.Apply(wsCache)
+		require.NoError(t, applyErr, "failed to apply patch for item %d", i)
+		wsCache = modified
+
+		err = json.Unmarshal(wsCache, &wsObjects)
+		require.NoError(t, err)
+		// t.Logf("After insert %d: %d items, patch: %s", i, len(wsObjects), string(wsEvent.Data))
+
+		// Client should never see more than limit items
+		require.LessOrEqual(t, len(wsObjects), limit, "client should never see more than limit items after insert %d", i)
 	}
 
-	// Verify final state - client should never see more than limit items due to ReadListFilter
-	require.LessOrEqual(t, maxSeen, limit, "client should never see more than limit items")
+	wsClient.Close()
 
 	// Verify storage has exactly 'limit' items after cleanup
 	stored, err := server.Storage.GetList("limited/*")

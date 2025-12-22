@@ -13,7 +13,7 @@ type StorageChan chan StorageEvent
 type StorageEvent struct {
 	Key       string
 	Operation string
-	Done      chan struct{} // Closed when broadcast completes, nil for fire-and-forget
+	Object    *meta.Object // The object that was set/deleted
 }
 
 // StorageOpt options of the storage instance
@@ -58,6 +58,8 @@ type StorageOpt struct {
 //
 // Del(key): Delete a key from the storage
 //
+// DelSilent(key): Delete a key from the storage without broadcasting
+//
 // Clear: will clear all data from the storage
 //
 // Watch: returns a channel that will receive any set or del operation
@@ -81,6 +83,7 @@ type Database interface {
 	SetAndUnlock(key string, data json.RawMessage) (string, error)
 	Unlock(key string) error
 	Del(key string) error
+	DelSilent(key string) error
 	Clear()
 	Watch() StorageChan
 }
@@ -99,12 +102,8 @@ type Stats struct {
 // WatchStorageNoop a noop reader of the watch channel
 func WatchStorageNoop(dataStore Database) {
 	for {
-		ev := <-dataStore.Watch()
-		// Signal completion if synchronous broadcast is expected
-		if ev.Done != nil {
-			close(ev.Done)
-		}
-		if !dataStore.Active() {
+		_, ok := <-dataStore.Watch()
+		if !ok || !dataStore.Active() {
 			break
 		}
 	}
