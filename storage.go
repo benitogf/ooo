@@ -1,6 +1,8 @@
 package ooo
 
 import (
+	"hash/fnv"
+
 	"github.com/goccy/go-json"
 
 	"github.com/benitogf/ooo/meta"
@@ -16,10 +18,67 @@ type StorageEvent struct {
 	Object    *meta.Object // The object that was set/deleted
 }
 
+// ShardedStorageChan manages multiple channels for per-key ordering.
+// Events for the same key are always routed to the same channel,
+// ensuring ordering is preserved per key while allowing parallelism across keys.
+type ShardedStorageChan struct {
+	shards []StorageChan
+	count  int
+}
+
+// NewShardedStorageChan creates a new sharded storage channel with the given number of shards.
+func NewShardedStorageChan(shardCount int) *ShardedStorageChan {
+	if shardCount <= 0 {
+		shardCount = 1
+	}
+	shards := make([]StorageChan, shardCount)
+	for i := range shards {
+		shards[i] = make(StorageChan, 100) // buffered to avoid blocking
+	}
+	return &ShardedStorageChan{
+		shards: shards,
+		count:  shardCount,
+	}
+}
+
+// Send routes an event to the appropriate shard based on key hash.
+func (s *ShardedStorageChan) Send(event StorageEvent) {
+	shard := s.shardFor(event.Key)
+	s.shards[shard] <- event
+}
+
+// shardFor returns the shard index for a given key using FNV-1a hash.
+func (s *ShardedStorageChan) shardFor(key string) int {
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return int(h.Sum32()) % s.count
+}
+
+// Shard returns the channel for a specific shard index.
+func (s *ShardedStorageChan) Shard(index int) StorageChan {
+	if index < 0 || index >= s.count {
+		return nil
+	}
+	return s.shards[index]
+}
+
+// Count returns the number of shards.
+func (s *ShardedStorageChan) Count() int {
+	return s.count
+}
+
+// Close closes all shard channels.
+func (s *ShardedStorageChan) Close() {
+	for _, shard := range s.shards {
+		close(shard)
+	}
+}
+
 // StorageOpt options of the storage instance
 type StorageOpt struct {
 	NoBroadcastKeys []string
 	BeforeRead      func(key string)
+	Workers         int // Number of worker shards for event processing
 }
 
 // Database interface to be implemented by storages
@@ -85,7 +144,7 @@ type Database interface {
 	Del(key string) error
 	DelSilent(key string) error
 	Clear()
-	Watch() StorageChan
+	WatchSharded() *ShardedStorageChan
 }
 
 // Storage abstraction of persistent data layer
@@ -99,13 +158,22 @@ type Stats struct {
 	Keys []string `json:"keys"`
 }
 
-// WatchStorageNoop a noop reader of the watch channel
+// WatchStorageNoop drains all events from a storage's sharded watcher channels.
+// Use this for extra storages that are not directly hooked to a server.
 func WatchStorageNoop(dataStore Database) {
-	for {
-		_, ok := <-dataStore.Watch()
-		if !ok || !dataStore.Active() {
-			break
-		}
+	shardedWatcher := dataStore.WatchSharded()
+	if shardedWatcher == nil {
+		return
+	}
+	for i := 0; i < shardedWatcher.Count(); i++ {
+		go func(ch StorageChan) {
+			for {
+				_, ok := <-ch
+				if !ok || !dataStore.Active() {
+					return
+				}
+			}
+		}(shardedWatcher.Shard(i))
 	}
 }
 

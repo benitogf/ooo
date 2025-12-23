@@ -1095,7 +1095,7 @@ func StorageBeforeReadTest(db Database, t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// Drain watcher channel to prevent blocking
+	// Drain watcher channels to prevent blocking
 	go WatchStorageNoop(db)
 
 	db.Clear()
@@ -1163,14 +1163,19 @@ func StorageBeforeReadTest(db Database, t *testing.T) {
 	db.Clear()
 }
 
-// WatchStorageNoopTest tests that WatchStorageNoop properly drains events
+// WatchStorageNoopTest tests that WatchStorageNoop properly drains events from sharded channels
 func WatchStorageNoopTest(db Database, t *testing.T) {
 	// Start a goroutine to drain the watcher
 	go WatchStorageNoop(db)
 
-	// Send events and verify they are drained without blocking
-	db.Watch() <- StorageEvent{Key: "test/1", Operation: "set"}
-	db.Watch() <- StorageEvent{Key: "test/2", Operation: "set"}
+	// Set some data to generate events - they should be drained without blocking
+	_, err := db.Set("test/1", TEST_DATA)
+	require.NoError(t, err)
+	_, err = db.Set("test/2", TEST_DATA_UPDATE)
+	require.NoError(t, err)
+
+	// Clean up
+	db.Clear()
 }
 
 func StorageBatchSetTest(server *Server, t *testing.T, n int) {

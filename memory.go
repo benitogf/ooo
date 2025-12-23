@@ -19,7 +19,7 @@ type MemoryStorage struct {
 	mutex           sync.RWMutex
 	memMutex        sync.Map
 	noBroadcastKeys []string
-	watcher         StorageChan
+	watcher         *ShardedStorageChan
 	storage         *Storage
 	beforeRead      func(key string)
 }
@@ -38,9 +38,12 @@ func (db *MemoryStorage) Start(storageOpt StorageOpt) error {
 	if db.storage == nil {
 		db.storage = &Storage{}
 	}
-	if db.watcher == nil {
-		db.watcher = make(StorageChan)
+	// Create sharded watcher for per-key ordering
+	workers := storageOpt.Workers
+	if workers <= 0 {
+		workers = 6 // default
 	}
+	db.watcher = NewShardedStorageChan(workers)
 	db.noBroadcastKeys = storageOpt.NoBroadcastKeys
 	db.beforeRead = storageOpt.BeforeRead
 	db.storage.Active = true
@@ -52,8 +55,10 @@ func (db *MemoryStorage) Close() {
 	db.mutex.Lock()
 	defer db.mutex.Unlock()
 	db.storage.Active = false
-	close(db.watcher)
-	db.watcher = nil
+	if db.watcher != nil {
+		db.watcher.Close()
+		db.watcher = nil
+	}
 }
 
 func (db *MemoryStorage) _getLock(path string) *sync.Mutex {
@@ -335,7 +340,7 @@ func (db *MemoryStorage) Set(path string, data json.RawMessage) (string, error) 
 	db.mem.Store(path, obj)
 
 	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-		db.watcher <- StorageEvent{Key: path, Operation: "set", Object: obj}
+		db.sendEvent(StorageEvent{Key: path, Operation: "set", Object: obj})
 	}
 	return index, nil
 }
@@ -369,7 +374,7 @@ func (db *MemoryStorage) Push(path string, data json.RawMessage) (string, error)
 	db.mem.Store(newPath, obj)
 
 	if !key.Contains(db.noBroadcastKeys, newPath) && db.Active() {
-		db.watcher <- StorageEvent{Key: newPath, Operation: "set", Object: obj}
+		db.sendEvent(StorageEvent{Key: newPath, Operation: "set", Object: obj})
 	}
 
 	return index, nil
@@ -426,7 +431,7 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 		}
 
 		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-			db.watcher <- StorageEvent{Key: path, Operation: "set", Object: obj}
+			db.sendEvent(StorageEvent{Key: path, Operation: "set", Object: obj})
 		}
 		return path, nil
 	}
@@ -448,7 +453,7 @@ func (db *MemoryStorage) Patch(path string, data json.RawMessage) (string, error
 			return path, err
 		}
 		if !key.Contains(db.noBroadcastKeys, k) && db.Active() {
-			db.watcher <- StorageEvent{Key: k, Operation: "set", Object: obj}
+			db.sendEvent(StorageEvent{Key: k, Operation: "set", Object: obj})
 		}
 	}
 
@@ -471,7 +476,7 @@ func (db *MemoryStorage) SetWithMeta(path string, data json.RawMessage, created 
 	db.mem.Store(path, obj)
 
 	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-		db.watcher <- StorageEvent{Key: path, Operation: "set", Object: obj}
+		db.sendEvent(StorageEvent{Key: path, Operation: "set", Object: obj})
 	}
 	return index, nil
 }
@@ -486,7 +491,7 @@ func (db *MemoryStorage) Del(path string) error {
 		obj := raw.(*meta.Object)
 		db.mem.Delete(path)
 		if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
-			db.watcher <- StorageEvent{Key: path, Operation: "del", Object: obj}
+			db.sendEvent(StorageEvent{Key: path, Operation: "del", Object: obj})
 		}
 		return nil
 	}
@@ -498,7 +503,7 @@ func (db *MemoryStorage) Del(path string) error {
 			obj := value.(*meta.Object)
 			db.mem.Delete(current)
 			if !key.Contains(db.noBroadcastKeys, current) && db.Active() {
-				db.watcher <- StorageEvent{Key: current, Operation: "del", Object: obj}
+				db.sendEvent(StorageEvent{Key: current, Operation: "del", Object: obj})
 			}
 		}
 		return true
@@ -529,9 +534,16 @@ func (db *MemoryStorage) DelSilent(path string) error {
 	return nil
 }
 
-// Watch the storage set/del events
-func (db *MemoryStorage) Watch() StorageChan {
+// WatchSharded returns the sharded storage channel for per-key ordered event processing
+func (db *MemoryStorage) WatchSharded() *ShardedStorageChan {
 	db.mutex.RLock()
 	defer db.mutex.RUnlock()
 	return db.watcher
+}
+
+// sendEvent sends an event to the sharded watcher
+func (db *MemoryStorage) sendEvent(event StorageEvent) {
+	if db.watcher != nil {
+		db.watcher.Send(event)
+	}
 }

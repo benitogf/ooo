@@ -139,6 +139,7 @@ func (app *Server) waitListen() {
 	var err error
 	storageOpt := StorageOpt{
 		NoBroadcastKeys: app.NoBroadcastKeys,
+		Workers:         app.Workers,
 	}
 
 	if app.BeforeRead != nil {
@@ -196,8 +197,10 @@ func (app *Server) waitStart() error {
 		return ErrServerStartFailed
 	}
 
-	for i := 0; i < app.Workers; i++ {
-		go app.watch(app.Storage.Watch())
+	// Start workers for sharded watcher (per-key ordering)
+	shardedWatcher := app.Storage.WatchSharded()
+	for i := 0; i < shardedWatcher.Count(); i++ {
+		go app.watch(shardedWatcher.Shard(i))
 	}
 
 	app.Console.Log("glad to serve[" + app.Address + "]")
