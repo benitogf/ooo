@@ -56,6 +56,11 @@ func ProcessBroadcast(cache *Cache, poolKey string, operation string, obj *meta.
 
 // processListBroadcast handles broadcasting to list subscriptions (glob paths)
 func processListBroadcast(cache *Cache, poolKey string, operation string, obj *meta.Object, filterObject FilterObjectFn, filterList FilterListFn, noPatch bool) BroadcastResult {
+	// Handle glob delete (obj is nil) - clear all items
+	if obj == nil && operation == "del" {
+		return processListDel(cache, poolKey, nil, noPatch)
+	}
+
 	if obj == nil {
 		return BroadcastResult{Skip: true}
 	}
@@ -67,7 +72,7 @@ func processListBroadcast(cache *Cache, poolKey string, operation string, obj *m
 	case "set":
 		return processListSet(cache, poolKey, obj, &filtered, filterErr, filterList, noPatch)
 	case "del":
-		return processListDel(cache, obj, noPatch)
+		return processListDel(cache, poolKey, obj, noPatch)
 	}
 	return BroadcastResult{Skip: true}
 }
@@ -127,7 +132,15 @@ func processListSet(cache *Cache, poolKey string, obj *meta.Object, filtered *me
 }
 
 // processListDel handles delete operations on list caches
-func processListDel(cache *Cache, obj *meta.Object, noPatch bool) BroadcastResult {
+func processListDel(cache *Cache, poolKey string, obj *meta.Object, noPatch bool) BroadcastResult {
+	// For glob delete (obj is nil), clear all items from the cache
+	if obj == nil {
+		cache.Objects = nil
+		// Return empty list as snapshot
+		data, _ := meta.Encode([]meta.Object{})
+		return BroadcastResult{Data: data, Snapshot: true}
+	}
+
 	newList, pos, found := removeFromList(cache.Objects, *obj)
 	if found {
 		cache.Objects = newList
@@ -171,7 +184,7 @@ func processObjectBroadcast(cache *Cache, poolKey string, operation string, obj 
 		return BroadcastResult{Data: patch, Snapshot: false}
 
 	case "del":
-		empty := meta.Object{}
+		empty := meta.Object{Data: json.RawMessage("{}")}
 		oldObj := cache.Object
 		cache.Object = &empty
 

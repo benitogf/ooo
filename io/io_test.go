@@ -148,8 +148,8 @@ func TestRemoteIO(t *testing.T) {
 	things, err := ooio.RemoteGetList[Thing](cfg, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(things))
-	require.Equal(t, "this", things[0].Data.This)
-	require.Equal(t, "here", things[1].Data.This)
+	require.Equal(t, "here", things[0].Data.This) // newest first (descending order)
+	require.Equal(t, "this", things[1].Data.This)
 
 	err = ooio.RemoteSet(cfg, string(THINGS_BASE_PATH)+"/what", Thing{
 		This: "what",
@@ -160,9 +160,9 @@ func TestRemoteIO(t *testing.T) {
 	things, err = ooio.RemoteGetList[Thing](cfg, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(things))
-	require.Equal(t, "this", things[0].Data.This)
+	require.Equal(t, "what", things[0].Data.This) // newest first (descending order)
 	require.Equal(t, "here", things[1].Data.This)
-	require.Equal(t, "what", things[2].Data.This)
+	require.Equal(t, "this", things[2].Data.This)
 }
 
 func TestRemoteDelete(t *testing.T) {

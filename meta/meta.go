@@ -54,12 +54,12 @@ type Object struct {
 	Created int64           `json:"created"`
 	Updated int64           `json:"updated"`
 	Index   string          `json:"index"`
-	Path    string          `json:"path"`
+	Path    string          `json:"path,omitempty"`
 	Data    json.RawMessage `json:"data"`
 }
 
 // Empty meta object byte array value
-var EmptyObject = []byte(`{ "created": 0, "updated": 0, "index": "", "data": {} }`)
+var EmptyObject = []byte(`{"created":0,"updated":0,"index":"","data":{}}`)
 
 // SortDesc by created
 func SortDesc(obj []Object) func(i, j int) bool {

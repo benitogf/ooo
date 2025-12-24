@@ -170,7 +170,7 @@ func TestRestStats(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/?api=keys", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -178,11 +178,12 @@ func TestRestStats(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-	require.Equal(t, "{\"keys\":[\"test/1\"]}", string(body))
+	require.Contains(t, string(body), "\"keys\":[\"test/1\"]")
+	require.Contains(t, string(body), "\"total\":1")
 
 	_ = app.Storage.Del("test/1")
 
-	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req = httptest.NewRequest(http.MethodGet, "/?api=keys", nil)
 	w = httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp = w.Result()
@@ -190,7 +191,8 @@ func TestRestStats(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
-	require.Equal(t, "{\"keys\":[]}", string(body))
+	require.Contains(t, string(body), "\"keys\":[]")
+	require.Contains(t, string(body), "\"total\":0")
 }
 
 func TestRestResponseCode(t *testing.T) {

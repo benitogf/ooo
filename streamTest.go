@@ -284,17 +284,13 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 
 	require.Equal(t, float64(4+Q), nextGet)
 
-	// Delete all items - each delete generates a separate broadcast
-	wg.Add(n)
+	// Delete all items - glob delete sends a single broadcast with empty list
+	wg.Add(1)
 	err = ooio.RemoteDelete(cfg, "test/*")
 	require.NoError(t, err)
 	wg.Wait()
-	for i := 0; i < n; i++ {
-		// Process each delete patch - wsEvent was updated by the goroutine
-		// We need to re-read wsCache state after all deletes
-	}
-	// After all deletes, apply final state
-	err = json.Unmarshal(wsCache, &wsObjects)
+	// After glob delete, the broadcast contains an empty list snapshot
+	err = json.Unmarshal(wsEvent.Data, &wsObjects)
 	if err != nil {
 		wsObjects = []meta.Object{}
 	}
@@ -698,4 +694,278 @@ func StreamLimitFilterTest(t *testing.T, server *Server) {
 	stored, err := server.Storage.GetList("limited/*")
 	require.NoError(t, err)
 	require.Equal(t, limit, len(stored), "storage should have exactly limit items")
+}
+
+// ClientCompatibilityTest covers the key behaviors expected by ooo-client:
+// 1. Object lifecycle: create (updated=0) → update (updated>0) → delete (empty object)
+// 2. List lifecycle: create → update → delete single item
+// 3. Glob delete: multiple items deleted with single broadcast returning empty list
+// 4. List sort order: newest first (descending by created)
+// 5. Nested paths: box/*/things/* pattern matching
+func ClientCompatibilityTest(t *testing.T, server *Server) {
+	cfg := remoteConfig(server)
+
+	// Test 1: Object lifecycle - verify updated field behavior
+	t.Run("ObjectLifecycle", func(t *testing.T) {
+		var wg sync.WaitGroup
+		var wsEvent messages.Message
+		wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/objtest"}
+		wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+		require.NoError(t, err)
+
+		wg.Add(1)
+		go func() {
+			for {
+				_, message, err := wsClient.ReadMessage()
+				if err != nil {
+					return
+				}
+				wsEvent, _ = messages.DecodeBuffer(message)
+				wg.Done()
+			}
+		}()
+
+		// Initial empty object
+		wg.Wait()
+		var obj meta.Object
+		err = json.Unmarshal(wsEvent.Data, &obj)
+		require.NoError(t, err)
+		require.Equal(t, int64(0), obj.Created, "initial object should have created=0")
+		require.Equal(t, int64(0), obj.Updated, "initial object should have updated=0")
+		require.Equal(t, json.RawMessage("{}"), obj.Data, "initial object should have data={}")
+
+		// Create object
+		wg.Add(1)
+		err = ooio.RemoteSet(cfg, "objtest", map[string]string{"name": "test1"})
+		require.NoError(t, err)
+		wg.Wait()
+		err = json.Unmarshal(wsEvent.Data, &obj)
+		if !wsEvent.Snapshot {
+			patch, _ := jsonpatch.DecodePatch(wsEvent.Data)
+			modified, _ := patch.Apply([]byte(`{"created":0,"updated":0,"index":"","data":{}}`))
+			json.Unmarshal(modified, &obj)
+		}
+		require.Greater(t, obj.Created, int64(0), "created object should have created>0")
+		require.Equal(t, int64(0), obj.Updated, "newly created object should have updated=0")
+
+		// Update object
+		wg.Add(1)
+		err = ooio.RemoteSet(cfg, "objtest", map[string]string{"name": "test2"})
+		require.NoError(t, err)
+		wg.Wait()
+		var updatedObj meta.Object
+		if wsEvent.Snapshot {
+			json.Unmarshal(wsEvent.Data, &updatedObj)
+		} else {
+			objBytes, _ := json.Marshal(obj)
+			patch, _ := jsonpatch.DecodePatch(wsEvent.Data)
+			modified, _ := patch.Apply(objBytes)
+			json.Unmarshal(modified, &updatedObj)
+		}
+		require.Greater(t, updatedObj.Updated, int64(0), "updated object should have updated>0")
+
+		// Delete object
+		wg.Add(1)
+		err = ooio.RemoteDelete(cfg, "objtest")
+		require.NoError(t, err)
+		wg.Wait()
+		var deletedObj meta.Object
+		if wsEvent.Snapshot {
+			json.Unmarshal(wsEvent.Data, &deletedObj)
+		} else {
+			objBytes, _ := json.Marshal(updatedObj)
+			patch, _ := jsonpatch.DecodePatch(wsEvent.Data)
+			modified, _ := patch.Apply(objBytes)
+			json.Unmarshal(modified, &deletedObj)
+		}
+		require.Equal(t, int64(0), deletedObj.Created, "deleted object should have created=0")
+		require.Equal(t, json.RawMessage("{}"), deletedObj.Data, "deleted object should have data={}")
+
+		wsClient.Close()
+	})
+
+	// Test 2: List lifecycle with single item
+	t.Run("ListLifecycle", func(t *testing.T) {
+		var wg sync.WaitGroup
+		var wsEvent messages.Message
+		var wsCache json.RawMessage
+		wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/items/*"}
+		wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+		require.NoError(t, err)
+
+		wg.Add(1)
+		go func() {
+			for {
+				_, message, err := wsClient.ReadMessage()
+				if err != nil {
+					return
+				}
+				wsEvent, _ = messages.DecodeBuffer(message)
+				wg.Done()
+			}
+		}()
+
+		// Initial empty list
+		wg.Wait()
+		wsCache = wsEvent.Data
+		var items []meta.Object
+		err = json.Unmarshal(wsEvent.Data, &items)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(items), "initial list should be empty")
+
+		// Create item
+		wg.Add(1)
+		indexResp, err := ooio.RemotePushWithResponse(cfg, "items/*", map[string]string{"name": "item1"})
+		require.NoError(t, err)
+		wg.Wait()
+		if !wsEvent.Snapshot {
+			patch, _ := jsonpatch.DecodePatch(wsEvent.Data)
+			modified, _ := patch.Apply(wsCache)
+			wsCache = modified
+		} else {
+			wsCache = wsEvent.Data
+		}
+		json.Unmarshal(wsCache, &items)
+		require.Equal(t, 1, len(items), "list should have 1 item after create")
+		require.Equal(t, int64(0), items[0].Updated, "newly created item should have updated=0")
+
+		// Update item
+		wg.Add(1)
+		err = ooio.RemoteSet(cfg, "items/"+indexResp.Index, map[string]string{"name": "item1-updated"})
+		require.NoError(t, err)
+		wg.Wait()
+		if !wsEvent.Snapshot {
+			patch, _ := jsonpatch.DecodePatch(wsEvent.Data)
+			modified, _ := patch.Apply(wsCache)
+			wsCache = modified
+		} else {
+			wsCache = wsEvent.Data
+		}
+		json.Unmarshal(wsCache, &items)
+		require.Equal(t, 1, len(items), "list should still have 1 item after update")
+		require.Greater(t, items[0].Updated, int64(0), "updated item should have updated>0")
+
+		// Delete item
+		wg.Add(1)
+		err = ooio.RemoteDelete(cfg, "items/"+indexResp.Index)
+		require.NoError(t, err)
+		wg.Wait()
+		if !wsEvent.Snapshot {
+			patch, _ := jsonpatch.DecodePatch(wsEvent.Data)
+			modified, _ := patch.Apply(wsCache)
+			wsCache = modified
+		} else {
+			wsCache = wsEvent.Data
+		}
+		json.Unmarshal(wsCache, &items)
+		require.Equal(t, 0, len(items), "list should be empty after delete")
+
+		wsClient.Close()
+	})
+
+	// Test 3: Glob delete - multiple items deleted with single broadcast
+	t.Run("GlobDelete", func(t *testing.T) {
+		var wg sync.WaitGroup
+		var wsEvent messages.Message
+		var msgCount int
+		wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/things/*"}
+		wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
+		require.NoError(t, err)
+
+		done := make(chan struct{})
+		go func() {
+			for {
+				_, message, err := wsClient.ReadMessage()
+				if err != nil {
+					close(done)
+					return
+				}
+				wsEvent, _ = messages.DecodeBuffer(message)
+				msgCount++
+				wg.Done()
+			}
+		}()
+
+		// Initial empty list
+		wg.Add(1)
+		wg.Wait()
+
+		// Create 5 items
+		numItems := 5
+		for i := 0; i < numItems; i++ {
+			wg.Add(1)
+			_, err := ooio.RemotePushWithResponse(cfg, "things/*", map[string]int{"value": i})
+			require.NoError(t, err)
+			wg.Wait()
+		}
+
+		// Glob delete - should receive exactly 1 broadcast (not 5)
+		msgCountBefore := msgCount
+		wg.Add(1)
+		err = ooio.RemoteDelete(cfg, "things/*")
+		require.NoError(t, err)
+		wg.Wait()
+
+		// Verify only 1 message received for glob delete
+		require.Equal(t, msgCountBefore+1, msgCount, "glob delete should send exactly 1 broadcast")
+
+		// Verify the broadcast contains empty list
+		var items []meta.Object
+		err = json.Unmarshal(wsEvent.Data, &items)
+		require.NoError(t, err)
+		require.Equal(t, 0, len(items), "glob delete broadcast should contain empty list")
+
+		// Verify storage is empty
+		stored, err := server.Storage.GetList("things/*")
+		require.NoError(t, err)
+		require.Equal(t, 0, len(stored), "storage should be empty after glob delete")
+
+		wsClient.Close()
+	})
+
+	// Test 4: List sort order - newest first (descending)
+	t.Run("ListSortOrder", func(t *testing.T) {
+		// Create items with different timestamps
+		_, err := ooio.RemotePushWithResponse(cfg, "sorted/*", map[string]string{"name": "first"})
+		require.NoError(t, err)
+		// Small delay to ensure different timestamps
+		_, err = ooio.RemotePushWithResponse(cfg, "sorted/*", map[string]string{"name": "second"})
+		require.NoError(t, err)
+
+		// Get list via HTTP - should be sorted newest first
+		items, err := ooio.RemoteGetList[map[string]string](cfg, "sorted/*")
+		require.NoError(t, err)
+		require.Equal(t, 2, len(items))
+		require.Equal(t, "second", items[0].Data["name"], "newest item should be first")
+		require.Equal(t, "first", items[1].Data["name"], "oldest item should be last")
+
+		// Cleanup
+		ooio.RemoteDelete(cfg, "sorted/*")
+	})
+
+	// Test 5: Nested paths - box/*/things/* pattern
+	t.Run("NestedPaths", func(t *testing.T) {
+		// Create items with nested paths
+		err := ooio.RemoteSet(cfg, "box/1/things/1", map[string]string{"name": "thing in box 1"})
+		require.NoError(t, err)
+		err = ooio.RemoteSet(cfg, "box/2/things/0", map[string]string{"name": "thing in box 2"})
+		require.NoError(t, err)
+
+		// Get list with nested glob pattern
+		items, err := ooio.RemoteGetList[map[string]string](cfg, "box/*/things/*")
+		require.NoError(t, err)
+		require.Equal(t, 2, len(items), "should find 2 items matching nested pattern")
+
+		// Newest item should be first (box/2/things/0 was created second)
+		require.Equal(t, "thing in box 2", items[0].Data["name"], "newest nested item should be first")
+
+		// Get specific nested item
+		item, err := ooio.RemoteGet[map[string]string](cfg, "box/2/things/0")
+		require.NoError(t, err)
+		require.Equal(t, "thing in box 2", item.Data["name"], "should get correct nested item")
+
+		// Cleanup
+		ooio.RemoteDelete(cfg, "box/1/things/1")
+		ooio.RemoteDelete(cfg, "box/2/things/0")
+	})
 }

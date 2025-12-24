@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/benitogf/coat"
+	"github.com/benitogf/ooo/explorer"
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
@@ -128,6 +129,24 @@ func (app *Server) Validate() error {
 	return nil
 }
 
+// getServerInfo returns server configuration for the explorer
+func (app *Server) getServerInfo() explorer.ServerInfo {
+	return explorer.ServerInfo{
+		Address:           app.Address,
+		Deadline:          app.Deadline,
+		ReadTimeout:       app.ReadTimeout,
+		WriteTimeout:      app.WriteTimeout,
+		ReadHeaderTimeout: app.ReadHeaderTimeout,
+		IdleTimeout:       app.IdleTimeout,
+		ForcePatch:        app.ForcePatch,
+		NoPatch:           app.NoPatch,
+		Static:            app.Static,
+		Silence:           app.Silence,
+		Workers:           app.Workers,
+		Tick:              app.Tick,
+	}
+}
+
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
 // connections. It's used by ListenAndServe and ListenAndServeTLS so
 // dead TCP connections (e.g. closing laptop mid-download) eventually
@@ -226,8 +245,8 @@ func (app *Server) fetch(path string) (FetchResult, error) {
 	}
 
 	if key.HasGlob(path) {
-		// List subscription
-		objs, err := app.Storage.GetList(path)
+		// List subscription - use descending order (newest first)
+		objs, err := app.Storage.GetListDescending(path)
 		if err != nil {
 			return FetchResult{}, err
 		}
@@ -423,14 +442,20 @@ func (app *Server) defaults() {
 // setupRoutes configures the HTTP routes for the server.
 func (app *Server) setupRoutes() {
 	// https://ieftimov.com/post/make-resilient-golang-net-http-servers-using-timeouts-deadlines-context-cancellation/
-	app.Router.HandleFunc("/", app.getStats).Methods("GET")
+	explorerHandler := &explorer.Handler{
+		GetKeys:    app.Storage.Keys,
+		GetInfo:    app.getServerInfo,
+		GetFilters: app.filters.Paths,
+		AuditFunc:  app.Audit,
+		ClockFunc:  app.clock,
+	}
+	app.Router.Handle("/", explorerHandler).Methods("GET")
+	app.Router.Handle("/vanilla-jsoneditor.js", explorerHandler).Methods("GET")
 	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
 	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
 		http.HandlerFunc(app.unpublish), app.Deadline, deadlineMsg)).Methods("DELETE")
 	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
 		http.HandlerFunc(app.publish), app.Deadline, deadlineMsg)).Methods("POST")
-	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(app.republish), app.Deadline, deadlineMsg)).Methods("PUT")
 	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
 		http.HandlerFunc(app.patch), app.Deadline, deadlineMsg)).Methods("PATCH")
 	app.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", app.read).Methods("GET")

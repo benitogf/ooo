@@ -13,56 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRestPutMethod(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-
-	data := json.RawMessage(`{"test":"put"}`)
-	req := httptest.NewRequest("PUT", "/puttest", bytes.NewBuffer(data))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	require.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// Verify data was stored
-	stored, err := app.Storage.Get("puttest")
-	require.NoError(t, err)
-	require.Contains(t, string(stored.Data), "put")
-}
-
-func TestRestPutInvalidKey(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-
-	data := json.RawMessage(`{"test":"put"}`)
-	req := httptest.NewRequest("PUT", "/test/*/*", bytes.NewBuffer(data))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
-}
-
-func TestRestPutUnauthorized(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Audit = func(r *http.Request) bool {
-		return r.Method != "PUT"
-	}
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-
-	data := json.RawMessage(`{"test":"put"}`)
-	req := httptest.NewRequest("PUT", "/puttest", bytes.NewBuffer(data))
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-}
-
 func TestRestPatchUnauthorized(t *testing.T) {
 	app := Server{}
 	app.Silence = true

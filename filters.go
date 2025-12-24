@@ -48,12 +48,14 @@ func (app *Server) ReadListFilter(path string, apply ApplyList) {
 }
 
 // OpenFilter open noop read and write filters
-// Automatically uses ReadObjectFilter for non-glob paths and ReadListFilter for glob paths
+// For glob paths like "things/*", this also enables reading individual items like "things/123"
 func (app *Server) OpenFilter(name string) {
 	app.filters.AddWrite(name, NoopFilter)
 	app.filters.AddDelete(name, NoopHook)
 	if key.IsGlob(name) {
 		app.filters.AddReadList(name, NoopListFilter)
+		// Also allow reading individual items that match the glob pattern
+		app.filters.AddReadObject(name, NoopObjectFilter)
 	} else {
 		app.filters.AddReadObject(name, NoopObjectFilter)
 	}
@@ -62,14 +64,22 @@ func (app *Server) OpenFilter(name string) {
 // LimitFilter creates a limit filter for a glob pattern path that maintains
 // a maximum number of entries. Uses a ReadListFilter (meta-based) to limit the view
 // (so clients never see more than limit items) and AfterWrite to delete old entries.
+// Also adds write and delete filters to allow creating and deleting items.
 func (app *Server) LimitFilter(path string, limit int) {
 	lf, err := filters.NewLimitFilter(path, limit, app.Storage)
 	if err != nil {
 		panic(err)
 	}
 
+	// Allow writes and deletes
+	app.filters.AddWrite(path, NoopFilter)
+	app.filters.AddDelete(path, NoopHook)
+
 	// ReadListFilter ensures clients never see more than limit items (meta-based, more efficient)
 	app.filters.AddReadList(path, lf.ReadListFilter)
+
+	// Also allow reading individual items that match the glob pattern
+	app.filters.AddReadObject(path, NoopObjectFilter)
 
 	// AfterWrite triggers cleanup of old entries
 	app.filters.AddAfterWrite(path, func(k string) {

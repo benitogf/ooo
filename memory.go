@@ -366,7 +366,7 @@ func (db *MemoryStorage) Push(path string, data json.RawMessage) (string, error)
 
 	obj := &meta.Object{
 		Created: now,
-		Updated: now,
+		Updated: 0,
 		Index:   index,
 		Path:    newPath,
 		Data:    data,
@@ -496,18 +496,18 @@ func (db *MemoryStorage) Del(path string) error {
 		return nil
 	}
 
-	// For glob deletes, collect and delete each matching key
+	// For glob deletes, delete all matching keys and send a single broadcast
 	db.mem.Range(func(k any, value any) bool {
 		current := k.(string)
 		if key.Match(path, current) {
-			obj := value.(*meta.Object)
 			db.mem.Delete(current)
-			if !key.Contains(db.noBroadcastKeys, current) && db.Active() {
-				db.sendEvent(StorageEvent{Key: current, Operation: "del", Object: obj})
-			}
 		}
 		return true
 	})
+	// Send a single broadcast event for the glob path (original behavior)
+	if !key.Contains(db.noBroadcastKeys, path) && db.Active() {
+		db.sendEvent(StorageEvent{Key: path, Operation: "del", Object: nil})
+	}
 	return nil
 }
 

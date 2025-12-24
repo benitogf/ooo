@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Storage Explorer</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid #30363d; padding-bottom: 16px; }
+        h1 { font-size: 24px; font-weight: 600; }
+        .tabs { display: flex; gap: 8px; }
+        .tab { padding: 8px 16px; background: #21262d; border: 1px solid #30363d; border-radius: 6px; cursor: pointer; color: #c9d1d9; font-size: 14px; }
+        .tab:hover { background: #30363d; }
+        .tab.active { background: #238636; border-color: #238636; }
+        .panel { display: none; }
+        .panel.active { display: block; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
+        .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .card-title { font-size: 16px; font-weight: 600; }
+        .btn { padding: 8px 16px; background: #238636; border: none; border-radius: 6px; color: #fff; cursor: pointer; font-size: 14px; }
+        .btn:hover { background: #2ea043; }
+        .btn-secondary { background: #21262d; border: 1px solid #30363d; }
+        .btn-secondary:hover { background: #30363d; }
+        .btn-danger { background: #da3633; }
+        .btn-danger:hover { background: #f85149; }
+        input, textarea, select { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; color: #c9d1d9; font-size: 14px; width: 100%; }
+        input:focus, textarea:focus { outline: none; border-color: #58a6ff; }
+        textarea { min-height: 120px; font-family: 'Monaco', 'Menlo', monospace; resize: vertical; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; margin-bottom: 6px; font-size: 14px; color: #8b949e; }
+        .keys-list { max-height: 400px; overflow-y: auto; }
+        .key-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid #21262d; cursor: pointer; }
+        .key-item:hover { background: #21262d; }
+        .key-item:last-child { border-bottom: none; }
+        .key-name { font-family: 'Monaco', 'Menlo', monospace; font-size: 13px; }
+        .key-actions { display: flex; gap: 8px; }
+        .key-actions button { padding: 4px 8px; font-size: 12px; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+        .info-item { background: #21262d; padding: 12px; border-radius: 6px; }
+        .info-label { font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+        .info-value { font-size: 14px; font-weight: 500; }
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+        .modal.active { display: flex; }
+        .modal-content { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 24px; width: 95%; max-width: 900px; max-height: 90vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .modal-close { background: none; border: none; color: #8b949e; font-size: 24px; cursor: pointer; }
+        .modal-close:hover { color: #c9d1d9; }
+        .status { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; display: none; }
+        .status.success { display: block; background: #238636; }
+        .status.error { display: block; background: #da3633; }
+        .json-view { background: #0d1117; padding: 12px; border-radius: 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+        .toolbar { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        .search-box { flex: 1; min-width: 200px; }
+        .empty-state { text-align: center; padding: 40px; color: #8b949e; }
+        .method-select { width: auto; min-width: 100px; }
+        .pagination { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 16px; padding: 12px; background: #21262d; border-radius: 6px; }
+        .pagination button { padding: 6px 12px; }
+        .pagination span { color: #8b949e; font-size: 14px; }
+        .page-info { font-weight: 500; color: #c9d1d9; }
+        #editJsonEditor { height: 500px; }
+        .jse-theme-dark {
+            --jse-theme-color: #238636;
+            --jse-theme-color-highlight: #2ea043;
+            --jse-background-color: #0d1117;
+            --jse-text-color: #c9d1d9;
+            --jse-text-color-inverse: #4d4d4d;
+            --jse-main-border: 1px solid #30363d;
+            --jse-menu-color: #c9d1d9;
+            --jse-modal-background: #161b22;
+            --jse-modal-overlay-background: rgba(0, 0, 0, 0.5);
+            --jse-modal-code-background: #161b22;
+            --jse-tooltip-color: var(--jse-text-color);
+            --jse-tooltip-background: #21262d;
+            --jse-tooltip-border: 1px solid #30363d;
+            --jse-tooltip-action-button-color: inherit;
+            --jse-tooltip-action-button-background: #30363d;
+            --jse-panel-background: #161b22;
+            --jse-panel-background-border: 1px solid #30363d;
+            --jse-panel-color: var(--jse-text-color);
+            --jse-panel-color-readonly: #8b949e;
+            --jse-panel-border: 1px solid #30363d;
+            --jse-panel-button-color-highlight: #c9d1d9;
+            --jse-panel-button-background-highlight: #30363d;
+            --jse-navigation-bar-background: #21262d;
+            --jse-navigation-bar-background-highlight: #30363d;
+            --jse-navigation-bar-dropdown-color: var(--jse-text-color);
+            --jse-context-menu-background: #161b22;
+            --jse-context-menu-background-highlight: #21262d;
+            --jse-context-menu-separator-color: #30363d;
+            --jse-context-menu-color: var(--jse-text-color);
+            --jse-context-menu-pointer-background: #30363d;
+            --jse-context-menu-pointer-background-highlight: #3d444d;
+            --jse-context-menu-pointer-color: var(--jse-context-menu-color);
+            --jse-key-color: #79c0ff;
+            --jse-value-color: var(--jse-text-color);
+            --jse-value-color-number: #a5d6ff;
+            --jse-value-color-boolean: #ff7b72;
+            --jse-value-color-null: #8b949e;
+            --jse-value-color-string: #a5d6ff;
+            --jse-value-color-url: #a5d6ff;
+            --jse-delimiter-color: #8b949e;
+            --jse-edit-outline: 2px solid var(--jse-text-color);
+            --jse-selection-background-color: #30363d;
+            --jse-selection-background-inactive-color: #21262d;
+            --jse-hover-background-color: #21262d;
+            --jse-active-line-background-color: rgba(255, 255, 255, 0.06);
+            --jse-search-match-background-color: #21262d;
+            --jse-collapsed-items-background-color: #21262d;
+            --jse-collapsed-items-selected-background-color: #30363d;
+            --jse-collapsed-items-link-color: #8b949e;
+            --jse-collapsed-items-link-color-highlight: #238636;
+            --jse-search-match-color: #9e6a03;
+            --jse-search-match-outline: 1px solid #bb8009;
+            --jse-search-match-active-color: #bb8009;
+            --jse-search-match-active-outline: 1px solid #d29922;
+            --jse-tag-background: #21262d;
+            --jse-tag-color: #8b949e;
+            --jse-table-header-background: #161b22;
+            --jse-table-header-background-highlight: #21262d;
+            --jse-table-row-odd-background: rgba(255, 255, 255, 0.05);
+            --jse-input-background: #0d1117;
+            --jse-input-border: var(--jse-main-border);
+            --jse-button-background: #238636;
+            --jse-button-background-highlight: #2ea043;
+            --jse-button-color: #ffffff;
+            --jse-button-secondary-background: #21262d;
+            --jse-button-secondary-background-highlight: #30363d;
+            --jse-button-secondary-background-disabled: #484f58;
+            --jse-button-secondary-color: var(--jse-text-color);
+            --jse-a-color: #58a6ff;
+            --jse-a-color-highlight: #79c0ff;
+            --jse-color-picker-background: #21262d;
+            --jse-color-picker-border-box-shadow: #30363d 0 0 0 1px;
+        }
+        .per-page-select { width: auto; min-width: 70px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Storage Explorer</h1>
+            <div class="tabs">
+                <button class="tab active" data-panel="storage">Storage</button>
+                <button class="tab" data-panel="filters">Filters</button>
+                <button class="tab" data-panel="settings">Settings</button>
+            </div>
+        </header>
+
+        <div id="storage" class="panel active">
+            <div class="toolbar">
+                <input type="text" class="search-box" id="searchKeys" placeholder="Search keys (server-side)...">
+                <select class="per-page-select" id="perPage" onchange="changePerPage()">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                </select>
+                <button class="btn" onclick="openCreateModal()">+ New Key</button>
+                <button class="btn btn-secondary" onclick="refreshKeys()">Refresh</button>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Keys (<span id="keyCount">0</span> of <span id="totalCount">0</span>)</span>
+                </div>
+                <div class="keys-list" id="keysList"></div>
+                <div class="pagination" id="pagination" style="display: none;">
+                    <button class="btn btn-secondary" id="prevBtn" onclick="prevPage()">← Prev</button>
+                    <span class="page-info">Page <span id="currentPage">1</span> of <span id="totalPages">1</span></span>
+                    <button class="btn btn-secondary" id="nextBtn" onclick="nextPage()">Next →</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="filters" class="panel">
+            <div class="toolbar">
+                <button class="btn btn-secondary" onclick="refreshFilters()">Refresh</button>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Registered Filter Paths (<span id="filterCount">0</span>)</span>
+                </div>
+                <div class="keys-list" id="filtersList"></div>
+            </div>
+        </div>
+
+        <div id="settings" class="panel">
+            <div class="toolbar">
+                <button class="btn btn-secondary" onclick="loadServerInfo()">Refresh</button>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span class="card-title">Server Configuration</span>
+                </div>
+                <div class="info-grid" id="serverInfo"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="viewModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="card-title" id="viewModalTitle">View Key</span>
+                <button class="modal-close" onclick="closeModal('viewModal')">&times;</button>
+            </div>
+            <div id="viewModalStatus" class="status"></div>
+            <div class="json-view" id="viewModalContent"></div>
+            <div style="margin-top: 16px; display: flex; gap: 8px;">
+                <button class="btn btn-secondary" onclick="editCurrentKey()">Edit</button>
+                <button class="btn btn-danger" onclick="deleteCurrentKey()">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal" id="editModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="card-title" id="editModalTitle">Edit Key</span>
+                <button class="modal-close" onclick="closeModal('editModal')">&times;</button>
+            </div>
+            <div id="editModalStatus" class="status"></div>
+            <form onsubmit="submitEdit(event)">
+                <div class="form-group">
+                    <label>Key Path</label>
+                    <input type="text" id="editKeyPath" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Data (JSON)</label>
+                    <div id="editJsonEditor"></div>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="submit" class="btn">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('editModal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal" id="createModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="card-title">Create New Key</span>
+                <button class="modal-close" onclick="closeModal('createModal')">&times;</button>
+            </div>
+            <div id="createModalStatus" class="status"></div>
+            <form onsubmit="submitCreate(event)">
+                <div class="form-group">
+                    <label>Key Path</label>
+                    <input type="text" id="createKeyPath" placeholder="e.g., users/* or items/123">
+                </div>
+                <div class="form-group">
+                    <label>Data (JSON)</label>
+                    <textarea id="createKeyData" placeholder='{"name": "example"}'></textarea>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="submit" class="btn">Create</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('createModal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script type="module">
+        import { JSONEditor } from '/vanilla-jsoneditor.js';
+        
+        let currentKey = null;
+        let currentData = null;
+        let currentPage = 1;
+        let currentLimit = 50;
+        let currentFilter = '';
+        let totalKeys = 0;
+        let jsonEditor = null;
+        let currentEditorContent = null;
+        let searchTimeout = null;
+        
+        // Expose functions globally for onclick handlers
+        window.editKey = editKey;
+        window.viewKey = viewKey;
+        window.deleteKey = deleteKey;
+        window.refreshKeys = refreshKeys;
+        window.openCreateModal = openCreateModal;
+        window.submitCreate = submitCreate;
+        window.submitEdit = submitEdit;
+        window.closeModal = closeModal;
+        window.openModal = openModal;
+        window.showStatus = showStatus;
+        window.editCurrentKey = editCurrentKey;
+        window.deleteCurrentKey = deleteCurrentKey;
+        window.prevPage = prevPage;
+        window.nextPage = nextPage;
+        window.changePerPage = changePerPage;
+        window.refreshFilters = refreshFilters;
+        window.loadServerInfo = loadServerInfo;
+
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.panel).classList.add('active');
+                if (tab.dataset.panel === 'settings') loadServerInfo();
+                if (tab.dataset.panel === 'filters') refreshFilters();
+            });
+        });
+
+        document.getElementById('searchKeys').addEventListener('input', (e) => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                currentFilter = e.target.value;
+                currentPage = 1;
+                refreshKeys();
+            }, 300);
+        });
+
+        function changePerPage() {
+            currentLimit = parseInt(document.getElementById('perPage').value);
+            currentPage = 1;
+            refreshKeys();
+        }
+
+        function prevPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                refreshKeys();
+            }
+        }
+
+        function nextPage() {
+            const totalPages = Math.ceil(totalKeys / currentLimit);
+            if (currentPage < totalPages) {
+                currentPage++;
+                refreshKeys();
+            }
+        }
+
+        async function refreshKeys() {
+            try {
+                const params = new URLSearchParams({
+                    api: 'keys',
+                    page: currentPage,
+                    limit: currentLimit
+                });
+                if (currentFilter) params.set('filter', currentFilter);
+                const res = await fetch('/?' + params.toString());
+                const data = await res.json();
+                totalKeys = data.total || 0;
+                renderKeys(data.keys || [], data.total, data.page, data.limit);
+            } catch (err) {
+                console.error('Failed to load keys:', err);
+            }
+        }
+
+        function renderKeys(keys, total, page, limit) {
+            const list = document.getElementById('keysList');
+            document.getElementById('keyCount').textContent = keys.length;
+            document.getElementById('totalCount').textContent = total;
+            
+            const totalPages = Math.max(1, Math.ceil(total / limit));
+            document.getElementById('currentPage').textContent = page;
+            document.getElementById('totalPages').textContent = totalPages;
+            
+            const pagination = document.getElementById('pagination');
+            pagination.style.display = total > limit ? 'flex' : 'none';
+            document.getElementById('prevBtn').disabled = page <= 1;
+            document.getElementById('nextBtn').disabled = page >= totalPages;
+            
+            if (keys.length === 0) {
+                list.innerHTML = '<div class="empty-state">No keys found</div>';
+                return;
+            }
+            list.innerHTML = keys.map(key => `
+                <div class="key-item" onclick="editKey('${escapeHtml(key)}')">
+                    <span class="key-name">${escapeHtml(key)}</span>
+                    <div class="key-actions">
+                        <button class="btn btn-secondary" onclick="event.stopPropagation(); viewKey('${escapeHtml(key)}')">View</button>
+                        <button class="btn btn-danger" onclick="event.stopPropagation(); deleteKey('${escapeHtml(key)}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+        }
+
+        async function viewKey(key) {
+            try {
+                const res = await fetch('/' + key);
+                const data = await res.json();
+                currentKey = key;
+                currentData = data;
+                document.getElementById('viewModalTitle').textContent = key;
+                document.getElementById('viewModalContent').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('viewModalStatus').className = 'status';
+                openModal('viewModal');
+            } catch (err) {
+                showStatus('viewModalStatus', 'error', 'Failed to load: ' + err.message);
+            }
+        }
+
+        async function editKey(key) {
+            try {
+                const res = await fetch('/' + key);
+                const data = await res.json();
+                currentKey = key;
+                document.getElementById('editModalTitle').textContent = 'Edit: ' + key;
+                document.getElementById('editKeyPath').value = key;
+                document.getElementById('editModalStatus').className = 'status';
+                closeModal('viewModal');
+                openModal('editModal');
+                
+                // Initialize or update jsoneditor
+                const container = document.getElementById('editJsonEditor');
+                if (jsonEditor) {
+                    jsonEditor.destroy();
+                }
+                const content = { json: data.data || data };
+                container.classList.add('jse-theme-dark');
+                jsonEditor = new JSONEditor({
+                    target: container,
+                    props: {
+                        content: content,
+                        mode: 'tree',
+                        mainMenuBar: true,
+                        navigationBar: true,
+                        statusBar: true,
+                        modes: ['text', 'tree'],
+                        onChange: (updatedContent) => {
+                            currentEditorContent = updatedContent;
+                        }
+                    }
+                });
+                currentEditorContent = content;
+            } catch (err) {
+                alert('Failed to load key: ' + err.message);
+            }
+        }
+
+        function editCurrentKey() {
+            if (currentKey) editKey(currentKey);
+        }
+
+        async function submitEdit(e) {
+            e.preventDefault();
+            const key = document.getElementById('editKeyPath').value;
+            let jsonData;
+            try {
+                if (currentEditorContent.json !== undefined) {
+                    jsonData = currentEditorContent.json;
+                } else if (currentEditorContent.text !== undefined) {
+                    jsonData = JSON.parse(currentEditorContent.text);
+                } else {
+                    throw new Error('No content');
+                }
+            } catch (err) {
+                showStatus('editModalStatus', 'error', 'Invalid JSON: ' + err.message);
+                return;
+            }
+            try {
+                const res = await fetch('/' + key, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(jsonData)
+                });
+                if (!res.ok) throw new Error(await res.text());
+                showStatus('editModalStatus', 'success', 'Saved successfully');
+                refreshKeys();
+                setTimeout(() => closeModal('editModal'), 1000);
+            } catch (err) {
+                showStatus('editModalStatus', 'error', 'Failed: ' + err.message);
+            }
+        }
+
+        async function deleteKey(key) {
+            if (!confirm('Delete key: ' + key + '?')) return;
+            try {
+                const res = await fetch('/' + key, { method: 'DELETE' });
+                if (!res.ok) throw new Error(await res.text());
+                refreshKeys();
+                closeModal('viewModal');
+            } catch (err) {
+                alert('Failed to delete: ' + err.message);
+            }
+        }
+
+        function deleteCurrentKey() {
+            if (currentKey) deleteKey(currentKey);
+        }
+
+        function openCreateModal() {
+            document.getElementById('createKeyPath').value = '';
+            document.getElementById('createKeyData').value = '';
+            document.getElementById('createModalStatus').className = 'status';
+            openModal('createModal');
+        }
+
+        async function submitCreate(e) {
+            e.preventDefault();
+            const path = document.getElementById('createKeyPath').value;
+            const dataStr = document.getElementById('createKeyData').value;
+            if (!path) {
+                showStatus('createModalStatus', 'error', 'Key path is required');
+                return;
+            }
+            try {
+                JSON.parse(dataStr);
+            } catch {
+                showStatus('createModalStatus', 'error', 'Invalid JSON');
+                return;
+            }
+            try {
+                const res = await fetch('/' + path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: dataStr
+                });
+                if (!res.ok) throw new Error(await res.text());
+                showStatus('createModalStatus', 'success', 'Created successfully');
+                refreshKeys();
+                setTimeout(() => closeModal('createModal'), 1000);
+            } catch (err) {
+                showStatus('createModalStatus', 'error', 'Failed: ' + err.message);
+            }
+        }
+
+        async function loadServerInfo() {
+            try {
+                const res = await fetch('/?api=info');
+                const info = await res.json();
+                const grid = document.getElementById('serverInfo');
+                grid.innerHTML = Object.entries(info).map(([key, value]) => `
+                    <div class="info-item">
+                        <div class="info-label">${key}</div>
+                        <div class="info-value">${formatValue(value)}</div>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load server info:', err);
+            }
+        }
+
+        async function refreshFilters() {
+            try {
+                const res = await fetch('/?api=filters');
+                const data = await res.json();
+                const paths = data.paths || [];
+                document.getElementById('filterCount').textContent = paths.length;
+                const list = document.getElementById('filtersList');
+                if (paths.length === 0) {
+                    list.innerHTML = '<div class="empty-state">No filters registered</div>';
+                    return;
+                }
+                list.innerHTML = paths.map(path => `
+                    <div class="key-item">
+                        <span class="key-name">${path}</span>
+                    </div>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load filters:', err);
+            }
+        }
+
+        function formatValue(val) {
+            if (typeof val === 'boolean') return val ? 'Yes' : 'No';
+            if (typeof val === 'number' && val > 1000000) return (val / 1000000000) + 's';
+            return val;
+        }
+
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        function showStatus(id, type, msg) {
+            const el = document.getElementById(id);
+            el.className = 'status ' + type;
+            el.textContent = msg;
+        }
+
+        document.querySelectorAll('.modal').forEach(modal => {
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.classList.remove('active');
+            });
+        });
+
+        refreshKeys();
+    </script>
+</body>
+</html>

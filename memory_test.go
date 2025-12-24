@@ -153,6 +153,18 @@ func TestStreamLimitFilter(t *testing.T) {
 	StreamLimitFilterTest(t, app)
 }
 
+func TestClientCompatibility(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	app := &Server{}
+	app.Silence = true
+	app.ForcePatch = true
+	app.Start("localhost:0")
+	defer app.Close(os.Interrupt)
+	ClientCompatibilityTest(t, app)
+}
+
 func TestBeforeRead(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()

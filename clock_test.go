@@ -19,7 +19,7 @@ func TestTime(t *testing.T) {
 	timestamp, err := strconv.ParseInt(timeStr, 10, 64)
 	require.NoError(t, err)
 	require.Greater(t, timestamp, int64(0))
-	
+
 	// Verify it's a recent timestamp (within last minute)
 	now := time.Now().UTC().UnixNano()
 	require.Less(t, now-timestamp, int64(time.Minute))
@@ -31,7 +31,7 @@ func TestSendTime(t *testing.T) {
 	app.Tick = 50 * time.Millisecond
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	
+
 	// Test sendTime method directly
 	app.sendTime()
 	// Should not panic or error
@@ -42,12 +42,12 @@ func TestTick(t *testing.T) {
 	app.Silence = true
 	app.Tick = 10 * time.Millisecond
 	app.Start("localhost:0")
-	
+
 	// Let it tick a few times
 	time.Sleep(50 * time.Millisecond)
-	
+
 	app.Close(os.Interrupt)
-	
+
 	// Verify server is no longer active
 	require.False(t, app.Active())
 }
@@ -60,7 +60,7 @@ func TestClockWebsocketUnauthorized(t *testing.T) {
 	}
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	
+
 	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.Nil(t, c)
@@ -73,21 +73,21 @@ func TestClockWebsocketAuthorized(t *testing.T) {
 	app.Tick = 50 * time.Millisecond
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	
+
 	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
-	
+
 	// Read initial time message
 	_, message, err := c.ReadMessage()
 	require.NoError(t, err)
-	
+
 	// Verify message is a valid timestamp
 	timestamp, err := strconv.ParseInt(string(message), 10, 64)
 	require.NoError(t, err)
 	require.Greater(t, timestamp, int64(0))
-	
+
 	c.Close()
 }
 
@@ -96,12 +96,12 @@ func TestClockHTTPRequest(t *testing.T) {
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	
-	// Test regular HTTP request to clock endpoint (should get stats instead)
+
+	// Test regular HTTP request to clock endpoint (should get explorer HTML)
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
 	app.Router.ServeHTTP(w, req)
 	resp := w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
-	require.Equal(t, "application/json", resp.Header.Get("Content-Type"))
+	require.Equal(t, "text/html; charset=utf-8", resp.Header.Get("Content-Type"))
 }
