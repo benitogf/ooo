@@ -140,7 +140,8 @@ func main() {
     // Sanitize/validate before writes to the list
     app.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
         var b Book
-        if err := json.Unmarshal(data, &b); err != nil {
+        err := json.Unmarshal(data, &b)
+        if err != nil {
             return nil, err
         }
         if b.Title == "" {
@@ -162,7 +163,8 @@ func main() {
     // Hide secrets on reads
     app.ReadFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
         var b Book
-        if err := json.Unmarshal(data, &b); err != nil {
+        err := json.Unmarshal(data, &b)
+        if err != nil {
             return nil, err
         }
         b.Secret = ""

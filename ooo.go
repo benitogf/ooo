@@ -17,6 +17,7 @@ import (
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
 	"github.com/benitogf/ooo/stream"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -446,6 +447,7 @@ func (app *Server) StartWithError(address string) error {
 	atomic.StoreInt64(&app.active, 0)
 	atomic.StoreInt64(&app.closing, 0)
 	app.startErr = make(chan error, 1)
+	monotonic.Init()
 	app.defaults()
 	app.setupRoutes()
 	// Preallocate stream pools for all registered filter paths
@@ -453,7 +455,8 @@ func (app *Server) StartWithError(address string) error {
 	app.wg.Add(1)
 	go app.waitListen()
 	app.wg.Wait()
-	if err := app.waitStart(); err != nil {
+	err := app.waitStart()
+	if err != nil {
 		return err
 	}
 	app.Console = coat.NewConsole(app.Address, app.Silence)

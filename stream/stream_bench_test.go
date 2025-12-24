@@ -12,208 +12,6 @@ import (
 const benchDomain = "http://example.com"
 
 // =============================================================================
-// List Manipulation Benchmarks
-// =============================================================================
-
-// BenchmarkInsertSorted benchmarks inserting into a sorted list
-func BenchmarkInsertSorted(b *testing.B) {
-	// Create a base list of 100 objects
-	baseList := make([]meta.Object, 100)
-	for i := 0; i < 100; i++ {
-		baseList[i] = meta.Object{
-			Created: int64(i * 1000),
-			Index:   strconv.Itoa(i),
-			Path:    "users/" + strconv.Itoa(i),
-			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
-		}
-	}
-
-	newObj := meta.Object{
-		Created: 50500, // Insert in the middle
-		Index:   "new",
-		Path:    "users/new",
-		Data:    json.RawMessage(`{"id":"new"}`),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		list := make([]meta.Object, len(baseList))
-		copy(list, baseList)
-		_, _ = insertSorted(list, newObj)
-	}
-}
-
-// BenchmarkInsertSortedAppend benchmarks appending to end of sorted list
-func BenchmarkInsertSortedAppend(b *testing.B) {
-	baseList := make([]meta.Object, 100)
-	for i := 0; i < 100; i++ {
-		baseList[i] = meta.Object{
-			Created: int64(i * 1000),
-			Index:   strconv.Itoa(i),
-			Path:    "users/" + strconv.Itoa(i),
-			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
-		}
-	}
-
-	newObj := meta.Object{
-		Created: 200000, // Append at end
-		Index:   "new",
-		Path:    "users/new",
-		Data:    json.RawMessage(`{"id":"new"}`),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		list := make([]meta.Object, len(baseList))
-		copy(list, baseList)
-		_, _ = insertSorted(list, newObj)
-	}
-}
-
-// BenchmarkUpdateInList benchmarks updating an item in a list
-func BenchmarkUpdateInList(b *testing.B) {
-	baseList := make([]meta.Object, 100)
-	for i := 0; i < 100; i++ {
-		baseList[i] = meta.Object{
-			Created: int64(i * 1000),
-			Index:   strconv.Itoa(i),
-			Path:    "users/" + strconv.Itoa(i),
-			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `","status":"active"}`),
-		}
-	}
-
-	updatedObj := meta.Object{
-		Created: 50000,
-		Index:   "50",
-		Path:    "users/50",
-		Data:    json.RawMessage(`{"id":"50","status":"inactive"}`),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		list := make([]meta.Object, len(baseList))
-		copy(list, baseList)
-		_, _, _ = updateInList(list, updatedObj)
-	}
-}
-
-// BenchmarkRemoveFromList benchmarks removing an item from a list
-func BenchmarkRemoveFromList(b *testing.B) {
-	baseList := make([]meta.Object, 100)
-	for i := 0; i < 100; i++ {
-		baseList[i] = meta.Object{
-			Created: int64(i * 1000),
-			Index:   strconv.Itoa(i),
-			Path:    "users/" + strconv.Itoa(i),
-			Data:    json.RawMessage(`{"id":"` + strconv.Itoa(i) + `"}`),
-		}
-	}
-
-	objToRemove := meta.Object{
-		Path: "users/50",
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		list := make([]meta.Object, len(baseList))
-		copy(list, baseList)
-		_, _, _ = removeFromList(list, objToRemove)
-	}
-}
-
-// =============================================================================
-// Patch Generation Benchmarks
-// =============================================================================
-
-// BenchmarkGenerateListPatchAdd benchmarks generating an add patch for lists
-func BenchmarkGenerateListPatchAdd(b *testing.B) {
-	obj := meta.Object{
-		Created: 1000,
-		Index:   "new",
-		Path:    "users/new",
-		Data:    json.RawMessage(`{"id":"new","name":"New User","status":"active"}`),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = generateListPatch("add", 5, &obj)
-	}
-}
-
-// BenchmarkGenerateListPatchReplace benchmarks generating a replace patch for lists
-func BenchmarkGenerateListPatchReplace(b *testing.B) {
-	obj := meta.Object{
-		Created: 1000,
-		Index:   "50",
-		Path:    "users/50",
-		Data:    json.RawMessage(`{"id":"50","name":"Updated User","status":"inactive"}`),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = generateListPatch("replace", 50, &obj)
-	}
-}
-
-// BenchmarkGenerateListPatchRemove benchmarks generating a remove patch for lists
-func BenchmarkGenerateListPatchRemove(b *testing.B) {
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _ = generateListPatch("remove", 50, nil)
-	}
-}
-
-// BenchmarkGenerateObjectPatch benchmarks generating a patch for single objects
-func BenchmarkGenerateObjectPatch(b *testing.B) {
-	oldObj := &meta.Object{
-		Created: 1000,
-		Updated: 1000,
-		Index:   "user1",
-		Path:    "users/user1",
-		Data:    json.RawMessage(`{"id":"user1","name":"Alice","status":"active"}`),
-	}
-	newObj := &meta.Object{
-		Created: 1000,
-		Updated: 2000,
-		Index:   "user1",
-		Path:    "users/user1",
-		Data:    json.RawMessage(`{"id":"user1","name":"Alice","status":"inactive"}`),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _, _ = generateObjectPatch(oldObj, newObj)
-	}
-}
-
-// BenchmarkGenerateObjectPatchLarge benchmarks patch generation for large objects
-func BenchmarkGenerateObjectPatchLarge(b *testing.B) {
-	// Build large nested object
-	largeData := `{"id":"user1","profile":{"name":"Alice","email":"alice@example.com","settings":{"theme":"dark","notifications":true,"language":"en","timezone":"UTC"}},"metadata":{"created":"2024-01-01","updated":"2024-01-02","version":1}}`
-	oldObj := &meta.Object{
-		Created: 1000,
-		Updated: 1000,
-		Index:   "user1",
-		Path:    "users/user1",
-		Data:    json.RawMessage(largeData),
-	}
-
-	updatedData := `{"id":"user1","profile":{"name":"Alice","email":"alice@example.com","settings":{"theme":"light","notifications":true,"language":"en","timezone":"UTC"}},"metadata":{"created":"2024-01-01","updated":"2024-01-02","version":2}}`
-	newObj := &meta.Object{
-		Created: 1000,
-		Updated: 2000,
-		Index:   "user1",
-		Path:    "users/user1",
-		Data:    json.RawMessage(updatedData),
-	}
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		_, _, _ = generateObjectPatch(oldObj, newObj)
-	}
-}
-
-// =============================================================================
 // Cache Benchmarks
 // =============================================================================
 
@@ -544,7 +342,7 @@ func BenchmarkNewConnection(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := "test/" + strconv.Itoa(i%1000)
-		stream.new(key, nil)
+		stream.newConn(key, nil)
 	}
 }
 
@@ -569,7 +367,7 @@ func BenchmarkNewConnectionPreallocated(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		key := "test/" + strconv.Itoa(i%1000)
-		stream.new(key, nil)
+		stream.newConn(key, nil)
 	}
 }
 
@@ -586,11 +384,11 @@ func BenchmarkNewConnectionExistingPool(b *testing.B) {
 	}
 
 	key := "test/existing"
-	stream.new(key, nil)
+	stream.newConn(key, nil)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		stream.new(key, nil)
+		stream.newConn(key, nil)
 	}
 }
 
@@ -691,5 +489,22 @@ func BenchmarkBuildMessageLarge(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = buildMessage(data, false, int64(i))
+	}
+}
+
+func BenchmarkRemoveConn(b *testing.B) {
+	// Create a slice with 100 connections
+	conns := make([]*Conn, 100)
+	for i := range conns {
+		conns[i] = &Conn{}
+	}
+	target := conns[50] // Remove from middle
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Make a copy to avoid modifying the original
+		testConns := make([]*Conn, len(conns))
+		copy(testConns, conns)
+		_ = removeConn(testConns, target)
 	}
 }

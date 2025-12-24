@@ -54,7 +54,8 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%s", ErrInvalidKey)
 		return
 	}
-	if err := key.ValidateGlob(_key); err != nil {
+	err := key.ValidateGlob(_key)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
@@ -107,7 +108,8 @@ func (app *Server) republish(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%s", ErrInvalidKey)
 		return
 	}
-	if err := key.ValidateGlob(_key); err != nil {
+	err := key.ValidateGlob(_key)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
@@ -154,7 +156,8 @@ func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%s", ErrInvalidKey)
 		return
 	}
-	if err := key.ValidateGlob(_key); err != nil {
+	err := key.ValidateGlob(_key)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return

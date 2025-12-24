@@ -64,7 +64,8 @@ func (lf *LimitFilter) Limit() int {
 func (lf *LimitFilter) ReadFilter(path string, data json.RawMessage) (json.RawMessage, error) {
 	// Decode the list of objects
 	var objects []meta.Object
-	if err := json.Unmarshal(data, &objects); err != nil {
+	err := json.Unmarshal(data, &objects)
+	if err != nil {
 		// Not a list, return as-is
 		return data, nil
 	}

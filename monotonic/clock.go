@@ -1,6 +1,7 @@
 package monotonic
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -28,8 +29,15 @@ type Clock struct {
 // globalClock is the package-level singleton
 var globalClock *Clock
 
-func init() {
-	globalClock = New()
+// initOnce ensures Init() only creates the clock once
+var initOnce sync.Once
+
+// Init initializes the global monotonic clock instance.
+// Safe to call multiple times; only the first call has effect.
+func Init() {
+	initOnce.Do(func() {
+		globalClock = New()
+	})
 }
 
 // New creates and starts a new monotonic clock
@@ -120,20 +128,31 @@ func (c *Clock) Stop() {
 	close(c.stopCh)
 }
 
-// Now returns a monotonically increasing timestamp using the global clock
+// Now returns a monotonically increasing timestamp using the global clock.
+// Panics if Init() has not been called.
 func Now() int64 {
+	if globalClock == nil {
+		panic("monotonic: clock not initialized, call monotonic.Init() first")
+	}
 	return globalClock.Now()
 }
 
-// Stop stops the global clock's correction loop
+// Stop stops the global clock's correction loop.
+// Panics if Init() has not been called.
 func Stop() {
+	if globalClock == nil {
+		panic("monotonic: clock not initialized, call monotonic.Init() first")
+	}
 	globalClock.Stop()
 }
 
-// Reset reinitializes the global clock (useful for testing)
+// Reset reinitializes the global clock (useful for testing).
+// This bypasses sync.Once to allow reinitialization.
 func Reset() {
 	if globalClock != nil {
 		globalClock.Stop()
 	}
 	globalClock = New()
+	// Reset initOnce so Init() can be called again if needed
+	initOnce = sync.Once{}
 }

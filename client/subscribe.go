@@ -198,7 +198,8 @@ func (s *subscribeState[T]) handleMessage(message []byte) bool {
 		return false
 	}
 	var item T
-	if err = json.Unmarshal(obj.Data, &item); err != nil {
+	err = json.Unmarshal(obj.Data, &item)
+	if err != nil {
 		s.cfg.console.Err(s.logPrefix()+": failed to unmarshal item", err)
 		if s.events.OnError != nil {
 			s.events.OnError(err)
@@ -273,7 +274,8 @@ func (s *subscribeState[T]) startCloseWatcher() {
 // The subscription runs until the context is cancelled.
 // For glob patterns (lists), use SubscribeList instead.
 func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T]) error {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return err
 	}
 	if path == "" {
@@ -282,7 +284,8 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 	if key.IsGlob(path) {
 		return ErrGlobNotAllowed
 	}
-	if err := events.Validate(); err != nil {
+	err = events.Validate()
+	if err != nil {
 		return err
 	}
 
@@ -373,7 +376,8 @@ func (s *subscribeListState[T]) handleMessage(message []byte) bool {
 	result := make([]Meta[T], 0, len(objs))
 	for _, obj := range objs {
 		var item T
-		if err = json.Unmarshal(obj.Data, &item); err != nil {
+		err = json.Unmarshal(obj.Data, &item)
+		if err != nil {
 			s.cfg.console.Err(s.logPrefix()+": failed to unmarshal list item", err)
 			if s.events.OnError != nil {
 				s.events.OnError(err)
@@ -450,7 +454,8 @@ func (s *subscribeListState[T]) startCloseWatcher() {
 // The subscription runs until the context is cancelled.
 // For single object paths (non-glob), use Subscribe instead.
 func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeListEvents[T]) error {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return err
 	}
 	if path == "" {
@@ -459,7 +464,8 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 	if !key.IsGlob(path) {
 		return ErrGlobRequired
 	}
-	if err := events.Validate(); err != nil {
+	err = events.Validate()
+	if err != nil {
 		return err
 	}
 

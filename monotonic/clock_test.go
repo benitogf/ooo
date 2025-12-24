@@ -9,6 +9,7 @@ import (
 )
 
 func TestMonotonicNow(t *testing.T) {
+	Init()
 	// Test that Now() returns increasing values
 	prev := Now()
 	for i := 0; i < 1000; i++ {
@@ -19,6 +20,7 @@ func TestMonotonicNow(t *testing.T) {
 }
 
 func TestMonotonicNowConcurrent(t *testing.T) {
+	Init()
 	// Test concurrent access - all values should be unique and increasing per goroutine
 	const numGoroutines = 10
 	const numIterations = 1000
@@ -80,15 +82,39 @@ func TestClockCorrection(t *testing.T) {
 }
 
 func BenchmarkMonotonicNow(b *testing.B) {
+	Init()
 	for i := 0; i < b.N; i++ {
 		Now()
 	}
 }
 
 func BenchmarkMonotonicNowParallel(b *testing.B) {
+	Init()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			Now()
 		}
 	})
+}
+
+func TestNowPanicWithoutInit(t *testing.T) {
+	// Save current globalClock and restore after test
+	original := globalClock
+	globalClock = nil
+	defer func() { globalClock = original }()
+
+	require.Panics(t, func() {
+		Now()
+	}, "Now() should panic when globalClock is nil")
+}
+
+func TestStopPanicWithoutInit(t *testing.T) {
+	// Save current globalClock and restore after test
+	original := globalClock
+	globalClock = nil
+	defer func() { globalClock = original }()
+
+	require.Panics(t, func() {
+		Stop()
+	}, "Stop() should panic when globalClock is nil")
 }

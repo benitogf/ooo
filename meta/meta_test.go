@@ -147,72 +147,118 @@ func TestEncodeRoundTrip(t *testing.T) {
 	require.True(t, bytes.Equal(original.Data, decoded.Data))
 }
 
-func BenchmarkEncode(b *testing.B) {
+func TestGetObject_PutObject(t *testing.T) {
+	obj := GetObject()
+	require.NotNil(t, obj)
+	require.Equal(t, int64(0), obj.Created)
+	require.Equal(t, int64(0), obj.Updated)
+	require.Equal(t, "", obj.Index)
+	require.Equal(t, "", obj.Path)
+	require.Nil(t, obj.Data)
+
+	// Modify and return to pool
+	obj.Created = 123
+	obj.Index = "test"
+	obj.Data = json.RawMessage(`{}`)
+	PutObject(obj)
+
+	// Get again - should be reset
+	obj2 := GetObject()
+	require.Equal(t, int64(0), obj2.Created)
+	require.Equal(t, "", obj2.Index)
+	require.Nil(t, obj2.Data)
+	PutObject(obj2)
+}
+
+func TestDecodePooled_Success(t *testing.T) {
+	data := []byte(`{"created":1000,"updated":2000,"index":"test","path":"test/path","data":{"key":"value"}}`)
+	obj, err := DecodePooled(data)
+	require.NoError(t, err)
+	require.NotNil(t, obj)
+	require.Equal(t, int64(1000), obj.Created)
+	require.Equal(t, int64(2000), obj.Updated)
+	require.Equal(t, "test", obj.Index)
+	PutObject(obj)
+}
+
+func TestDecodePooled_Error(t *testing.T) {
+	data := []byte(`invalid json`)
+	obj, err := DecodePooled(data)
+	require.Error(t, err)
+	require.Nil(t, obj)
+}
+
+func TestEncodeToBuffer_Success(t *testing.T) {
 	obj := Object{
-		Created: 12345,
-		Updated: 67890,
-		Index:   "test-index",
-		Path:    "test/path",
-		Data:    json.RawMessage(`{"key":"value","nested":{"a":1,"b":2}}`),
-	}
-	for i := 0; i < b.N; i++ {
-		Encode(obj)
-	}
-}
-
-func BenchmarkDecode(b *testing.B) {
-	data := []byte(`{"created":12345,"updated":67890,"index":"test-index","path":"test/path","data":{"key":"value"}}`)
-	for i := 0; i < b.N; i++ {
-		Decode(data)
-	}
-}
-
-func BenchmarkNew(b *testing.B) {
-	obj := &Object{
 		Created: 12345,
 		Updated: 67890,
 		Index:   "test-index",
 		Path:    "test/path",
 		Data:    json.RawMessage(`{"key":"value"}`),
 	}
-	for i := 0; i < b.N; i++ {
-		New(obj)
-	}
+	result, err := EncodeToBuffer(obj)
+	require.NoError(t, err)
+	require.NotEmpty(t, result)
+
+	// Verify it can be decoded back
+	decoded, err := Decode(result)
+	require.NoError(t, err)
+	require.Equal(t, obj.Created, decoded.Created)
+	require.Equal(t, obj.Index, decoded.Index)
 }
 
-func BenchmarkDecodeList(b *testing.B) {
-	data := []byte(`[{"created":1,"updated":2,"index":"1","data":{}},{"created":2,"updated":3,"index":"2","data":{}},{"created":3,"updated":4,"index":"3","data":{}}]`)
-	for i := 0; i < b.N; i++ {
-		DecodeList(data)
-	}
+func TestDecodeListWithCap_Success(t *testing.T) {
+	data := []byte(`[{"created":1,"updated":2,"index":"1","data":{}},{"created":2,"updated":3,"index":"2","data":{}}]`)
+	objs, err := DecodeListWithCap(data, 5)
+	require.NoError(t, err)
+	require.Len(t, objs, 2)
+	require.Equal(t, int64(1), objs[0].Created)
+	require.Equal(t, int64(2), objs[1].Created)
 }
 
-func BenchmarkEncodeToBuffer(b *testing.B) {
-	obj := Object{
-		Created: 12345,
-		Updated: 67890,
-		Index:   "test-index",
-		Path:    "test/path",
-		Data:    json.RawMessage(`{"key":"value","nested":{"a":1,"b":2}}`),
-	}
-	for i := 0; i < b.N; i++ {
-		EncodeToBuffer(obj)
-	}
+func TestDecodeListWithCap_Error(t *testing.T) {
+	data := []byte(`invalid json`)
+	objs, err := DecodeListWithCap(data, 5)
+	require.Error(t, err)
+	require.Nil(t, objs)
 }
 
-func BenchmarkDecodePooled(b *testing.B) {
-	data := []byte(`{"created":12345,"updated":67890,"index":"test-index","path":"test/path","data":{"key":"value"}}`)
-	for i := 0; i < b.N; i++ {
-		obj, _ := DecodePooled(data)
-		if obj != nil {
-			PutObject(obj)
+func TestDecodeList_Error(t *testing.T) {
+	data := []byte(`invalid json`)
+	_, err := DecodeList(data)
+	require.Error(t, err)
+}
+
+func TestDecodeFromReader_Error(t *testing.T) {
+	reader := strings.NewReader(`invalid json`)
+	_, err := DecodeFromReader(reader)
+	require.Error(t, err)
+}
+
+func TestDecodeListFromReader_Error(t *testing.T) {
+	reader := strings.NewReader(`invalid json`)
+	_, err := DecodeListFromReader(reader)
+	require.Error(t, err)
+}
+
+func TestBufferPool_Reuse(t *testing.T) {
+	// Encode multiple objects to exercise buffer pool
+	for range 100 {
+		obj := Object{
+			Created: int64(0),
+			Index:   "test",
+			Data:    json.RawMessage(`{}`),
 		}
+		_, err := EncodeToBuffer(obj)
+		require.NoError(t, err)
 	}
 }
 
-func BenchmarkDecodeListWithCap(b *testing.B) {
-	data := []byte(`[{"created":1,"updated":2,"index":"1","data":{}},{"created":2,"updated":3,"index":"2","data":{}},{"created":3,"updated":4,"index":"3","data":{}}]`)
-	for i := 0; i < b.N; i++ {
-		DecodeListWithCap(data, 3)
+func TestObjectPool_Reuse(t *testing.T) {
+	// Get and put multiple objects to exercise pool
+	for i := range 100 {
+		obj := GetObject()
+		obj.Created = int64(i)
+		PutObject(obj)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"time"
 
@@ -169,7 +170,8 @@ func RemoteSet[T any](cfg RemoteConfig, path string, item T) error {
 
 // RemoteSetWithContext stores an item at the given path with context support.
 func RemoteSetWithContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) error {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return err
 	}
 	if key.IsGlob(path) {
@@ -206,7 +208,8 @@ func RemoteSetWithResponse[T any](cfg RemoteConfig, path string, item T) (IndexR
 // RemoteSetWithResponseContext stores an item at the given path with context support and returns the response.
 // After setting, it fetches the object to return the full metadata.
 func RemoteSetWithResponseContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) (IndexResponse, error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return IndexResponse{}, err
 	}
 	if key.IsGlob(path) {
@@ -258,7 +261,8 @@ func RemotePushWithResponse[T any](cfg RemoteConfig, path string, item T) (Index
 // RemotePushWithResponseContext adds an item to a list path with context support and returns the response.
 // After pushing, it fetches the created object to return the full metadata.
 func RemotePushWithResponseContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) (IndexResponse, error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return IndexResponse{}, err
 	}
 	if !key.IsGlob(path) {
@@ -302,7 +306,8 @@ func RemotePushWithResponseContext[T any](ctx context.Context, cfg RemoteConfig,
 
 // RemotePushWithContext adds an item to a list path with context support.
 func RemotePushWithContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) error {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return err
 	}
 	if !key.IsGlob(path) {
@@ -340,7 +345,8 @@ func RemoteGet[T any](cfg RemoteConfig, path string) (client.Meta[T], error) {
 
 // RemoteGetWithContext retrieves an item from the given path with context support.
 func RemoteGetWithContext[T any](ctx context.Context, cfg RemoteConfig, path string) (client.Meta[T], error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return client.Meta[T]{}, err
 	}
 	if key.IsGlob(path) {
@@ -372,7 +378,8 @@ func RemoteGetWithContext[T any](ctx context.Context, cfg RemoteConfig, path str
 		return client.Meta[T]{}, err
 	}
 	var item T
-	if err := json.Unmarshal(obj.Data, &item); err != nil {
+	err = json.Unmarshal(obj.Data, &item)
+	if err != nil {
 		meta.PutObject(obj)
 		log.Printf("RemoteGet[%s]: failed to unmarshal data: %v", path, err)
 		return client.Meta[T]{}, err
@@ -395,7 +402,8 @@ func RemoteGetList[T any](cfg RemoteConfig, path string) ([]client.Meta[T], erro
 
 // RemoteGetListWithContext retrieves a list of items from the given path with context support.
 func RemoteGetListWithContext[T any](ctx context.Context, cfg RemoteConfig, path string) ([]client.Meta[T], error) {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return []client.Meta[T]{}, err
 	}
 	if !key.IsGlob(path) {
@@ -426,7 +434,8 @@ func RemoteGetListWithContext[T any](ctx context.Context, cfg RemoteConfig, path
 	items := make([]client.Meta[T], 0, len(objs))
 	for _, obj := range objs {
 		var item T
-		if err := json.Unmarshal(obj.Data, &item); err != nil {
+		err := json.Unmarshal(obj.Data, &item)
+		if err != nil {
 			log.Printf("RemoteGetList[%s]: failed to unmarshal item: %v", path, err)
 			continue
 		}
@@ -448,18 +457,17 @@ func RemoteDelete(cfg RemoteConfig, path string) error {
 
 // RemoteDeleteWithContext deletes an item at the given path with context support.
 func RemoteDeleteWithContext(ctx context.Context, cfg RemoteConfig, path string) error {
-	if err := cfg.Validate(); err != nil {
+	err := cfg.Validate()
+	if err != nil {
 		return err
 	}
 
-	_, err := cfg.doWithRetry(ctx, "RemoteDelete", path, func() (*http.Request, error) {
+	_, err = cfg.doWithRetry(ctx, "RemoteDelete", path, func() (*http.Request, error) {
 		req, err := http.NewRequest("DELETE", cfg.URL(path), nil)
 		if err != nil {
 			return nil, err
 		}
-		for k, v := range cfg.Header {
-			req.Header[k] = v
-		}
+		maps.Copy(req.Header, cfg.Header)
 		return req, nil
 	})
 	return err

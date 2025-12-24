@@ -10,6 +10,7 @@ import (
 
 	"github.com/benitogf/coat"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
 	hjhttptest "github.com/getlantern/httptest"
 	"github.com/stretchr/testify/require"
 )
@@ -28,9 +29,10 @@ func makeStreamRequestMock(url string) (*http.Request, *hjhttptest.HijackableRes
 const domain = "http://example.com"
 
 func TestInitCacheObject(t *testing.T) {
+	monotonic.Init()
 	const testKey = "testing"
 	stream := Stream{
-		Console:   coat.NewConsole(domain, false),
+		Console:   coat.NewConsole(domain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
@@ -69,68 +71,20 @@ func TestInitCacheObject(t *testing.T) {
 	require.Equal(t, 0, len(stream.pools[testKey].connections))
 }
 
-func TestGenerateListPatch(t *testing.T) {
-	// Test add patch
-	obj := meta.Object{
-		Created: 1000,
-		Index:   "new",
-		Path:    "test/new",
-		Data:    json.RawMessage(`{"four":4}`),
-	}
-	patch, err := generateListPatch("add", 3, &obj)
-	require.NoError(t, err)
-	require.Contains(t, string(patch), `"op":"add"`)
-	require.Contains(t, string(patch), `"path":"/3"`)
-
-	// Test replace patch
-	patch, err = generateListPatch("replace", 2, &obj)
-	require.NoError(t, err)
-	require.Contains(t, string(patch), `"op":"replace"`)
-	require.Contains(t, string(patch), `"path":"/2"`)
-
-	// Test remove patch
-	patch, err = generateListPatch("remove", 1, nil)
-	require.NoError(t, err)
-	require.Contains(t, string(patch), `"op":"remove"`)
-	require.Contains(t, string(patch), `"path":"/1"`)
-}
-
-func TestGenerateObjectPatch(t *testing.T) {
-	oldObj := &meta.Object{
-		Created: 1000,
-		Updated: 1000,
-		Index:   "test",
-		Path:    "test/1",
-		Data:    json.RawMessage(`{"name":"Alice","status":"active"}`),
-	}
-	newObj := &meta.Object{
-		Created: 1000,
-		Updated: 2000,
-		Index:   "test",
-		Path:    "test/1",
-		Data:    json.RawMessage(`{"name":"Alice","status":"inactive"}`),
-	}
-
-	patch, snapshot, err := generateObjectPatch(oldObj, newObj)
-	require.NoError(t, err)
-	require.False(t, snapshot)
-	require.Contains(t, string(patch), `"op":"replace"`)
-	require.Contains(t, string(patch), `/data/status`)
-}
-
 func TestConcurrentBroadcast(t *testing.T) {
+	monotonic.Init()
 	var wg sync.WaitGroup
 
 	stream := Stream{
-		Console:   coat.NewConsole(domain, false),
+		Console:   coat.NewConsole(domain, true),
 		pools:     make(map[string]*Pool),
 		poolIndex: newPoolTrie(),
 		OnSubscribe: func(key string) error {
-			log.Println("sub", key)
+			// log.Println("sub", key)
 			return nil
 		},
 		OnUnsubscribe: func(key string) {
-			log.Println("unsub", key)
+			// log.Println("unsub", key)
 		},
 	}
 
@@ -163,7 +117,7 @@ func TestConcurrentBroadcast(t *testing.T) {
 
 	// Concurrent broadcasts
 	wg.Add(20)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			defer wg.Done()
 			newObj := &meta.Object{Created: 1000, Updated: 2000, Index: "a", Path: "a", Data: json.RawMessage(`{"key":"a","updated":true}`)}
@@ -181,7 +135,7 @@ func TestConcurrentBroadcast(t *testing.T) {
 		}()
 	}
 
-	for y := 0; y < 10; y++ {
+	for range 10 {
 		go func() {
 			defer wg.Done()
 			newObj := &meta.Object{Created: 1000, Updated: 2000, Index: "b", Path: "b", Data: json.RawMessage(`{"key":"b","updated":true}`)}
@@ -245,21 +199,4 @@ func TestRemoveConn(t *testing.T) {
 	conns = []*Conn{c1}
 	result = removeConn(conns, c1)
 	require.Equal(t, 0, len(result))
-}
-
-func BenchmarkRemoveConn(b *testing.B) {
-	// Create a slice with 100 connections
-	conns := make([]*Conn, 100)
-	for i := range conns {
-		conns[i] = &Conn{}
-	}
-	target := conns[50] // Remove from middle
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		// Make a copy to avoid modifying the original
-		testConns := make([]*Conn, len(conns))
-		copy(testConns, conns)
-		_ = removeConn(testConns, target)
-	}
 }
