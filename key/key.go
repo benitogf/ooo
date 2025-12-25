@@ -76,6 +76,7 @@ func IsValid(key string) bool {
 }
 
 // Match checks if a key is part of a path (glob)
+// Optimized for common patterns like "prefix/*" and "a/*/b/*"
 func Match(path string, key string) bool {
 	if path == key {
 		return true
@@ -83,6 +84,19 @@ func Match(path string, key string) bool {
 	if !HasGlob(path) {
 		return false
 	}
+
+	// Fast path: simple trailing glob "prefix/*"
+	if strings.HasSuffix(path, "/*") && strings.Count(path, "*") == 1 {
+		prefix := path[:len(path)-1] // "prefix/"
+		if !strings.HasPrefix(key, prefix) {
+			return false
+		}
+		// Check no additional slashes in the matched part
+		suffix := key[len(prefix):]
+		return !strings.Contains(suffix, "/")
+	}
+
+	// General case: use filepath.Match
 	match, err := filepath.Match(path, key)
 	if err != nil {
 		return false

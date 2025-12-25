@@ -79,7 +79,8 @@ func (m *MemoryLayer) GetList(path string) ([]meta.Object, error) {
 		return nil, ErrInvalidPattern
 	}
 
-	res := []meta.Object{}
+	// Pre-allocate with reasonable capacity to reduce growslice overhead
+	res := make([]meta.Object, 0, min(len(m.data), 64))
 	for k, obj := range m.data {
 		if key.Match(path, k) {
 			res = append(res, *obj)
