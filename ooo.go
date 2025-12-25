@@ -19,6 +19,7 @@ import (
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
+	"github.com/benitogf/ooo/storage"
 	"github.com/benitogf/ooo/stream"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -95,7 +96,7 @@ type Server struct {
 	AllowedMethods    []string
 	AllowedHeaders    []string
 	ExposedHeaders    []string
-	Storage           Database
+	Storage           storage.Database
 	Address           string
 	closing           int64
 	active            int64
@@ -109,7 +110,7 @@ type Server struct {
 	WriteTimeout      time.Duration
 	ReadHeaderTimeout time.Duration
 	IdleTimeout       time.Duration
-	OnStorageEvent    StorageEventCallback
+	OnStorageEvent    storage.EventCallback
 	BeforeRead        func(key string)
 	startErr          chan error // channel for startup errors
 }
@@ -157,7 +158,7 @@ type tcpKeepAliveListener struct {
 
 func (app *Server) waitListen() {
 	var err error
-	storageOpt := StorageOpt{
+	storageOpt := storage.Options{
 		NoBroadcastKeys: app.NoBroadcastKeys,
 		Workers:         app.Workers,
 	}
@@ -289,7 +290,7 @@ func (app *Server) fetch(path string) (FetchResult, error) {
 	return FetchResult{Data: data, Version: version}, nil
 }
 
-func (app *Server) watch(sc StorageChan) {
+func (app *Server) watch(sc storage.StorageChan) {
 	for {
 		ev, ok := <-sc
 		if !ok {
@@ -410,7 +411,9 @@ func (app *Server) defaults() {
 		app.Stream.Console = app.Console
 	}
 	if app.Storage == nil {
-		app.Storage = &MemoryStorage{}
+		app.Storage = storage.New(storage.LayeredConfig{
+			Memory: storage.NewMemoryLayer(),
+		})
 	}
 	if app.Workers == 0 {
 		app.Workers = 6

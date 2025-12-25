@@ -4,6 +4,8 @@ import (
 	"os"
 	"runtime"
 	"testing"
+
+	"github.com/benitogf/ooo/storage"
 )
 
 func TestStorage(t *testing.T) {
@@ -107,7 +109,7 @@ func TestKeysRange(t *testing.T) {
 	StorageKeysRangeTest(app, t, 10)
 }
 
-func TestStreamItemGlobBroadcastLevel(t *testing.T) {
+func TestStreamItemGlobBroadcast(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
@@ -169,8 +171,10 @@ func TestBeforeRead(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	db := &MemoryStorage{}
-	err := db.Start(StorageOpt{})
+	db := storage.New(storage.LayeredConfig{
+		Memory: storage.NewMemoryLayer(),
+	})
+	err := db.Start(storage.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,8 +186,10 @@ func TestWatchStorageNoop(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	db := &MemoryStorage{}
-	err := db.Start(StorageOpt{})
+	db := storage.New(storage.LayeredConfig{
+		Memory: storage.NewMemoryLayer(),
+	})
+	err := db.Start(storage.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

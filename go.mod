@@ -32,3 +32,5 @@ require (
 )
 
 replace github.com/benitogf/jsonpatch => ../jsonpatch
+
+replace github.com/benitogf/nopog => ../nopog

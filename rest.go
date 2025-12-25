@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/messages"
@@ -180,7 +181,7 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		app.Console.Err(err.Error())
-		if err == ErrNotFound {
+		if err == ErrNotFound || strings.Contains(err.Error(), "not found") {
 			w.WriteHeader(http.StatusNotFound)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -188,11 +189,6 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
-
-	// this performs better than the watch channel
-	// if app.Storage.Watch() == nil {
-	// 	go app.broadcast(_key)
-	// }
 
 	w.WriteHeader(http.StatusNoContent)
 	w.Write([]byte(`"unpublish "+_key`))

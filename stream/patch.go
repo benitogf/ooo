@@ -269,11 +269,16 @@ func insertSorted(list []meta.Object, obj meta.Object) ([]meta.Object, int) {
 }
 
 // updateInList finds and updates obj in list by matching Path.
+// Returns a new slice to avoid race conditions with concurrent readers.
 func updateInList(list []meta.Object, obj meta.Object) ([]meta.Object, int, bool) {
 	for i, item := range list {
 		if item.Path == obj.Path {
-			list[i] = obj
-			return list, i, true
+			// Create a new slice to avoid modifying the original in-place
+			// This prevents race conditions with concurrent JSON marshaling
+			newList := make([]meta.Object, len(list))
+			copy(newList, list)
+			newList[i] = obj
+			return newList, i, true
 		}
 	}
 	return list, -1, false

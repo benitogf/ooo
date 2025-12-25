@@ -5,11 +5,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strconv"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/goccy/go-json"
 
@@ -17,6 +15,7 @@ import (
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
+	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -975,7 +974,7 @@ func StorageListTest(server *Server, t *testing.T) {
 }
 
 // StorageSetGetDelTest testing storage function
-func StorageSetGetDelTest(db Database, b *testing.B) {
+func StorageSetGetDelTestBenchmark(db storage.Database, b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_key := key.Build("test/*")
@@ -996,12 +995,11 @@ func StorageSetGetDelTest(db Database, b *testing.B) {
 // StorageGetNTest testing storage GetN function
 func StorageGetNTest(server *Server, t *testing.T, n int) {
 	server.Storage.Clear()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		value := strconv.Itoa(i)
 		key, err := server.Storage.Set("test/"+value, TEST_DATA)
 		require.NoError(t, err)
 		require.Equal(t, value, key)
-		time.Sleep(time.Millisecond * 1)
 	}
 
 	limit := 1
@@ -1066,10 +1064,6 @@ func StorageKeysRangeTest(server *Server, t *testing.T, n int) {
 		}
 		require.NoError(t, err)
 		require.Equal(t, path, "test/"+key)
-		if runtime.GOOS == "windows" {
-			// time granularity in windows is not fast enough
-			time.Sleep(time.Millisecond * 1)
-		}
 	}
 
 	keys, err := server.Storage.KeysRange("test/*", 0, firstNow)
@@ -1079,14 +1073,14 @@ func StorageKeysRangeTest(server *Server, t *testing.T, n int) {
 }
 
 // StorageBeforeReadTest tests that the BeforeRead callback is called on read operations
-func StorageBeforeReadTest(db Database, t *testing.T) {
+func StorageBeforeReadTest(db storage.Database, t *testing.T) {
 	// Track which keys were read
 	readKeys := []string{}
 	var readMutex sync.Mutex
 
 	// Start storage with beforeRead callback
 	db.Close()
-	err := db.Start(StorageOpt{
+	err := db.Start(storage.Options{
 		BeforeRead: func(key string) {
 			readMutex.Lock()
 			readKeys = append(readKeys, key)
@@ -1096,7 +1090,7 @@ func StorageBeforeReadTest(db Database, t *testing.T) {
 	require.NoError(t, err)
 
 	// Drain watcher channels to prevent blocking
-	go WatchStorageNoop(db)
+	go storage.WatchStorageNoop(db)
 
 	db.Clear()
 
@@ -1164,9 +1158,9 @@ func StorageBeforeReadTest(db Database, t *testing.T) {
 }
 
 // WatchStorageNoopTest tests that WatchStorageNoop properly drains events from sharded channels
-func WatchStorageNoopTest(db Database, t *testing.T) {
+func WatchStorageNoopTest(db storage.Database, t *testing.T) {
 	// Start a goroutine to drain the watcher
-	go WatchStorageNoop(db)
+	go storage.WatchStorageNoop(db)
 
 	// Set some data to generate events - they should be drained without blocking
 	_, err := db.Set("test/1", TEST_DATA)

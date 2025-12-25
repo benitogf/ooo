@@ -12,3 +12,4 @@ ooo-fuzz.zip
 *.test
 ooo.test.exe
 coverage.out
+test_compat

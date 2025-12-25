@@ -1,11 +1,11 @@
-package ooo
+package storage
 
 import (
 	"sync"
 	"testing"
 )
 
-func TestNewShardedStorageChan(t *testing.T) {
+func TestNewShardedChan(t *testing.T) {
 	tests := []struct {
 		name       string
 		shardCount int
@@ -20,7 +20,7 @@ func TestNewShardedStorageChan(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewShardedStorageChan(tt.shardCount)
+			s := NewShardedChan(tt.shardCount)
 			defer s.Close()
 
 			if got := s.Count(); got != tt.wantCount {
@@ -37,8 +37,8 @@ func TestNewShardedStorageChan(t *testing.T) {
 	}
 }
 
-func TestShardedStorageChan_Shard_OutOfBounds(t *testing.T) {
-	s := NewShardedStorageChan(4)
+func TestShardedChan_Shard_OutOfBounds(t *testing.T) {
+	s := NewShardedChan(4)
 	defer s.Close()
 
 	if shard := s.Shard(-1); shard != nil {
@@ -54,11 +54,11 @@ func TestShardedStorageChan_Shard_OutOfBounds(t *testing.T) {
 	}
 }
 
-func TestShardedStorageChan_Send(t *testing.T) {
-	s := NewShardedStorageChan(4)
+func TestShardedChan_Send(t *testing.T) {
+	s := NewShardedChan(4)
 	defer s.Close()
 
-	event := StorageEvent{
+	event := Event{
 		Key:       "test/key",
 		Operation: "set",
 	}
@@ -67,7 +67,7 @@ func TestShardedStorageChan_Send(t *testing.T) {
 	s.Send(event)
 
 	// Verify event was received on the correct shard
-	shardIdx := s.shardFor(event.Key)
+	shardIdx := s.ShardFor(event.Key)
 	select {
 	case received := <-s.Shard(shardIdx):
 		if received.Key != event.Key {
@@ -81,23 +81,23 @@ func TestShardedStorageChan_Send(t *testing.T) {
 	}
 }
 
-func TestShardedStorageChan_KeyConsistency(t *testing.T) {
-	s := NewShardedStorageChan(8)
+func TestShardedChan_KeyConsistency(t *testing.T) {
+	s := NewShardedChan(8)
 	defer s.Close()
 
 	// Same key should always go to the same shard
 	key := "consistent/key/path"
-	shard1 := s.shardFor(key)
-	shard2 := s.shardFor(key)
-	shard3 := s.shardFor(key)
+	shard1 := s.ShardFor(key)
+	shard2 := s.ShardFor(key)
+	shard3 := s.ShardFor(key)
 
 	if shard1 != shard2 || shard2 != shard3 {
 		t.Errorf("same key mapped to different shards: %d, %d, %d", shard1, shard2, shard3)
 	}
 }
 
-func TestShardedStorageChan_KeyDistribution(t *testing.T) {
-	s := NewShardedStorageChan(8)
+func TestShardedChan_KeyDistribution(t *testing.T) {
+	s := NewShardedChan(8)
 	defer s.Close()
 
 	// Test that different keys distribute across shards
@@ -110,7 +110,7 @@ func TestShardedStorageChan_KeyDistribution(t *testing.T) {
 	}
 
 	for _, key := range keys {
-		shard := s.shardFor(key)
+		shard := s.ShardFor(key)
 		shardHits[shard]++
 	}
 
@@ -121,8 +121,8 @@ func TestShardedStorageChan_KeyDistribution(t *testing.T) {
 	}
 }
 
-func TestShardedStorageChan_ConcurrentSend(t *testing.T) {
-	s := NewShardedStorageChan(4)
+func TestShardedChan_ConcurrentSend(t *testing.T) {
+	s := NewShardedChan(4)
 
 	var wg sync.WaitGroup
 	eventCount := 100
@@ -132,7 +132,7 @@ func TestShardedStorageChan_ConcurrentSend(t *testing.T) {
 	for i := 0; i < eventCount; i++ {
 		go func(idx int) {
 			defer wg.Done()
-			s.Send(StorageEvent{
+			s.Send(Event{
 				Key:       "key/" + string(rune('a'+idx%26)),
 				Operation: "set",
 			})
@@ -155,8 +155,8 @@ func TestShardedStorageChan_ConcurrentSend(t *testing.T) {
 	}
 }
 
-func TestShardedStorageChan_Close(t *testing.T) {
-	s := NewShardedStorageChan(4)
+func TestShardedChan_Close(t *testing.T) {
+	s := NewShardedChan(4)
 	s.Close()
 
 	// After close, channels should be closed
@@ -169,22 +169,22 @@ func TestShardedStorageChan_Close(t *testing.T) {
 	}
 }
 
-func TestShardedStorageChan_SingleShard(t *testing.T) {
-	s := NewShardedStorageChan(1)
+func TestShardedChan_SingleShard(t *testing.T) {
+	s := NewShardedChan(1)
 	defer s.Close()
 
 	// All keys should go to shard 0
 	keys := []string{"a", "b", "c", "different/path", "another/one"}
 	for _, key := range keys {
-		if shard := s.shardFor(key); shard != 0 {
+		if shard := s.ShardFor(key); shard != 0 {
 			t.Errorf("shardFor(%q) = %d, want 0 for single-shard instance", key, shard)
 		}
 	}
 }
 
-func BenchmarkShardedStorageChan_Send(b *testing.B) {
-	s := NewShardedStorageChan(8)
-	event := StorageEvent{Key: "bench/key", Operation: "set"}
+func BenchmarkShardedChan_Send(b *testing.B) {
+	s := NewShardedChan(8)
+	event := Event{Key: "bench/key", Operation: "set"}
 
 	// Drain in background
 	done := make(chan struct{})
@@ -208,13 +208,13 @@ func BenchmarkShardedStorageChan_Send(b *testing.B) {
 	close(done)
 }
 
-func BenchmarkShardedStorageChan_ShardFor(b *testing.B) {
-	s := NewShardedStorageChan(8)
+func BenchmarkShardedChan_ShardFor(b *testing.B) {
+	s := NewShardedChan(8)
 	defer s.Close()
 
 	key := "benchmark/test/key/path"
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = s.shardFor(key)
+		_ = s.ShardFor(key)
 	}
 }

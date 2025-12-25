@@ -13,5 +13,5 @@ func BenchmarkMemoryStorageSetGetDel(b *testing.B) {
 	app.Silence = true
 	app.Start("localhost:9889")
 	defer app.Close(os.Interrupt)
-	StorageSetGetDelTest(app.Storage, b)
+	StorageSetGetDelTestBenchmark(app.Storage, b)
 }
