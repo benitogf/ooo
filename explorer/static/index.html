@@ -16,6 +16,9 @@
         .tab.active { background: #238636; border-color: #238636; }
         .panel { display: none; }
         .panel.active { display: block; }
+        .subpanel { display: none; }
+        .subpanel.active { display: block; }
+        .subtab.active { background: #238636; border-color: #238636; }
         .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; margin-bottom: 16px; }
         .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
         .card-title { font-size: 16px; font-weight: 600; }
@@ -140,15 +143,19 @@
 <body>
     <div class="container">
         <header>
-            <h1>Storage Explorer</h1>
+            <h1 id="appTitle">Storage Explorer</h1>
             <div class="tabs">
                 <button class="tab active" data-panel="storage">Storage</button>
-                <button class="tab" data-panel="filters">Filters</button>
                 <button class="tab" data-panel="settings">Settings</button>
             </div>
         </header>
 
         <div id="storage" class="panel active">
+            <div class="submenu" style="display: flex; gap: 8px; margin-bottom: 16px;">
+                <button class="btn btn-secondary subtab active" data-subpanel="keys-view">Keys</button>
+                <button class="btn btn-secondary subtab" data-subpanel="filters-view">Filters</button>
+            </div>
+            <div id="keys-view" class="subpanel active">
             <div class="toolbar">
                 <input type="text" class="search-box" id="searchKeys" placeholder="Search keys (server-side)...">
                 <select class="per-page-select" id="perPage" onchange="changePerPage()">
@@ -171,9 +178,8 @@
                     <button class="btn btn-secondary" id="nextBtn" onclick="nextPage()">Next →</button>
                 </div>
             </div>
-        </div>
-
-        <div id="filters" class="panel">
+            </div>
+            <div id="filters-view" class="subpanel">
             <div class="toolbar">
                 <button class="btn btn-secondary" onclick="refreshFilters()">Refresh</button>
             </div>
@@ -182,6 +188,7 @@
                     <span class="card-title">Registered Filter Paths (<span id="filterCount">0</span>)</span>
                 </div>
                 <div class="keys-list" id="filtersList"></div>
+            </div>
             </div>
         </div>
 
@@ -261,6 +268,41 @@
         </div>
     </div>
 
+    <div class="modal" id="filterViewModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="card-title" id="filterViewModalTitle">Filter Content</span>
+                <button class="modal-close" onclick="closeModal('filterViewModal')">&times;</button>
+            </div>
+            <div id="filterViewModalStatus" class="status"></div>
+            <div id="filterViewJsonEditor" style="height: 400px;"></div>
+        </div>
+    </div>
+
+    <div class="modal" id="filterPushModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="card-title" id="filterPushModalTitle">Push to Filter</span>
+                <button class="modal-close" onclick="closeModal('filterPushModal')">&times;</button>
+            </div>
+            <div id="filterPushModalStatus" class="status"></div>
+            <form onsubmit="submitFilterPush(event)">
+                <div class="form-group">
+                    <label>Filter Path</label>
+                    <input type="text" id="filterPushPath" readonly>
+                </div>
+                <div class="form-group">
+                    <label>Data (JSON)</label>
+                    <textarea id="filterPushData" placeholder='{"name": "example"}'></textarea>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                    <button type="submit" class="btn">Push</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('filterPushModal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script type="module">
         import { JSONEditor } from '/vanilla-jsoneditor.js';
         
@@ -271,6 +313,7 @@
         let currentFilter = '';
         let totalKeys = 0;
         let jsonEditor = null;
+        let filterViewEditor = null;
         let currentEditorContent = null;
         let searchTimeout = null;
         
@@ -292,6 +335,23 @@
         window.changePerPage = changePerPage;
         window.refreshFilters = refreshFilters;
         window.loadServerInfo = loadServerInfo;
+        window.viewFilterContent = viewFilterContent;
+        window.openFilterPushModal = openFilterPushModal;
+        window.submitFilterPush = submitFilterPush;
+
+        // Load server info on startup to get the name for title
+        async function loadAppTitle() {
+            try {
+                const res = await fetch('/?api=info');
+                const info = await res.json();
+                if (info.name) {
+                    document.getElementById('appTitle').textContent = info.name;
+                    document.title = info.name;
+                }
+            } catch (err) {
+                console.error('Failed to load app title:', err);
+            }
+        }
 
         document.querySelectorAll('.tab').forEach(tab => {
             tab.addEventListener('click', () => {
@@ -300,7 +360,16 @@
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.panel).classList.add('active');
                 if (tab.dataset.panel === 'settings') loadServerInfo();
-                if (tab.dataset.panel === 'filters') refreshFilters();
+            });
+        });
+
+        document.querySelectorAll('.subtab').forEach(subtab => {
+            subtab.addEventListener('click', () => {
+                document.querySelectorAll('.subtab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.subpanel').forEach(p => p.classList.remove('active'));
+                subtab.classList.add('active');
+                document.getElementById(subtab.dataset.subpanel).classList.add('active');
+                if (subtab.dataset.subpanel === 'filters-view') refreshFilters();
             });
         });
 
@@ -553,11 +622,81 @@
                 }
                 list.innerHTML = paths.map(path => `
                     <div class="key-item">
-                        <span class="key-name">${path}</span>
+                        <span class="key-name">${escapeHtml(path)}</span>
+                        <div class="key-actions">
+                            <button class="btn btn-secondary" onclick="event.stopPropagation(); viewFilterContent('${escapeHtml(path)}')">View</button>
+                            <button class="btn" onclick="event.stopPropagation(); openFilterPushModal('${escapeHtml(path)}')">Push</button>
+                        </div>
                     </div>
                 `).join('');
             } catch (err) {
                 console.error('Failed to load filters:', err);
+            }
+        }
+
+        async function viewFilterContent(filterPath) {
+            try {
+                const res = await fetch('/' + filterPath);
+                const data = await res.json();
+                document.getElementById('filterViewModalTitle').textContent = 'View: ' + filterPath;
+                document.getElementById('filterViewModalStatus').className = 'status';
+                openModal('filterViewModal');
+                
+                const container = document.getElementById('filterViewJsonEditor');
+                if (filterViewEditor) {
+                    filterViewEditor.destroy();
+                }
+                container.classList.add('jse-theme-dark');
+                filterViewEditor = new JSONEditor({
+                    target: container,
+                    props: {
+                        content: { json: data },
+                        mode: 'tree',
+                        mainMenuBar: true,
+                        navigationBar: true,
+                        statusBar: true,
+                        readOnly: true
+                    }
+                });
+            } catch (err) {
+                showStatus('filterViewModalStatus', 'error', 'Failed to load: ' + err.message);
+                openModal('filterViewModal');
+            }
+        }
+
+        function openFilterPushModal(filterPath) {
+            document.getElementById('filterPushPath').value = filterPath;
+            document.getElementById('filterPushData').value = '';
+            document.getElementById('filterPushModalStatus').className = 'status';
+            document.getElementById('filterPushModalTitle').textContent = 'Push to: ' + filterPath;
+            openModal('filterPushModal');
+        }
+
+        async function submitFilterPush(e) {
+            e.preventDefault();
+            const path = document.getElementById('filterPushPath').value;
+            const dataStr = document.getElementById('filterPushData').value;
+            if (!dataStr) {
+                showStatus('filterPushModalStatus', 'error', 'Data is required');
+                return;
+            }
+            try {
+                JSON.parse(dataStr);
+            } catch {
+                showStatus('filterPushModalStatus', 'error', 'Invalid JSON');
+                return;
+            }
+            try {
+                const res = await fetch('/' + path, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: dataStr
+                });
+                if (!res.ok) throw new Error(await res.text());
+                showStatus('filterPushModalStatus', 'success', 'Pushed successfully');
+                setTimeout(() => closeModal('filterPushModal'), 1000);
+            } catch (err) {
+                showStatus('filterPushModalStatus', 'error', 'Failed: ' + err.message);
             }
         }
 
@@ -587,6 +726,7 @@
             });
         });
 
+        loadAppTitle();
         refreshKeys();
     </script>
 </body>

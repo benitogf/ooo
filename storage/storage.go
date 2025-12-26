@@ -102,10 +102,8 @@ type EventCallback func(event Event)
 
 // LayerOptions configuration for individual storage layers
 type LayerOptions struct {
-	// MaxEntries is the maximum number of entries before eviction (0 = unlimited)
-	MaxEntries int
-	// InitFromLower whether to initialize cache from lower layers on startup
-	InitFromLower bool
+	// SkipLoadMemory when true, skips loading data from embedded layer into memory on startup
+	SkipLoadMemory bool
 }
 
 // Layer is the interface for individual storage layers (memory, embedded, sql)

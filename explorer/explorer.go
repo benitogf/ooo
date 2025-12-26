@@ -14,6 +14,7 @@ var staticFiles embed.FS
 
 // ServerInfo contains server configuration exposed to the explorer
 type ServerInfo struct {
+	Name              string        `json:"name"`
 	Address           string        `json:"address"`
 	Deadline          time.Duration `json:"deadline"`
 	ReadTimeout       time.Duration `json:"readTimeout"`

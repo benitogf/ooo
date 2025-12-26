@@ -36,21 +36,25 @@ const deadlineMsg = "ooo: server deadline reached"
 // false: rejects the request
 type audit func(r *http.Request) bool
 
-// Server application
+// Server is the main application struct for the ooo server.
+//
+// Name: display name for the server, shown in the storage explorer title
 //
 // Router: can be predefined with routes and passed to be extended
 //
+// Stream: manages WebSocket connections and broadcasts
+//
 // NoBroadcastKeys: array of keys that should not broadcast on changes
 //
-// DbOpt: options for storage
-//
-// Audit: function to audit requests
+// Audit: function to audit requests, returns true to approve, false to deny
 //
 // Workers: number of workers to use as readers of the storage->broadcast channel
 //
 // ForcePatch: flag to force patch operations even if the patch is bigger than the snapshot
 //
-// OnSubscribe: function to monitor subscribe events
+// NoPatch: flag to disable patch operations entirely, always send full snapshots
+//
+// OnSubscribe: function to monitor subscribe events, can return error to deny subscription
 //
 // OnUnsubscribe: function to monitor unsubscribe events
 //
@@ -60,26 +64,43 @@ type audit func(r *http.Request) bool
 //
 // AllowedOrigins: list of allowed origins for cross domain access, defaults to ["*"]
 //
-// AllowedMethods: list of allowed methods for cross domain access, defaults to ["GET", "POST", "DELETE", "PUT"]
+// AllowedMethods: list of allowed methods for cross domain access, defaults to ["GET", "POST", "DELETE", "PUT", "PATCH"]
 //
 // AllowedHeaders: list of allowed headers for cross domain access, defaults to ["Authorization", "Content-Type"]
 //
 // ExposedHeaders: list of exposed headers for cross domain access, defaults to nil
 //
-// Storage: database interdace implementation
+// Storage: database interface implementation
 //
-// Silence: output silence flag
+// Address: the address the server is listening on (populated after Start)
 //
-// Static: static routing flag
+// Silence: output silence flag, suppresses console output when true
+//
+// Static: static routing flag, when true only filtered routes are allowed
 //
 // Tick: time interval between ticks on the clock websocket
 //
-// Signal: os signal channel
+// Console: logging console for the server
+//
+// Signal: os signal channel for graceful shutdown
 //
 // Client: http client to make requests
+//
+// ReadTimeout: maximum duration for reading the entire request
+//
+// WriteTimeout: maximum duration before timing out writes of the response
+//
+// ReadHeaderTimeout: amount of time allowed to read request headers
+//
+// IdleTimeout: maximum amount of time to wait for the next request
+//
+// OnStorageEvent: callback function triggered on storage events
+//
+// BeforeRead: callback function triggered before read operations
 type Server struct {
 	wg                sync.WaitGroup
 	server            *http.Server
+	Name              string
 	Router            *mux.Router
 	Stream            stream.Stream
 	filters           filters.Filters
@@ -117,34 +138,35 @@ type Server struct {
 
 // Validate checks the server configuration for common issues.
 // Call this before Start() to catch configuration errors early.
-func (app *Server) Validate() error {
-	if app.ForcePatch && app.NoPatch {
+func (server *Server) Validate() error {
+	if server.ForcePatch && server.NoPatch {
 		return ErrForcePatchConflict
 	}
-	if app.Workers < 0 {
+	if server.Workers < 0 {
 		return ErrNegativeWorkers
 	}
-	if app.Deadline < 0 {
+	if server.Deadline < 0 {
 		return ErrNegativeDeadline
 	}
 	return nil
 }
 
 // getServerInfo returns server configuration for the explorer
-func (app *Server) getServerInfo() explorer.ServerInfo {
+func (server *Server) getServerInfo() explorer.ServerInfo {
 	return explorer.ServerInfo{
-		Address:           app.Address,
-		Deadline:          app.Deadline,
-		ReadTimeout:       app.ReadTimeout,
-		WriteTimeout:      app.WriteTimeout,
-		ReadHeaderTimeout: app.ReadHeaderTimeout,
-		IdleTimeout:       app.IdleTimeout,
-		ForcePatch:        app.ForcePatch,
-		NoPatch:           app.NoPatch,
-		Static:            app.Static,
-		Silence:           app.Silence,
-		Workers:           app.Workers,
-		Tick:              app.Tick,
+		Name:              server.Name,
+		Address:           server.Address,
+		Deadline:          server.Deadline,
+		ReadTimeout:       server.ReadTimeout,
+		WriteTimeout:      server.WriteTimeout,
+		ReadHeaderTimeout: server.ReadHeaderTimeout,
+		IdleTimeout:       server.IdleTimeout,
+		ForcePatch:        server.ForcePatch,
+		NoPatch:           server.NoPatch,
+		Static:            server.Static,
+		Silence:           server.Silence,
+		Workers:           server.Workers,
+		Tick:              server.Tick,
 	}
 }
 
@@ -156,75 +178,75 @@ type tcpKeepAliveListener struct {
 	*net.TCPListener
 }
 
-func (app *Server) waitListen() {
+func (server *Server) waitListen() {
 	var err error
 	storageOpt := storage.Options{
-		NoBroadcastKeys: app.NoBroadcastKeys,
-		Workers:         app.Workers,
+		NoBroadcastKeys: server.NoBroadcastKeys,
+		Workers:         server.Workers,
 	}
 
-	if app.BeforeRead != nil {
-		storageOpt.BeforeRead = app.BeforeRead
+	if server.BeforeRead != nil {
+		storageOpt.BeforeRead = server.BeforeRead
 	}
-	err = app.Storage.Start(storageOpt)
+	err = server.Storage.Start(storageOpt)
 	if err != nil {
-		app.startErr <- fmt.Errorf("ooo: storage start failed: %w", err)
-		app.wg.Done()
+		server.startErr <- fmt.Errorf("ooo: storage start failed: %w", err)
+		server.wg.Done()
 		return
 	}
-	app.server = &http.Server{
-		WriteTimeout:      app.WriteTimeout,
-		ReadTimeout:       app.ReadTimeout,
-		ReadHeaderTimeout: app.ReadHeaderTimeout,
-		IdleTimeout:       app.IdleTimeout,
-		Addr:              app.Address,
+	server.server = &http.Server{
+		WriteTimeout:      server.WriteTimeout,
+		ReadTimeout:       server.ReadTimeout,
+		ReadHeaderTimeout: server.ReadHeaderTimeout,
+		IdleTimeout:       server.IdleTimeout,
+		Addr:              server.Address,
 		Handler: cors.New(cors.Options{
-			AllowedMethods: app.AllowedMethods,
-			AllowedOrigins: app.AllowedOrigins,
-			AllowedHeaders: app.AllowedHeaders,
-			ExposedHeaders: app.ExposedHeaders,
+			AllowedMethods: server.AllowedMethods,
+			AllowedOrigins: server.AllowedOrigins,
+			AllowedHeaders: server.AllowedHeaders,
+			ExposedHeaders: server.ExposedHeaders,
 			// AllowCredentials: true,
 			// Debug:          true,
-		}).Handler(handlers.CompressHandler(app.Router))}
-	ln, err := net.Listen("tcp4", app.Address)
+		}).Handler(handlers.CompressHandler(server.Router))}
+	ln, err := net.Listen("tcp4", server.Address)
 	if err != nil {
-		app.startErr <- fmt.Errorf("ooo: failed to start tcp: %w", err)
-		app.wg.Done()
+		server.startErr <- fmt.Errorf("ooo: failed to start tcp: %w", err)
+		server.wg.Done()
 		return
 	}
-	app.Address = ln.Addr().String()
-	atomic.StoreInt64(&app.active, 1)
-	app.wg.Done()
-	err = app.server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
-	if atomic.LoadInt64(&app.closing) != 1 && err != nil {
-		app.Console.Err("server error", err)
+	server.Address = ln.Addr().String()
+	atomic.StoreInt64(&server.active, 1)
+	server.wg.Done()
+	err = server.server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+	if atomic.LoadInt64(&server.closing) != 1 && err != nil {
+		server.Console.Err("server error", err)
 	}
 }
 
 // Active check if the server is active
-func (app *Server) Active() bool {
-	return atomic.LoadInt64(&app.active) == 1 && atomic.LoadInt64(&app.closing) == 0
+func (server *Server) Active() bool {
+	return atomic.LoadInt64(&server.active) == 1 && atomic.LoadInt64(&server.closing) == 0
 }
 
-func (app *Server) waitStart() error {
+func (server *Server) waitStart() error {
 	// Check for startup errors from waitListen
 	select {
-	case err := <-app.startErr:
+	case err := <-server.startErr:
 		return err
 	default:
 	}
 
-	if atomic.LoadInt64(&app.active) == 0 || !app.Storage.Active() {
+	if atomic.LoadInt64(&server.active) == 0 || !server.Storage.Active() {
 		return ErrServerStartFailed
 	}
 
 	// Start workers for sharded watcher (per-key ordering)
-	shardedWatcher := app.Storage.WatchSharded()
+	shardedWatcher := server.Storage.WatchSharded()
 	for i := 0; i < shardedWatcher.Count(); i++ {
-		go app.watch(shardedWatcher.Shard(i))
+		go server.watch(shardedWatcher.Shard(i))
 	}
 
-	app.Console.Log("glad to serve[" + app.Address + "]")
+	server.Console.Log("glad to serve[" + server.Address + "]")
 	return nil
 }
 
@@ -235,11 +257,11 @@ type FetchResult struct {
 }
 
 // Fetch data, update cache and apply filter
-func (app *Server) fetch(path string) (FetchResult, error) {
+func (server *Server) fetch(path string) (FetchResult, error) {
 	// Check if any filter exists for static mode validation
-	if app.Static {
-		hasFilter := app.filters.ReadObject.HasMatch(path) != -1 ||
-			app.filters.ReadList.HasMatch(path) != -1
+	if server.Static {
+		hasFilter := server.filters.ReadObject.HasMatch(path) != -1 ||
+			server.filters.ReadList.HasMatch(path) != -1
 		if !hasFilter {
 			return FetchResult{}, filters.ErrRouteNotDefined
 		}
@@ -247,16 +269,16 @@ func (app *Server) fetch(path string) (FetchResult, error) {
 
 	if key.HasGlob(path) {
 		// List subscription - use descending order (newest first)
-		objs, err := app.Storage.GetListDescending(path)
+		objs, err := server.Storage.GetListDescending(path)
 		if err != nil {
 			return FetchResult{}, err
 		}
-		filtered, err := app.filters.ReadList.Check(path, objs, app.Static)
+		filtered, err := server.filters.ReadList.Check(path, objs, server.Static)
 		if err != nil {
 			return FetchResult{}, err
 		}
 		// Initialize decoded cache (creates pool if needed)
-		version := app.Stream.InitCacheObjectsWithVersion(path, filtered)
+		version := server.Stream.InitCacheObjectsWithVersion(path, filtered)
 		// Encode for sending
 		data, err := meta.Encode(filtered)
 		if err != nil {
@@ -266,17 +288,17 @@ func (app *Server) fetch(path string) (FetchResult, error) {
 	}
 
 	// Single object subscription
-	obj, err := app.Storage.Get(path)
+	obj, err := server.Storage.Get(path)
 	if err != nil {
 		// Object not found - return empty object
 		obj = meta.Object{}
 	}
-	filtered, err := app.filters.ReadObject.Check(path, obj, app.Static)
+	filtered, err := server.filters.ReadObject.Check(path, obj, server.Static)
 	if err != nil {
 		return FetchResult{}, err
 	}
 	// Initialize decoded cache (creates pool if needed)
-	version := app.Stream.InitCacheObjectWithVersion(path, &filtered)
+	version := server.Stream.InitCacheObjectWithVersion(path, &filtered)
 	// Encode for sending
 	var data []byte
 	if filtered.Created == 0 && filtered.Index == "" {
@@ -290,7 +312,7 @@ func (app *Server) fetch(path string) (FetchResult, error) {
 	return FetchResult{Data: data, Version: version}, nil
 }
 
-func (app *Server) watch(sc storage.StorageChan) {
+func (server *Server) watch(sc storage.StorageChan) {
 	for {
 		ev, ok := <-sc
 		if !ok {
@@ -298,36 +320,36 @@ func (app *Server) watch(sc storage.StorageChan) {
 			break
 		}
 		if ev.Key != "" {
-			app.Console.Log("broadcast[" + ev.Key + "]")
-			app.Stream.Broadcast(ev.Key, stream.BroadcastOpt{
+			server.Console.Log("broadcast[" + ev.Key + "]")
+			server.Stream.Broadcast(ev.Key, stream.BroadcastOpt{
 				Key:       ev.Key,
 				Operation: ev.Operation,
 				Object:    ev.Object,
 				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
-					return app.filters.ReadObject.Check(key, obj, app.Static)
+					return server.filters.ReadObject.Check(key, obj, server.Static)
 				},
 				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
-					return app.filters.ReadList.Check(key, objs, app.Static)
+					return server.filters.ReadList.Check(key, objs, server.Static)
 				},
-				Static: app.Static,
+				Static: server.Static,
 			})
-			if app.OnStorageEvent != nil {
-				app.OnStorageEvent(ev)
+			if server.OnStorageEvent != nil {
+				server.OnStorageEvent(ev)
 			}
 		}
-		if !app.Storage.Active() {
+		if !server.Storage.Active() {
 			break
 		}
 	}
 }
 
 // defaultCORS sets default CORS configuration.
-func (app *Server) defaultCORS() {
-	if len(app.AllowedOrigins) == 0 {
-		app.AllowedOrigins = []string{"*"}
+func (server *Server) defaultCORS() {
+	if len(server.AllowedOrigins) == 0 {
+		server.AllowedOrigins = []string{"*"}
 	}
-	if len(app.AllowedMethods) == 0 {
-		app.AllowedMethods = []string{
+	if len(server.AllowedMethods) == 0 {
+		server.AllowedMethods = []string{
 			http.MethodGet,
 			http.MethodPost,
 			http.MethodDelete,
@@ -335,53 +357,53 @@ func (app *Server) defaultCORS() {
 			http.MethodPatch,
 		}
 	}
-	if len(app.AllowedHeaders) == 0 {
-		app.AllowedHeaders = []string{"Authorization", "Content-Type"}
+	if len(server.AllowedHeaders) == 0 {
+		server.AllowedHeaders = []string{"Authorization", "Content-Type"}
 	}
 }
 
 // defaultTimeouts sets default timeout values.
-func (app *Server) defaultTimeouts() {
-	if app.Deadline.Nanoseconds() == 0 {
-		app.Deadline = time.Second * 10
+func (server *Server) defaultTimeouts() {
+	if server.Deadline.Nanoseconds() == 0 {
+		server.Deadline = time.Second * 10
 	}
-	if app.Tick == 0 {
-		app.Tick = 1 * time.Second
+	if server.Tick == 0 {
+		server.Tick = 1 * time.Second
 	}
-	if app.ReadTimeout == 0 {
-		app.ReadTimeout = 1 * time.Minute
+	if server.ReadTimeout == 0 {
+		server.ReadTimeout = 1 * time.Minute
 	}
-	if app.WriteTimeout == 0 {
-		app.WriteTimeout = 1 * time.Minute
+	if server.WriteTimeout == 0 {
+		server.WriteTimeout = 1 * time.Minute
 	}
-	if app.ReadHeaderTimeout == 0 {
-		app.ReadHeaderTimeout = 10 * time.Second
+	if server.ReadHeaderTimeout == 0 {
+		server.ReadHeaderTimeout = 10 * time.Second
 	}
-	if app.IdleTimeout == 0 {
-		app.IdleTimeout = 10 * time.Second
+	if server.IdleTimeout == 0 {
+		server.IdleTimeout = 10 * time.Second
 	}
 }
 
 // defaultCallbacks sets default callback functions.
-func (app *Server) defaultCallbacks() {
-	if app.OnClose == nil {
-		app.OnClose = func() {}
+func (server *Server) defaultCallbacks() {
+	if server.OnClose == nil {
+		server.OnClose = func() {}
 	}
-	if app.Audit == nil {
-		app.Audit = func(r *http.Request) bool { return true }
+	if server.Audit == nil {
+		server.Audit = func(r *http.Request) bool { return true }
 	}
-	if app.OnSubscribe == nil {
-		app.OnSubscribe = func(key string) error { return nil }
+	if server.OnSubscribe == nil {
+		server.OnSubscribe = func(key string) error { return nil }
 	}
-	if app.OnUnsubscribe == nil {
-		app.OnUnsubscribe = func(key string) {}
+	if server.OnUnsubscribe == nil {
+		server.OnUnsubscribe = func(key string) {}
 	}
 }
 
 // defaultClient sets up the default HTTP client.
-func (app *Server) defaultClient() {
-	if app.Client == nil {
-		app.Client = &http.Client{
+func (server *Server) defaultClient() {
+	if server.Client == nil {
+		server.Client = &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
 				Dial: (&net.Dialer{
@@ -400,130 +422,133 @@ func (app *Server) defaultClient() {
 }
 
 // defaults will populate the server fields with their zero values.
-func (app *Server) defaults() {
-	if app.Router == nil {
-		app.Router = mux.NewRouter()
+func (server *Server) defaults() {
+	if server.Name == "" {
+		server.Name = "ooo"
 	}
-	if app.Console == nil {
-		app.Console = coat.NewConsole(app.Address, app.Silence)
+	if server.Router == nil {
+		server.Router = mux.NewRouter()
 	}
-	if app.Stream.Console == nil {
-		app.Stream.Console = app.Console
+	if server.Console == nil {
+		server.Console = coat.NewConsole(server.Address, server.Silence)
 	}
-	if app.Storage == nil {
-		app.Storage = storage.New(storage.LayeredConfig{
+	if server.Stream.Console == nil {
+		server.Stream.Console = server.Console
+	}
+	if server.Storage == nil {
+		server.Storage = storage.New(storage.LayeredConfig{
 			Memory: storage.NewMemoryLayer(),
 		})
 	}
-	if app.Workers == 0 {
-		app.Workers = 6
+	if server.Workers == 0 {
+		server.Workers = 6
 	}
-	if app.NoBroadcastKeys == nil {
-		app.NoBroadcastKeys = []string{}
+	if server.NoBroadcastKeys == nil {
+		server.NoBroadcastKeys = []string{}
 	}
 
-	app.defaultTimeouts()
-	app.defaultCORS()
-	app.defaultCallbacks()
-	app.defaultClient()
+	server.defaultTimeouts()
+	server.defaultCORS()
+	server.defaultCallbacks()
+	server.defaultClient()
 
 	// Stream configuration
-	if app.Stream.OnSubscribe == nil {
-		app.Stream.OnSubscribe = app.OnSubscribe
+	if server.Stream.OnSubscribe == nil {
+		server.Stream.OnSubscribe = server.OnSubscribe
 	}
-	if app.Stream.OnUnsubscribe == nil {
-		app.Stream.OnUnsubscribe = app.OnUnsubscribe
+	if server.Stream.OnUnsubscribe == nil {
+		server.Stream.OnUnsubscribe = server.OnUnsubscribe
 	}
-	app.Stream.ForcePatch = app.ForcePatch
-	app.Stream.NoPatch = app.NoPatch
-	if app.Stream.ForcePatch && app.Stream.NoPatch {
-		app.Console.Err("both ForcePatch and NoPatch are enabled, only NoPatch will be used")
+	server.Stream.ForcePatch = server.ForcePatch
+	server.Stream.NoPatch = server.NoPatch
+	if server.Stream.ForcePatch && server.Stream.NoPatch {
+		server.Console.Err("both ForcePatch and NoPatch are enabled, only NoPatch will be used")
 	}
-	app.Stream.InitClock()
+	server.Stream.InitClock()
 }
 
 // setupRoutes configures the HTTP routes for the server.
-func (app *Server) setupRoutes() {
+func (server *Server) setupRoutes() {
 	// https://ieftimov.com/post/make-resilient-golang-net-http-servers-using-timeouts-deadlines-context-cancellation/
 	explorerHandler := &explorer.Handler{
-		GetKeys:    app.Storage.Keys,
-		GetInfo:    app.getServerInfo,
-		GetFilters: app.filters.Paths,
-		AuditFunc:  app.Audit,
-		ClockFunc:  app.clock,
+		GetKeys:    server.Storage.Keys,
+		GetInfo:    server.getServerInfo,
+		GetFilters: server.filters.Paths,
+		AuditFunc:  server.Audit,
+		ClockFunc:  server.clock,
 	}
-	app.Router.Handle("/", explorerHandler).Methods("GET")
-	app.Router.Handle("/vanilla-jsoneditor.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/", explorerHandler).Methods("GET")
+	server.Router.Handle("/vanilla-jsoneditor.js", explorerHandler).Methods("GET")
 	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
-	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(app.unpublish), app.Deadline, deadlineMsg)).Methods("DELETE")
-	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(app.publish), app.Deadline, deadlineMsg)).Methods("POST")
-	app.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(app.patch), app.Deadline, deadlineMsg)).Methods("PATCH")
-	app.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", app.read).Methods("GET")
-	app.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", app.read).Queries("v", "{[\\d]}").Methods("GET")
+	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
+		http.HandlerFunc(server.unpublish), server.Deadline, deadlineMsg)).Methods("DELETE")
+	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
+		http.HandlerFunc(server.publish), server.Deadline, deadlineMsg)).Methods("POST")
+	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
+		http.HandlerFunc(server.patch), server.Deadline, deadlineMsg)).Methods("PATCH")
+	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", server.read).Methods("GET")
+	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", server.read).Queries("v", "{[\\d]}").Methods("GET")
 }
 
 // StartWithError initializes and starts the http server and database connection.
 // Returns an error if startup fails instead of calling log.Fatal.
-func (app *Server) StartWithError(address string) error {
-	app.Address = address
-	if atomic.LoadInt64(&app.active) == 1 {
+func (server *Server) StartWithError(address string) error {
+	server.Address = address
+	if atomic.LoadInt64(&server.active) == 1 {
 		return ErrServerAlreadyActive
 	}
-	atomic.StoreInt64(&app.active, 0)
-	atomic.StoreInt64(&app.closing, 0)
-	app.startErr = make(chan error, 1)
+	atomic.StoreInt64(&server.active, 0)
+	atomic.StoreInt64(&server.closing, 0)
+	server.startErr = make(chan error, 1)
 	monotonic.Init()
-	app.defaults()
-	app.setupRoutes()
+	server.defaults()
+	server.setupRoutes()
 	// Preallocate stream pools for all registered filter paths
-	app.Stream.PreallocatePools(app.filters.Paths())
-	app.wg.Add(1)
-	go app.waitListen()
-	app.wg.Wait()
-	err := app.waitStart()
+	server.Stream.PreallocatePools(server.filters.Paths())
+	server.wg.Add(1)
+	go server.waitListen()
+	server.wg.Wait()
+	err := server.waitStart()
 	if err != nil {
 		return err
 	}
-	app.Console = coat.NewConsole(app.Address, app.Silence)
-	go app.startClock()
+	server.Console = coat.NewConsole(server.Address, server.Silence)
+	go server.startClock()
 	return nil
 }
 
 // Start initializes and starts the http server and database connection.
 // Panics if startup fails. Use StartWithError for error handling.
 // If the server is already active, this is a no-op (does not panic).
-func (app *Server) Start(address string) {
-	err := app.StartWithError(address)
+func (server *Server) Start(address string) {
+	err := server.StartWithError(address)
 	if err != nil && err != ErrServerAlreadyActive {
 		log.Fatal(err)
 	}
 }
 
 // Close : shutdown the http server and database connection
-func (app *Server) Close(sig os.Signal) {
-	if atomic.LoadInt64(&app.closing) != 1 {
-		atomic.StoreInt64(&app.closing, 1)
-		atomic.StoreInt64(&app.active, 0)
-		app.Storage.Close()
-		app.OnClose()
-		app.Console.Err("shutdown", sig)
-		if app.server != nil {
-			app.server.Shutdown(context.Background())
+func (server *Server) Close(sig os.Signal) {
+	if atomic.LoadInt64(&server.closing) != 1 {
+		atomic.StoreInt64(&server.closing, 1)
+		atomic.StoreInt64(&server.active, 0)
+		server.Storage.Close()
+		server.OnClose()
+		server.Console.Err("shutdown", sig)
+		if server.server != nil {
+			server.server.Shutdown(context.Background())
 		}
 	}
 }
 
 // WaitClose : Blocks waiting for SIGINT, SIGTERM, SIGKILL, SIGHUP
-func (app *Server) WaitClose() {
-	app.Signal = make(chan os.Signal, 1)
+func (server *Server) WaitClose() {
+	server.Signal = make(chan os.Signal, 1)
 	done := make(chan bool, 1)
-	signal.Notify(app.Signal, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	signal.Notify(server.Signal, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
-		sig := <-app.Signal
-		app.Close(sig)
+		sig := <-server.Signal
+		server.Close(sig)
 		done <- true
 	}()
 	<-done

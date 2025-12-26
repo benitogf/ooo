@@ -9,40 +9,40 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func (app *Server) ws(w http.ResponseWriter, r *http.Request) error {
+func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 	_key := mux.Vars(r)["key"]
 	version := r.FormValue("v")
 
 	// Static mode validation - check if any read filter exists
-	if app.Static {
+	if server.Static {
 		var hasFilter bool
 		if key.IsGlob(_key) {
-			hasFilter = app.filters.ReadList.HasMatch(_key) != -1
+			hasFilter = server.filters.ReadList.HasMatch(_key) != -1
 		} else {
-			hasFilter = app.filters.ReadObject.HasMatch(_key) != -1
+			hasFilter = server.filters.ReadObject.HasMatch(_key) != -1
 		}
 		if !hasFilter {
 			return filters.ErrRouteNotDefined
 		}
 	}
 
-	client, err := app.Stream.New(_key, w, r)
+	client, err := server.Stream.New(_key, w, r)
 	if err != nil {
-		app.Console.Err("ooo: filtered route", err)
+		server.Console.Err("ooo: filtered route", err)
 		return err
 	}
 
 	// send initial msg
-	result, err := app.fetch(_key)
+	result, err := server.fetch(_key)
 	if err != nil {
-		app.Console.Err("ooo: filtered route", err)
+		server.Console.Err("ooo: filtered route", err)
 		return err
 	}
 
 	// log.Println("version", version, "result.Version", strconv.FormatInt(result.Version, 16), version != strconv.FormatInt(result.Version, 16))
 	if version != strconv.FormatInt(result.Version, 16) {
-		go app.Stream.Write(client, result.Data, true, result.Version)
+		go server.Stream.Write(client, result.Data, true, result.Version)
 	}
-	app.Stream.Read(_key, client)
+	server.Stream.Read(_key, client)
 	return nil
 }

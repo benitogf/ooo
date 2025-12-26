@@ -15,16 +15,16 @@ func Time() string {
 	return strconv.FormatInt(now, 10)
 }
 
-func (app *Server) sendTime() {
-	app.Stream.BroadcastClock(Time())
+func (server *Server) sendTime() {
+	server.Stream.BroadcastClock(Time())
 }
 
-func (app *Server) startClock() {
-	ticker := time.NewTicker(app.Tick)
+func (server *Server) startClock() {
+	ticker := time.NewTicker(server.Tick)
 	for {
 		<-ticker.C
-		if app.Active() {
-			app.sendTime()
+		if server.Active() {
+			server.sendTime()
 			continue
 		}
 
@@ -32,19 +32,19 @@ func (app *Server) startClock() {
 	}
 }
 
-func (app *Server) clock(w http.ResponseWriter, r *http.Request) {
-	if !app.Audit(r) {
+func (server *Server) clock(w http.ResponseWriter, r *http.Request) {
+	if !server.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "%s", ErrNotAuthorized)
-		app.Console.Err("socketConnectionUnauthorized time")
+		server.Console.Err("socketConnectionUnauthorized time")
 		return
 	}
 
-	client, err := app.Stream.New("", w, r)
+	client, err := server.Stream.New("", w, r)
 	if err != nil {
 		return
 	}
 
-	go app.Stream.WriteClock(client, Time())
-	app.Stream.Read("", client)
+	go server.Stream.WriteClock(client, Time())
+	server.Stream.Read("", client)
 }

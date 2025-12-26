@@ -976,7 +976,7 @@ func StorageListTest(server *Server, t *testing.T) {
 // StorageSetGetDelTest testing storage function
 func StorageSetGetDelTestBenchmark(db storage.Database, b *testing.B) {
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_key := key.Build("test/*")
 		_, err := db.Set("test/"+_key, TEST_DATA)
 		require.NoError(b, err)

@@ -145,22 +145,3 @@ func BenchmarkLayeredStorageMemoryOnly(b *testing.B) {
 		storage.Del(key)
 	}
 }
-
-func BenchmarkMemoryLayerEviction(b *testing.B) {
-	layer := NewMemoryLayer()
-	layer.Start(LayerOptions{MaxEntries: 100})
-	defer layer.Close()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		key := "test/" + strconv.Itoa(i)
-		obj := &meta.Object{
-			Created: int64(i),
-			Updated: 0,
-			Index:   strconv.Itoa(i),
-			Path:    key,
-			Data:    benchData,
-		}
-		layer.Set(key, obj)
-	}
-}

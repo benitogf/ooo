@@ -1,7 +1,6 @@
 package storage
 
 import (
-	"container/list"
 	"sort"
 	"strings"
 	"sync"
@@ -10,22 +9,17 @@ import (
 	"github.com/benitogf/ooo/meta"
 )
 
-// MemoryLayer is an in-memory storage layer with optional LRU eviction
+// MemoryLayer is an in-memory storage layer
 type MemoryLayer struct {
-	data       map[string]*meta.Object
-	lruList    *list.List
-	lruMap     map[string]*list.Element
-	maxEntries int
-	mutex      sync.RWMutex
-	active     bool
+	data   map[string]*meta.Object
+	mutex  sync.RWMutex
+	active bool
 }
 
 // NewMemoryLayer creates a new memory layer
 func NewMemoryLayer() *MemoryLayer {
 	return &MemoryLayer{
-		data:    make(map[string]*meta.Object),
-		lruList: list.New(),
-		lruMap:  make(map[string]*list.Element),
+		data: make(map[string]*meta.Object),
 	}
 }
 
@@ -40,7 +34,6 @@ func (m *MemoryLayer) Active() bool {
 func (m *MemoryLayer) Start(opt LayerOptions) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.maxEntries = opt.MaxEntries
 	m.active = true
 	return nil
 }
@@ -54,17 +47,12 @@ func (m *MemoryLayer) Close() {
 
 // Get retrieves a single value by exact key
 func (m *MemoryLayer) Get(k string) (meta.Object, error) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
 
 	obj, found := m.data[k]
 	if !found {
 		return meta.Object{}, ErrNotFound
-	}
-
-	// Update LRU
-	if elem, ok := m.lruMap[k]; ok {
-		m.lruList.MoveToFront(elem)
 	}
 
 	return *obj, nil
@@ -94,26 +82,7 @@ func (m *MemoryLayer) GetList(path string) ([]meta.Object, error) {
 func (m *MemoryLayer) Set(k string, obj *meta.Object) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-
-	// Check if key exists
-	_, exists := m.data[k]
-
-	// Store the object
 	m.data[k] = obj
-
-	// Update LRU
-	if exists {
-		if elem, ok := m.lruMap[k]; ok {
-			m.lruList.MoveToFront(elem)
-		}
-	} else {
-		elem := m.lruList.PushFront(k)
-		m.lruMap[k] = elem
-	}
-
-	// Evict if necessary
-	m.evictIfNeeded()
-
 	return nil
 }
 
@@ -128,10 +97,6 @@ func (m *MemoryLayer) Del(k string) error {
 			return ErrNotFound
 		}
 		delete(m.data, k)
-		if elem, ok := m.lruMap[k]; ok {
-			m.lruList.Remove(elem)
-			delete(m.lruMap, k)
-		}
 		return nil
 	}
 
@@ -139,10 +104,6 @@ func (m *MemoryLayer) Del(k string) error {
 	for dk := range m.data {
 		if key.Match(k, dk) {
 			delete(m.data, dk)
-			if elem, ok := m.lruMap[dk]; ok {
-				m.lruList.Remove(elem)
-				delete(m.lruMap, dk)
-			}
 		}
 	}
 	return nil
@@ -169,29 +130,7 @@ func (m *MemoryLayer) Keys() ([]string, error) {
 func (m *MemoryLayer) Clear() {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-
 	m.data = make(map[string]*meta.Object)
-	m.lruList = list.New()
-	m.lruMap = make(map[string]*list.Element)
-}
-
-// evictIfNeeded removes the least recently used entry if over capacity
-// Must be called with mutex held
-func (m *MemoryLayer) evictIfNeeded() {
-	if m.maxEntries <= 0 {
-		return // No limit
-	}
-
-	for len(m.data) > m.maxEntries {
-		elem := m.lruList.Back()
-		if elem == nil {
-			break
-		}
-		k := elem.Value.(string)
-		delete(m.data, k)
-		m.lruList.Remove(elem)
-		delete(m.lruMap, k)
-	}
 }
 
 // Len returns the number of entries (for testing)
@@ -199,12 +138,4 @@ func (m *MemoryLayer) Len() int {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return len(m.data)
-}
-
-// SetMaxEntries updates the max entries limit
-func (m *MemoryLayer) SetMaxEntries(max int) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	m.maxEntries = max
-	m.evictIfNeeded()
 }

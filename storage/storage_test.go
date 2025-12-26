@@ -64,42 +64,6 @@ func TestMemoryLayer(t *testing.T) {
 	require.Equal(t, ErrNotFound, err)
 }
 
-func TestMemoryLayerEviction(t *testing.T) {
-	t.Parallel()
-
-	layer := NewMemoryLayer()
-	err := layer.Start(LayerOptions{MaxEntries: 3})
-	require.NoError(t, err)
-	defer layer.Close()
-
-	// Test eviction directly on the layer
-	for i := 0; i < 5; i++ {
-		key := "test/" + string(rune('a'+i))
-		obj := testObject(key, testData, int64(i))
-		err := layer.Set(key, &obj)
-		require.NoError(t, err)
-	}
-
-	require.Equal(t, 3, layer.Len())
-
-	// First two entries should be evicted (LRU)
-	_, err = layer.Get("test/a")
-	require.Error(t, err)
-
-	_, err = layer.Get("test/b")
-	require.Error(t, err)
-
-	// Last three should exist
-	_, err = layer.Get("test/c")
-	require.NoError(t, err)
-
-	_, err = layer.Get("test/d")
-	require.NoError(t, err)
-
-	_, err = layer.Get("test/e")
-	require.NoError(t, err)
-}
-
 func TestMemoryStorageList(t *testing.T) {
 	t.Parallel()
 
@@ -300,14 +264,8 @@ func TestLayeredStorageCachePopulation(t *testing.T) {
 	memory := NewMemoryLayer()
 
 	storage := New(LayeredConfig{
-		Memory: memory,
-		MemoryOptions: LayerOptions{
-			InitFromLower: true,
-		},
+		Memory:   memory,
 		Embedded: &mockEmbeddedLayer{layer: embedded},
-		EmbeddedOptions: LayerOptions{
-			InitFromLower: true,
-		},
 	})
 	err = storage.Start(Options{})
 	require.NoError(t, err)
@@ -330,12 +288,11 @@ func TestLayeredStorageWriteThrough(t *testing.T) {
 	embedded := NewMemoryLayer()
 
 	storage := New(LayeredConfig{
-		Memory:        memory,
-		MemoryOptions: LayerOptions{},
-		Embedded:      &mockEmbeddedLayer{layer: embedded},
-		EmbeddedOptions: LayerOptions{
-			InitFromLower: false,
+		Memory: memory,
+		MemoryOptions: LayerOptions{
+			SkipLoadMemory: true,
 		},
+		Embedded: &mockEmbeddedLayer{layer: embedded},
 	})
 	err := storage.Start(Options{})
 	require.NoError(t, err)
@@ -379,12 +336,11 @@ func TestLayeredStorageCacheMiss(t *testing.T) {
 	embedded.Set("test", &obj)
 
 	storage := New(LayeredConfig{
-		Memory:        memory,
-		MemoryOptions: LayerOptions{},
-		Embedded:      &mockEmbeddedLayer{layer: embedded},
-		EmbeddedOptions: LayerOptions{
-			InitFromLower: false, // Don't init cache
+		Memory: memory,
+		MemoryOptions: LayerOptions{
+			SkipLoadMemory: true, // Don't init cache
 		},
+		Embedded: &mockEmbeddedLayer{layer: embedded},
 	})
 
 	err = storage.Start(Options{})

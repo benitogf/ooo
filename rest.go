@@ -12,8 +12,8 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
-	if !app.Audit(r) {
+func (server *Server) publish(w http.ResponseWriter, r *http.Request) {
+	if !server.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
@@ -39,9 +39,9 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := app.filters.Write.Check(_key, event, app.Static)
+	data, err := server.filters.Write.Check(_key, event, server.Static)
 	if err != nil {
-		app.Console.Err("setError:filter["+_key+"]", err)
+		server.Console.Err("setError:filter["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
@@ -50,9 +50,9 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 	// Use Push for glob patterns, Set for specific keys
 	var index string
 	if key.IsGlob(_key) {
-		index, err = app.Storage.Push(_key, data)
+		index, err = server.Storage.Push(_key, data)
 	} else {
-		index, err = app.Storage.Set(_key, data)
+		index, err = server.Storage.Set(_key, data)
 	}
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -60,14 +60,14 @@ func (app *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.Console.Log("publish", _key)
-	app.filters.AfterWrite.Check(_key)
+	server.Console.Log("publish", _key)
+	server.filters.AfterWrite.Check(_key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"index":"` + index + `"}`))
 }
 
-func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
-	if !app.Audit(r) {
+func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
+	if !server.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
@@ -93,28 +93,28 @@ func (app *Server) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := app.filters.Write.Check(_key, event, app.Static)
+	data, err := server.filters.Write.Check(_key, event, server.Static)
 	if err != nil {
-		app.Console.Err("setError["+_key+"]", err)
+		server.Console.Err("setError["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	index, err := app.Storage.Patch(_key, data)
+	index, err := server.Storage.Patch(_key, data)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	app.Console.Log("patch", _key)
-	app.filters.AfterWrite.Check(_key)
+	server.Console.Log("patch", _key)
+	server.filters.AfterWrite.Check(_key)
 	w.Header().Set("Content-Type", "application/json")
 	w.Write([]byte(`{"index":"` + index + `"}`))
 }
 
-func (app *Server) read(w http.ResponseWriter, r *http.Request) {
+func (server *Server) read(w http.ResponseWriter, r *http.Request) {
 	_key := mux.Vars(r)["key"]
 	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -122,14 +122,14 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.Audit(r) {
+	if !server.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
 	}
 
 	if r.Header.Get("Upgrade") == "websocket" {
-		err := app.ws(w, r)
+		err := server.ws(w, r)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			return
@@ -137,8 +137,8 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app.Console.Log("read", _key)
-	entry, err := app.fetch(_key)
+	server.Console.Log("read", _key)
+	entry, err := server.fetch(_key)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
@@ -154,7 +154,7 @@ func (app *Server) read(w http.ResponseWriter, r *http.Request) {
 	w.Write(entry.Data)
 }
 
-func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
+func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 	_key := mux.Vars(r)["key"]
 	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -162,25 +162,25 @@ func (app *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !app.Audit(r) {
+	if !server.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
 		fmt.Fprintf(w, "%s", ErrNotAuthorized)
 		return
 	}
 
-	err := app.filters.Delete.Check(_key, app.Static)
+	err := server.filters.Delete.Check(_key, server.Static)
 	if err != nil {
-		app.Console.Err("detError["+_key+"]", err)
+		server.Console.Err("detError["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	app.Console.Log("unpublish", _key)
-	err = app.Storage.Del(_key)
+	server.Console.Log("unpublish", _key)
+	err = server.Storage.Del(_key)
 
 	if err != nil {
-		app.Console.Err(err.Error())
+		server.Console.Err(err.Error())
 		if err == ErrNotFound || strings.Contains(err.Error(), "not found") {
 			w.WriteHeader(http.StatusNotFound)
 		} else {

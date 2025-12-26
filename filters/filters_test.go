@@ -418,42 +418,42 @@ func TestFilter_FirstMatchOnly(t *testing.T) {
 
 func BenchmarkFilter_Check(b *testing.B) {
 	f := Filter{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		f = append(f, filter{path: "path" + string(rune('a'+i)) + "/*", apply: NoopFilter})
 	}
 	f = append(f, filter{path: "target/*", apply: NoopFilter})
 	data := json.RawMessage(`{"key":"value"}`)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		f.Check("target/123", data, false)
 	}
 }
 
 func BenchmarkObjectFilter_Check(b *testing.B) {
 	f := ObjectFilter{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		f = append(f, objectFilter{path: "path" + string(rune('a'+i)) + "/*", apply: NoopObjectFilter})
 	}
 	f = append(f, objectFilter{path: "target/*", apply: NoopObjectFilter})
 	obj := meta.Object{Index: "test", Created: 123}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		f.Check("target/123", obj, false)
 	}
 }
 
 func BenchmarkListFilter_Check(b *testing.B) {
 	f := ListFilter{}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		f = append(f, listFilter{path: "path" + string(rune('a'+i)) + "/*", apply: NoopListFilter})
 	}
 	f = append(f, listFilter{path: "target/*", apply: NoopListFilter})
 	objs := []meta.Object{{Index: "1"}, {Index: "2"}, {Index: "3"}}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		f.Check("target/123", objs, false)
 	}
 }

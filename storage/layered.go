@@ -103,20 +103,13 @@ func (l *Layered) Start(opt Options) error {
 
 // initializeCaches populates faster layers from slower layers
 func (l *Layered) initializeCaches() error {
-	var sourceData map[string]*meta.Object
-
-	// If embedded has data and we should init from it, load it
-	if l.embedded != nil && l.embeddedOpt.InitFromLower {
+	// Load from embedded into memory unless skipped
+	if l.embedded != nil && l.memory != nil && !l.memoryOpt.SkipLoadMemory {
 		data, err := l.embedded.Load()
 		if err != nil {
 			return err
 		}
-		sourceData = data
-	}
-
-	// Populate memory layer
-	if l.memory != nil && l.memoryOpt.InitFromLower && sourceData != nil {
-		for k, obj := range sourceData {
+		for k, obj := range data {
 			_ = l.memory.Set(k, obj)
 		}
 	}

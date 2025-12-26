@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -14,7 +15,9 @@ import (
 )
 
 func TestTime(t *testing.T) {
-	t.Parallel()
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
 	timeStr := Time()
 	timestamp, err := strconv.ParseInt(timeStr, 10, 64)
 	require.NoError(t, err)
@@ -26,55 +29,67 @@ func TestTime(t *testing.T) {
 }
 
 func TestSendTime(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Tick = 50 * time.Millisecond
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Tick = 50 * time.Millisecond
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
 
 	// Test sendTime method directly
-	app.sendTime()
+	server.sendTime()
 	// Should not panic or error
 }
 
 func TestTick(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Tick = 10 * time.Millisecond
-	app.Start("localhost:0")
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Tick = 1 * time.Millisecond
+	server.Start("localhost:0")
 
 	// Let it tick a few times
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
-	app.Close(os.Interrupt)
+	server.Close(os.Interrupt)
 
 	// Verify server is no longer active
-	require.False(t, app.Active())
+	require.False(t, server.Active())
 }
 
 func TestClockWebsocketUnauthorized(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Audit = func(r *http.Request) bool {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Audit = func(r *http.Request) bool {
 		return false // Deny all requests
 	}
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
 
-	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/"}
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.Nil(t, c)
 	require.Error(t, err)
 }
 
 func TestClockWebsocketAuthorized(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Tick = 50 * time.Millisecond
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Tick = 50 * time.Millisecond
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
 
-	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/"}
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/"}
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
@@ -92,15 +107,18 @@ func TestClockWebsocketAuthorized(t *testing.T) {
 }
 
 func TestClockHTTPRequest(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
 
 	// Test regular HTTP request to clock endpoint (should get explorer HTML)
 	req := httptest.NewRequest("GET", "/", nil)
 	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
+	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Equal(t, "text/html; charset=utf-8", resp.Header.Get("Content-Type"))

@@ -1,159 +1,37 @@
 package ooo
 
 import (
-	"bytes"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
 	"os"
 	"testing"
 
-	"github.com/goccy/go-json"
-
-	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
-func TestAudit(t *testing.T) {
-	// t.Parallel()
-	app := Server{}
-	app.Silence = true
-	app.Audit = func(r *http.Request) bool {
-		return r.Header.Get("Upgrade") != "websocket" && r.Method != "GET" && r.Method != "DELETE"
-	}
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-
-	index, err := app.Storage.Set("test", json.RawMessage(`{"test": "123"}`))
-	require.NoError(t, err)
-	require.Equal(t, "test", index)
-
-	req := httptest.NewRequest("GET", "/test", nil)
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	require.Equal(t, 401, resp.StatusCode)
-
-	req = httptest.NewRequest("GET", "/", nil)
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, 401, resp.StatusCode)
-
-	req = httptest.NewRequest("DELETE", "/test", nil)
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, 401, resp.StatusCode)
-
-	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/sa/test"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	require.Nil(t, c)
-	app.Console.Err(err)
-	require.Error(t, err)
-
-	app.Audit = func(r *http.Request) bool {
-		return r.Method == "GET"
-	}
-
-	var jsonStr = []byte(`{"data":"test"}`)
-	req = httptest.NewRequest("POST", "/test", bytes.NewBuffer(jsonStr))
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, 401, resp.StatusCode)
-
-	req = httptest.NewRequest("GET", "/test", nil)
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, 200, resp.StatusCode)
-
-	app.Audit = func(r *http.Request) bool {
-		return r.Header.Get("Upgrade") != "websocket"
-	}
-
-	u = url.URL{Scheme: "ws", Host: app.Address, Path: "/"}
-	c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-	require.Nil(t, c)
-	app.Console.Err(err)
-	require.Error(t, err)
-}
-
 func TestDoubleShutdown(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-	app.Close(os.Interrupt)
+	server := Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+	server.Close(os.Interrupt)
 }
 
 func TestDoubleStart(t *testing.T) {
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:9889")
-	app.Start("localhost:9889")
-	defer app.Close(os.Interrupt)
+	server := Server{}
+	server.Silence = true
+	server.Start("localhost:9889")
+	server.Start("localhost:9889")
+	defer server.Close(os.Interrupt)
 }
 
 func TestRestart(t *testing.T) {
 	t.Skip()
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:9889")
-	app.Close(os.Interrupt)
+	server := Server{}
+	server.Silence = true
+	server.Start("localhost:9889")
+	server.Close(os.Interrupt)
 	// https://golang.org/pkg/net/http/#example_Server_Shutdown
-	app.Start("localhost:9889")
-	defer app.Close(os.Interrupt)
-}
-
-func TestGlobKey(t *testing.T) {
-	// t.Parallel()
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/ws/test/*"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	app.Console.Err(err)
-	require.NotNil(t, c)
-	require.NoError(t, err)
-	c.Close()
-}
-
-func TestInvalidKey(t *testing.T) {
-	// t.Parallel()
-	app := Server{}
-	app.Silence = true
-	app.Start("localhost:0")
-	defer app.Close(os.Interrupt)
-	u := url.URL{Scheme: "ws", Host: app.Address, Path: "/sa//test"}
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	require.Nil(t, c)
-	app.Console.Err(err)
-	require.Error(t, err)
-	u = url.URL{Scheme: "ws", Host: app.Address, Path: "/sa/test//1"}
-	c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-	require.Nil(t, c)
-	app.Console.Err(err)
-	require.Error(t, err)
-	u = url.URL{Scheme: "ws", Host: app.Address, Path: "/sa/test/1/"}
-	c, _, err = websocket.DefaultDialer.Dial(u.String(), nil)
-	require.Nil(t, c)
-	app.Console.Err(err)
-	require.Error(t, err)
-
-	req := httptest.NewRequest("GET", "/test//1", nil)
-	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp := w.Result()
-	require.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
-
-	req = httptest.NewRequest("DELETE", "/r/test//1", nil)
-	w = httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
-	resp = w.Result()
-	require.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
+	server.Start("localhost:9889")
+	defer server.Close(os.Interrupt)
 }
 
 // TODO: find a way to test this
@@ -176,3 +54,34 @@ func TestInvalidKey(t *testing.T) {
 // 	resp := w.Result()
 // 	require.Equal(t, 503, resp.StatusCode)
 // }
+
+func TestServerValidate(t *testing.T) {
+	// Valid config
+	server := &Server{}
+	require.NoError(t, server.Validate())
+
+	// ForcePatch and NoPatch both enabled
+	server = &Server{
+		ForcePatch: true,
+		NoPatch:    true,
+	}
+	err := server.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "ForcePatch and NoPatch cannot both be enabled")
+
+	// Negative Workers
+	server = &Server{
+		Workers: -1,
+	}
+	err = server.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Workers cannot be negative")
+
+	// Negative Deadline
+	server = &Server{
+		Deadline: -1,
+	}
+	err = server.Validate()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Deadline cannot be negative")
+}

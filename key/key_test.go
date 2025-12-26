@@ -3,6 +3,7 @@ package key
 import (
 	"testing"
 
+	"github.com/benitogf/ooo/monotonic"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,25 +64,27 @@ func TestValidateGlob(t *testing.T) {
 }
 
 func BenchmarkIsValid(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		IsValid("test/path/to/resource")
 	}
 }
 
 func BenchmarkMatch(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Match("test/path/*", "test/path/123")
 	}
 }
 
 func BenchmarkBuild(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	monotonic.Init()
+	b.ResetTimer()
+	for b.Loop() {
 		Build("test/path/*")
 	}
 }
 
 func BenchmarkValidateGlob(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		ValidateGlob("test/path/*")
 	}
 }
