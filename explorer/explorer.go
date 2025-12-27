@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-//go:embed static/*
+//go:embed all:static
 var staticFiles embed.FS
 
 // ServerInfo contains server configuration exposed to the explorer
@@ -73,10 +73,32 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Serve static files
+	// Serve static files (use HasSuffix to handle sub-path mounting)
 	path := r.URL.Path
-	if path == "/vanilla-jsoneditor.js" {
+	if strings.HasSuffix(path, "/vanilla-jsoneditor.js") {
 		h.serveStatic(w, r, "vanilla-jsoneditor.js")
+		return
+	}
+	if strings.HasSuffix(path, "/react.min.js") {
+		h.serveStatic(w, r, "react.min.js")
+		return
+	}
+	if strings.HasSuffix(path, "/react-dom.min.js") {
+		h.serveStatic(w, r, "react-dom.min.js")
+		return
+	}
+	if strings.HasSuffix(path, "/babel.min.js") {
+		h.serveStatic(w, r, "babel.min.js")
+		return
+	}
+	if strings.HasSuffix(path, "/styles.css") {
+		h.serveStatic(w, r, "styles.css")
+		return
+	}
+	// Serve React JSX component files
+	if idx := strings.Index(path, "/components/"); idx != -1 {
+		componentPath := path[idx+1:] // Get "components/..."
+		h.serveStatic(w, r, componentPath)
 		return
 	}
 
@@ -116,13 +138,23 @@ func (h *Handler) handleKeys(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 
-	// Filter keys by search term
+	// Filter keys by glob pattern or search term
 	var filteredKeys []string
 	if filter != "" {
-		filterLower := strings.ToLower(filter)
-		for _, k := range keys {
-			if strings.Contains(strings.ToLower(k), filterLower) {
-				filteredKeys = append(filteredKeys, k)
+		if strings.Contains(filter, "*") {
+			// Glob pattern matching
+			prefix := strings.Split(filter, "*")[0]
+			for _, k := range keys {
+				if strings.HasPrefix(k, prefix) {
+					filteredKeys = append(filteredKeys, k)
+				}
+			}
+		} else {
+			// Exact prefix match for static filters
+			for _, k := range keys {
+				if strings.HasPrefix(k, filter) {
+					filteredKeys = append(filteredKeys, k)
+				}
 			}
 		}
 	} else {
@@ -188,12 +220,14 @@ func (h *Handler) serveStatic(w http.ResponseWriter, r *http.Request, filename s
 	}
 
 	contentType := "application/octet-stream"
-	if strings.HasSuffix(filename, ".js") {
+	if strings.HasSuffix(filename, ".js") || strings.HasSuffix(filename, ".jsx") {
 		contentType = "application/javascript"
 	} else if strings.HasSuffix(filename, ".css") {
 		contentType = "text/css"
 	} else if strings.HasSuffix(filename, ".svg") {
 		contentType = "image/svg+xml"
+	} else if strings.HasSuffix(filename, ".html") {
+		contentType = "text/html; charset=utf-8"
 	}
 
 	w.Header().Set("Content-Type", contentType)

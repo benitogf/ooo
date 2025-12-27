@@ -479,6 +479,11 @@ func (server *Server) setupRoutes() {
 	}
 	server.Router.Handle("/", explorerHandler).Methods("GET")
 	server.Router.Handle("/vanilla-jsoneditor.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/react.min.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/react-dom.min.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/babel.min.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/styles.css", explorerHandler).Methods("GET")
+	server.Router.PathPrefix("/components/").Handler(explorerHandler).Methods("GET")
 	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
 	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
 		http.HandlerFunc(server.unpublish), server.Deadline, deadlineMsg)).Methods("DELETE")
