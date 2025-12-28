@@ -220,6 +220,32 @@ func (sm *Stream) Close(key string, client *Conn) {
 	client.conn.Close()
 }
 
+// CloseAll forcefully closes all connections in all pools
+func (sm *Stream) CloseAll() {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	// Close clock pool connections
+	if sm.clockPool != nil {
+		sm.clockPool.mutex.Lock()
+		for _, client := range sm.clockPool.connections {
+			client.conn.Close()
+		}
+		sm.clockPool.connections = nil
+		sm.clockPool.mutex.Unlock()
+	}
+
+	// Close all pool connections
+	for _, pool := range sm.pools {
+		pool.mutex.Lock()
+		for _, client := range pool.connections {
+			client.conn.Close()
+		}
+		pool.connections = nil
+		pool.mutex.Unlock()
+	}
+}
+
 // Broadcast will look for pools that match a path and broadcast updates.
 func (sm *Stream) Broadcast(path string, opt BroadcastOpt) {
 	sm.mutex.RLock()

@@ -1,8 +1,12 @@
 package ooo
 
 import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -24,36 +28,35 @@ func TestDoubleStart(t *testing.T) {
 }
 
 func TestRestart(t *testing.T) {
-	t.Skip()
 	server := Server{}
 	server.Silence = true
-	server.Start("localhost:9889")
+	server.Start("localhost:0")
+	addr := server.Address
 	server.Close(os.Interrupt)
 	// https://golang.org/pkg/net/http/#example_Server_Shutdown
-	server.Start("localhost:9889")
+	server.Start(addr)
+	require.True(t, server.Active())
 	defer server.Close(os.Interrupt)
 }
 
-// TODO: find a way to test this
-// func TestDeadline(t *testing.T) {
-// 	if runtime.GOOS == "windows" {
-// 		// TODO: investigate how to simulate a delay in the request on windows
-// 		t.Skip()
-// 	}
-// 	app := Server{
-// 		Deadline: 1 * time.Nanosecond,
-// 		Silence:  true,
-// 	}
-// 	app.Start("localhost:0")
-// 	defer app.Close(os.Interrupt)
+func TestDeadline(t *testing.T) {
+	// Test that TimeoutHandler works correctly with a custom route
+	deadline := 10 * time.Millisecond
+	slowHandler := http.TimeoutHandler(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(100 * time.Millisecond)
+			w.Write([]byte("done"))
+		}), deadline, deadlineMsg)
 
-// 	var jsonStr = []byte(`{"data":"test"}`)
-// 	req := httptest.NewRequest("POST", "/test", bytes.NewBuffer(jsonStr))
-// 	w := httptest.NewRecorder()
-// 	app.Router.ServeHTTP(w, req)
-// 	resp := w.Result()
-// 	require.Equal(t, 503, resp.StatusCode)
-// }
+	// Use httptest server to test the timeout handler directly
+	ts := httptest.NewServer(slowHandler)
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL, "application/json", bytes.NewBuffer([]byte(`{"data":"test"}`)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
+}
 
 func TestServerValidate(t *testing.T) {
 	// Valid config
@@ -84,4 +87,50 @@ func TestServerValidate(t *testing.T) {
 	err = server.Validate()
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "Deadline cannot be negative")
+}
+
+func TestCloseResetsState(t *testing.T) {
+	server := Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	require.True(t, server.Active())
+	require.NotNil(t, server.Router)
+	require.NotNil(t, server.Storage)
+
+	server.Close(os.Interrupt)
+
+	// After close, internal state should be cleared
+	require.Nil(t, server.Router)
+	require.Nil(t, server.Storage)
+}
+
+func TestStartWithError(t *testing.T) {
+	server := Server{}
+	server.Silence = true
+
+	// Start successfully
+	err := server.StartWithError("localhost:0")
+	require.NoError(t, err)
+	require.True(t, server.Active())
+
+	// Try to start again - should return ErrServerAlreadyActive
+	err = server.StartWithError("localhost:0")
+	require.Error(t, err)
+	require.Equal(t, ErrServerAlreadyActive, err)
+
+	server.Close(os.Interrupt)
+}
+
+func TestActive(t *testing.T) {
+	server := Server{}
+	server.Silence = true
+
+	// Not active before start
+	require.False(t, server.Active())
+
+	server.Start("localhost:0")
+	require.True(t, server.Active())
+
+	server.Close(os.Interrupt)
+	require.False(t, server.Active())
 }

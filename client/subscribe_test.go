@@ -3,9 +3,7 @@ package client_test
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"sync"
@@ -15,7 +13,6 @@ import (
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
-	"github.com/pkg/expect"
 	"github.com/stretchr/testify/require"
 )
 
@@ -50,13 +47,13 @@ func TestClientList(t *testing.T) {
 		Ctx:      ctx,
 		Protocol: "ws",
 		Host:     server.Address,
+		Silence:  true,
 	}, "devices/*", client.SubscribeListEvents[Device]{
 		OnMessage: func(devices []client.Meta[Device]) {
 			if len(devices) > 0 {
 				sort.Slice(devices, func(i, j int) bool {
 					return devices[i].Created < devices[j].Created
 				})
-				log.Println("len", len(devices))
 				require.Equal(t, "device "+strconv.Itoa(len(devices)-1), devices[len(devices)-1].Data.Name)
 			}
 			wg.Done()
@@ -67,9 +64,6 @@ func TestClientList(t *testing.T) {
 	for i := range 5 {
 		wg.Add(1)
 		createDevice(t, &server, "device "+strconv.Itoa(i))
-		if runtime.GOOS == "windows" {
-			time.Sleep(10 * time.Millisecond)
-		}
 		wg.Wait()
 	}
 }
@@ -81,76 +75,98 @@ func TestClientClose(t *testing.T) {
 	defer server.Close(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:      ctx,
-		Protocol: "ws",
-		Host:     server.Address,
-	}, "devices/*", client.SubscribeListEvents[Device]{
-		OnMessage: func(devices []client.Meta[Device]) {
-			wg.Done()
-		},
-	})
-	wg.Wait()
+	var connected sync.WaitGroup
+	connected.Add(1)
+	var exited sync.WaitGroup
+	exited.Add(1)
 
+	go func() {
+		defer exited.Done()
+		client.SubscribeList(client.SubscribeConfig{
+			Ctx:      ctx,
+			Protocol: "ws",
+			Host:     server.Address,
+			Silence:  true,
+		}, "devices/*", client.SubscribeListEvents[Device]{
+			OnMessage: func(devices []client.Meta[Device]) {
+				connected.Done()
+			},
+		})
+	}()
+
+	connected.Wait()
 	cancel()
-	time.Sleep(10 * time.Millisecond) // wait for the connection to be closed
-	createDevice(t, &server, "device null")
-	time.Sleep(100 * time.Millisecond) // wait to verify that the update is not received
+	exited.Wait()
 }
 
 func TestClientCloseWhileReconnecting(t *testing.T) {
 	server := ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
-	defer server.Close(os.Interrupt)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	// client.DEBUG = false
-	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:      ctx,
-		Protocol: "ws",
-		Host:     server.Address,
-	}, "devices/*", client.SubscribeListEvents[Device]{
-		OnMessage: func(devices []client.Meta[Device]) {
-			wg.Done()
-		},
-	})
-	wg.Wait()
+	var connected sync.WaitGroup
+	connected.Add(1)
+	var disconnected sync.WaitGroup
+	disconnected.Add(1)
+	var exited sync.WaitGroup
+	exited.Add(1)
 
-	// close server and wait for the client to start reconnection attempts
+	go func() {
+		defer exited.Done()
+		client.SubscribeList(client.SubscribeConfig{
+			Ctx:      ctx,
+			Protocol: "ws",
+			Host:     server.Address,
+			Silence:  true,
+		}, "devices/*", client.SubscribeListEvents[Device]{
+			OnMessage: func(devices []client.Meta[Device]) {
+				connected.Done()
+			},
+			OnError: func(err error) {
+				disconnected.Done()
+			},
+		})
+	}()
+
+	connected.Wait()
 	server.Close(os.Interrupt)
-	time.Sleep(1 * time.Second)
-
-	// cancel while reconnecting in progress
+	disconnected.Wait()
 	cancel()
-	createDevice(t, &server, "device null")
-	time.Sleep(1 * time.Second)
+	exited.Wait()
 }
 
 func TestClientCloseWithoutConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:              ctx,
-		Protocol:         "ws",
-		Host:             "notAnIP",
-		HandshakeTimeout: 10 * time.Millisecond,
-	}, "devices/*", client.SubscribeListEvents[Device]{
-		OnMessage: func(devices []client.Meta[Device]) {
-			expect.True(false)
-		},
-	})
+	var connectionFailed sync.WaitGroup
+	connectionFailed.Add(1)
+	var exited sync.WaitGroup
+	exited.Add(1)
+	messageReceived := false
 
-	// wait for retries to stablish connection
-	time.Sleep(200 * time.Millisecond)
+	go func() {
+		defer exited.Done()
+		client.SubscribeList(client.SubscribeConfig{
+			Ctx:              ctx,
+			Protocol:         "ws",
+			Host:             "notAnIP",
+			HandshakeTimeout: 10 * time.Millisecond,
+			Silence:          true,
+		}, "devices/*", client.SubscribeListEvents[Device]{
+			OnMessage: func(devices []client.Meta[Device]) {
+				messageReceived = true
+			},
+			OnError: func(err error) {
+				connectionFailed.Done()
+			},
+		})
+	}()
 
-	// cancel while trying to connect
+	connectionFailed.Wait()
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	exited.Wait()
+	require.False(t, messageReceived, "OnMessage should not be called when connection fails")
 }
 
 func TestClientListCallbackCurry(t *testing.T) {
@@ -179,6 +195,7 @@ func TestClientListCallbackCurry(t *testing.T) {
 		Ctx:      ctx,
 		Protocol: "ws",
 		Host:     server.Address,
+		Silence:  true,
 	}, "devices/*", client.SubscribeListEvents[Device]{
 		OnMessage: makeDevicesCallback(),
 	})
@@ -189,9 +206,6 @@ func TestClientListCallbackCurry(t *testing.T) {
 	for i := range NUM_DEVICES {
 		wg.Add(1)
 		createDevice(t, &server, "device "+strconv.Itoa(i))
-		if runtime.GOOS == "windows" {
-			time.Sleep(10 * time.Millisecond)
-		}
 		wg.Wait()
 	}
 

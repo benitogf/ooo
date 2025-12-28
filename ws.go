@@ -26,6 +26,9 @@ func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
+	server.handlerWg.Add(1)
+	defer server.handlerWg.Done()
+
 	client, err := server.Stream.New(_key, w, r)
 	if err != nil {
 		server.Console.Err("ooo: filtered route", err)
@@ -41,7 +44,7 @@ func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 
 	// log.Println("version", version, "result.Version", strconv.FormatInt(result.Version, 16), version != strconv.FormatInt(result.Version, 16))
 	if version != strconv.FormatInt(result.Version, 16) {
-		go server.Stream.Write(client, result.Data, true, result.Version)
+		server.Stream.Write(client, result.Data, true, result.Version)
 	}
 	server.Stream.Read(_key, client)
 	return nil

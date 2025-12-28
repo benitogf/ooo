@@ -65,21 +65,23 @@ func TestWebSocketSubscriptionEvents(t *testing.T) {
 	server := Server{}
 	server.Silence = true
 
+	var subscribedWg sync.WaitGroup
+	subscribedWg.Add(1)
+	var unsubscribedWg sync.WaitGroup
+	unsubscribedWg.Add(1)
+
 	subscribed := ""
 	unsubscribed := ""
-	var mu sync.Mutex
 
 	server.OnSubscribe = func(key string) error {
-		mu.Lock()
 		subscribed = key
-		mu.Unlock()
+		subscribedWg.Done()
 		return nil
 	}
 
 	server.OnUnsubscribe = func(key string) {
-		mu.Lock()
 		unsubscribed = key
-		mu.Unlock()
+		unsubscribedWg.Done()
 	}
 
 	server.Start("localhost:0")
@@ -90,22 +92,14 @@ func TestWebSocketSubscriptionEvents(t *testing.T) {
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
 
-	// Give time for subscription event
-	time.Sleep(10 * time.Millisecond)
-
-	mu.Lock()
+	subscribedWg.Wait()
 	require.Equal(t, "testkey", subscribed)
-	mu.Unlock()
 
 	// Close connection
 	c.Close()
 
-	// Give time for unsubscription event
-	time.Sleep(10 * time.Millisecond)
-
-	mu.Lock()
+	unsubscribedWg.Wait()
 	require.Equal(t, "testkey", unsubscribed)
-	mu.Unlock()
 }
 
 func TestWebSocketSubscriptionDenied(t *testing.T) {

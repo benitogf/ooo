@@ -479,6 +479,11 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 	state.startCloseWatcher()
 
 	for {
+		if state.closing.Load() {
+			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
+			break
+		}
+
 		if !state.connect() {
 			continue
 		}

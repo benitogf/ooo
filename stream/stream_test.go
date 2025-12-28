@@ -200,3 +200,163 @@ func TestRemoveConn(t *testing.T) {
 	result = removeConn(conns, c1)
 	require.Equal(t, 0, len(result))
 }
+
+func TestInitClock(t *testing.T) {
+	stream := Stream{}
+	stream.InitClock()
+
+	require.NotNil(t, stream.pools)
+	require.NotNil(t, stream.poolIndex)
+	require.NotNil(t, stream.clockPool)
+	require.Equal(t, DefaultWriteTimeout, stream.WriteTimeout)
+
+	// Call again to ensure idempotency
+	stream.InitClock()
+	require.NotNil(t, stream.clockPool)
+}
+
+func TestPreallocatePools(t *testing.T) {
+	stream := Stream{
+		Console: coat.NewConsole(domain, true),
+	}
+
+	paths := []string{"items/*", "users/*", "config"}
+	stream.PreallocatePools(paths)
+
+	require.Equal(t, 3, len(stream.pools))
+	require.NotNil(t, stream.pools["items/*"])
+	require.NotNil(t, stream.pools["users/*"])
+	require.NotNil(t, stream.pools["config"])
+
+	// Verify pools have correct keys
+	require.Equal(t, "items/*", stream.pools["items/*"].Key)
+	require.Equal(t, "users/*", stream.pools["users/*"].Key)
+	require.Equal(t, "config", stream.pools["config"].Key)
+
+	// Call again with overlapping paths - should not duplicate
+	stream.PreallocatePools([]string{"items/*", "newpath"})
+	require.Equal(t, 4, len(stream.pools))
+	require.NotNil(t, stream.pools["newpath"])
+}
+
+func TestGetState(t *testing.T) {
+	monotonic.Init()
+	stream := Stream{
+		Console:   coat.NewConsole(domain, true),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
+		OnSubscribe: func(key string) error {
+			return nil
+		},
+		OnUnsubscribe: func(key string) {},
+	}
+	stream.InitClock()
+
+	// Empty state initially
+	state := stream.GetState()
+	require.Equal(t, 0, len(state))
+
+	// Add a connection to a pool
+	req, w := makeStreamRequestMock(domain + "/test")
+	wsConn, err := stream.New("test", w, req)
+	require.NoError(t, err)
+
+	state = stream.GetState()
+	require.Equal(t, 1, len(state))
+	require.Equal(t, "test", state[0].Key)
+	require.Equal(t, 1, state[0].Connections)
+
+	// Add clock connection
+	reqClock, wClock := makeStreamRequestMock(domain + "/")
+	wsConnClock, err := stream.New("", wClock, reqClock)
+	require.NoError(t, err)
+
+	state = stream.GetState()
+	require.Equal(t, 2, len(state))
+
+	// Cleanup
+	stream.Close("test", wsConn)
+	stream.Close("", wsConnClock)
+}
+
+func TestBroadcastClock(t *testing.T) {
+	monotonic.Init()
+	stream := Stream{
+		Console:       coat.NewConsole(domain, true),
+		pools:         make(map[string]*Pool),
+		poolIndex:     newPoolTrie(),
+		WriteTimeout:  DefaultWriteTimeout,
+		OnSubscribe:   func(key string) error { return nil },
+		OnUnsubscribe: func(key string) {},
+	}
+
+	// BroadcastClock with nil clockPool should not panic
+	stream.BroadcastClock("12345")
+
+	// Initialize clock pool
+	stream.InitClock()
+
+	// BroadcastClock with empty connections should not panic
+	stream.BroadcastClock("12345")
+
+	// Add a clock connection
+	req, w := makeStreamRequestMock(domain + "/")
+	wsConn, err := stream.New("", w, req)
+	require.NoError(t, err)
+	require.Equal(t, 1, len(stream.clockPool.connections))
+
+	// BroadcastClock with connection (will fail to write but shouldn't panic)
+	stream.BroadcastClock("12345")
+
+	stream.Close("", wsConn)
+}
+
+func TestInitCacheObjectsWithVersion(t *testing.T) {
+	monotonic.Init()
+	stream := Stream{
+		Console:       coat.NewConsole(domain, true),
+		pools:         make(map[string]*Pool),
+		poolIndex:     newPoolTrie(),
+		OnSubscribe:   func(key string) error { return nil },
+		OnUnsubscribe: func(key string) {},
+	}
+
+	objects := []meta.Object{
+		{Created: 1000, Index: "a", Path: "items/a", Data: json.RawMessage(`{"id":"a"}`)},
+		{Created: 2000, Index: "b", Path: "items/b", Data: json.RawMessage(`{"id":"b"}`)},
+	}
+
+	// Initialize cache for new pool
+	version := stream.InitCacheObjectsWithVersion("items/*", objects)
+	require.NotZero(t, version)
+	require.Equal(t, 1, len(stream.pools))
+	require.Equal(t, 2, len(stream.pools["items/*"].cache.Objects))
+
+	// Update existing pool cache
+	newObjects := []meta.Object{
+		{Created: 3000, Index: "c", Path: "items/c", Data: json.RawMessage(`{"id":"c"}`)},
+	}
+	version2 := stream.InitCacheObjectsWithVersion("items/*", newObjects)
+	require.Equal(t, version, version2) // Version should remain the same
+	require.Equal(t, 1, len(stream.pools["items/*"].cache.Objects))
+}
+
+func TestGetCacheVersionErrors(t *testing.T) {
+	monotonic.Init()
+	stream := Stream{
+		Console:   coat.NewConsole(domain, true),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
+	}
+
+	// Pool not found
+	_, err := stream.GetCacheVersion("nonexistent")
+	require.Error(t, err)
+	require.Equal(t, ErrPoolNotFound, err)
+
+	// Pool exists but cache is empty
+	stream.pools["empty"] = &Pool{Key: "empty"}
+	_, err = stream.GetCacheVersion("empty")
+	require.Error(t, err)
+	require.Equal(t, ErrPoolCacheEmpty, err)
+}

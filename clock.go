@@ -40,11 +40,14 @@ func (server *Server) clock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	server.handlerWg.Add(1)
+	defer server.handlerWg.Done()
+
 	client, err := server.Stream.New("", w, r)
 	if err != nil {
 		return
 	}
 
-	go server.Stream.WriteClock(client, Time())
+	server.Stream.WriteClock(client, Time())
 	server.Stream.Read("", client)
 }

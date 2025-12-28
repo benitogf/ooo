@@ -523,6 +523,9 @@ func main() {
                 fmt.Printf("%d. %s (due: %v)\n", i+1, it.Data.Task, it.Data.Due)
             }
         },
+        OnError: func(err error) {
+            fmt.Println("connection error:", err)
+        },
     })
 
     // Produce updates
@@ -552,6 +555,9 @@ go client.Subscribe[Todo](cfg, "todo", client.SubscribeEvents[Todo]{
     OnMessage: func(item client.Meta[Todo]) {
         fmt.Println("current todo:", item.Data.Task)
     },
+    OnError: func(err error) {
+        fmt.Println("connection error:", err)
+    },
 })
 
 // Update the item to trigger a message
@@ -572,6 +578,9 @@ go client.SubscribeList[Todo](cfg, "todos/*", client.SubscribeListEvents[Todo]{
     OnMessage: func(items []client.Meta[Todo]) {
         // handle items
     },
+    OnError: func(err error) {
+        // handle connection error
+    },
 })
 ```
 
@@ -581,6 +590,66 @@ go client.SubscribeList[Todo](cfg, "todos/*", client.SubscribeListEvents[Todo]{
 - Retry delays can be configured via `SubscribeConfig.Retry`
 - The callback runs in the client's goroutine; keep work minimal or offload to channels
 - Call `cancel()` on the context to close the websocket and stop reconnection attempts
+
+#### Subscribe to multiple paths
+
+Use `SubscribeMultipleList2`, `SubscribeMultipleList3`, or `SubscribeMultipleList4` to subscribe to multiple paths with different types and receive combined state updates in a single callback.
+
+```go
+type User struct {
+    ID   int    `json:"id"`
+    Name string `json:"name"`
+}
+
+type Post struct {
+    ID    int    `json:"id"`
+    Title string `json:"title"`
+}
+
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+
+client.SubscribeMultipleList2(
+    ctx,
+    client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
+    client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
+    client.SubscribeMultipleList2Events[User, Post]{
+        OnMessage: func(users client.MultiState[User], posts client.MultiState[Post]) {
+            // Called when either subscription updates
+            // Use .Updated to check which one changed
+            if users.Updated {
+                fmt.Println("users updated:", len(users.Data))
+            }
+            if posts.Updated {
+                fmt.Println("posts updated:", len(posts.Data))
+            }
+        },
+        OnError: func(usersErr, postsErr error) {
+            // Per-connection errors (nil if no error on that connection)
+            if usersErr != nil {
+                fmt.Println("users connection error:", usersErr)
+            }
+            if postsErr != nil {
+                fmt.Println("posts connection error:", postsErr)
+            }
+        },
+    },
+)
+```
+
+The `MultiState[T]` struct contains:
+- `Data []Meta[T]` - the current list of items
+- `Updated bool` - true if this subscription triggered the callback
+
+For 3 or 4 paths, use `SubscribeMultipleList3Events` or `SubscribeMultipleList4Events` with corresponding `OnError` signatures:
+
+```go
+// 3 paths
+OnError: func(err1, err2, err3 error)
+
+// 4 paths  
+OnError: func(err1, err2, err3, err4 error)
+```
 
 ## UI
 

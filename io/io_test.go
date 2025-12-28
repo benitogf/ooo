@@ -3,9 +3,7 @@ package io_test
 import (
 	"net/http"
 	"os"
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/benitogf/ooo"
 	ooio "github.com/benitogf/ooo/io"
@@ -56,15 +54,9 @@ func TestIObasic(t *testing.T) {
 	index, err := ooo.Push(server, THINGS_PATH, thing1.Data)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
 	index, err = ooo.Push(server, THINGS_PATH, thing2.Data)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
 
 	things, err := ooo.GetList[Thing](server, THINGS_PATH)
 	require.NoError(t, err)
@@ -136,9 +128,6 @@ func TestRemoteIO(t *testing.T) {
 
 	err = ooio.RemotePush(cfg, THINGS_PATH, thing1.Data)
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
 	err = ooio.RemotePush(cfg, THINGS_PATH, thing2.Data)
 	require.NoError(t, err)
 

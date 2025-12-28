@@ -99,6 +99,9 @@ type audit func(r *http.Request) bool
 // BeforeRead: callback function triggered before read operations
 type Server struct {
 	wg                sync.WaitGroup
+	watchWg           sync.WaitGroup
+	listenWg          sync.WaitGroup
+	handlerWg         sync.WaitGroup
 	server            *http.Server
 	Name              string
 	Router            *mux.Router
@@ -221,6 +224,7 @@ type tcpKeepAliveListener struct {
 }
 
 func (server *Server) waitListen() {
+	defer server.listenWg.Done()
 	var err error
 	storageOpt := storage.Options{
 		NoBroadcastKeys: server.NoBroadcastKeys,
@@ -285,6 +289,7 @@ func (server *Server) waitStart() error {
 	// Start workers for sharded watcher (per-key ordering)
 	shardedWatcher := server.Storage.WatchSharded()
 	for i := 0; i < shardedWatcher.Count(); i++ {
+		server.watchWg.Add(1)
 		go server.watch(shardedWatcher.Shard(i))
 	}
 
@@ -355,6 +360,7 @@ func (server *Server) fetch(path string) (FetchResult, error) {
 }
 
 func (server *Server) watch(sc storage.StorageChan) {
+	defer server.watchWg.Done()
 	for {
 		ev, ok := <-sc
 		if !ok {
@@ -562,6 +568,7 @@ func (server *Server) StartWithError(address string) error {
 	// Preallocate stream pools for all registered filter paths
 	server.Stream.PreallocatePools(server.filters.Paths())
 	server.wg.Add(1)
+	server.listenWg.Add(1)
 	go server.waitListen()
 	server.wg.Wait()
 	err := server.waitStart()
@@ -588,12 +595,27 @@ func (server *Server) Close(sig os.Signal) {
 	if atomic.LoadInt64(&server.closing) != 1 {
 		atomic.StoreInt64(&server.closing, 1)
 		atomic.StoreInt64(&server.active, 0)
-		server.Storage.Close()
-		server.OnClose()
-		server.Console.Err("shutdown", sig)
+		// Force close all stream connections first
+		server.Stream.CloseAll()
+		// Shutdown HTTP server to stop accepting new connections
 		if server.server != nil {
 			server.server.Shutdown(context.Background())
 		}
+		server.handlerWg.Wait() // Wait for HTTP handlers to finish
+		server.listenWg.Wait()  // Wait for listen goroutine to finish
+		server.Storage.Close()
+		server.watchWg.Wait() // Wait for watch goroutines to finish
+		server.OnClose()
+		server.Console.Err("shutdown", sig)
+		// Clear server state to allow restarting
+		server.server = nil
+		server.Router = nil
+		server.Stream = stream.Stream{}
+		server.Storage = nil
+		server.Console = nil
+		server.filters = filters.Filters{}
+		server.limitFilters = nil
+		server.startErr = nil
 	}
 }
 

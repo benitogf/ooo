@@ -58,7 +58,7 @@ func ProcessBroadcast(cache *Cache, poolKey string, operation string, obj *meta.
 func processListBroadcast(cache *Cache, poolKey string, operation string, obj *meta.Object, filterObject FilterObjectFn, filterList FilterListFn, noPatch bool) BroadcastResult {
 	// Handle glob delete (obj is nil) - clear all items
 	if obj == nil && operation == "del" {
-		return processListDel(cache, poolKey, nil, noPatch)
+		return processListDel(cache, nil, noPatch)
 	}
 
 	if obj == nil {
@@ -72,7 +72,7 @@ func processListBroadcast(cache *Cache, poolKey string, operation string, obj *m
 	case "set":
 		return processListSet(cache, poolKey, obj, &filtered, filterErr, filterList, noPatch)
 	case "del":
-		return processListDel(cache, poolKey, obj, noPatch)
+		return processListDel(cache, obj, noPatch)
 	}
 	return BroadcastResult{Skip: true}
 }
@@ -132,7 +132,7 @@ func processListSet(cache *Cache, poolKey string, obj *meta.Object, filtered *me
 }
 
 // processListDel handles delete operations on list caches
-func processListDel(cache *Cache, poolKey string, obj *meta.Object, noPatch bool) BroadcastResult {
+func processListDel(cache *Cache, obj *meta.Object, noPatch bool) BroadcastResult {
 	// For glob delete (obj is nil), clear all items from the cache
 	if obj == nil {
 		cache.Objects = nil
