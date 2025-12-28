@@ -129,6 +129,9 @@ func NoopHook(index string) error {
 	return nil
 }
 
+// NoopNotify open noop notify
+func NoopNotify(index string) {}
+
 // NoopFilter noop filter for write operations
 func NoopFilter(index string, data json.RawMessage) (json.RawMessage, error) {
 	return data, nil
@@ -331,4 +334,80 @@ func (f *Filters) Paths() []string {
 		paths = append(paths, path)
 	}
 	return paths
+}
+
+// FilterInfo contains detailed information about a filter path
+type FilterInfo struct {
+	Path      string `json:"path"`
+	Type      string `json:"type"`            // "open", "read-only", "write-only", "limit", "custom"
+	CanRead   bool   `json:"canRead"`         // Has read filter (object or list)
+	CanWrite  bool   `json:"canWrite"`        // Has write filter
+	CanDelete bool   `json:"canDelete"`       // Has delete filter
+	IsGlob    bool   `json:"isGlob"`          // Path contains wildcard
+	Limit     int    `json:"limit,omitempty"` // Limit value if it's a limit filter
+}
+
+// PathsInfo returns detailed information about all registered filter paths.
+func (f *Filters) PathsInfo(limitFilters map[string]int) []FilterInfo {
+	pathInfo := make(map[string]*FilterInfo)
+
+	// Track write filters
+	for _, filter := range f.Write {
+		if _, ok := pathInfo[filter.path]; !ok {
+			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
+		}
+		pathInfo[filter.path].CanWrite = true
+	}
+
+	// Track read object filters
+	for _, filter := range f.ReadObject {
+		if _, ok := pathInfo[filter.path]; !ok {
+			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
+		}
+		pathInfo[filter.path].CanRead = true
+	}
+
+	// Track read list filters
+	for _, filter := range f.ReadList {
+		if _, ok := pathInfo[filter.path]; !ok {
+			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
+		}
+		pathInfo[filter.path].CanRead = true
+	}
+
+	// Track delete filters
+	for _, filter := range f.Delete {
+		if _, ok := pathInfo[filter.path]; !ok {
+			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
+		}
+		pathInfo[filter.path].CanDelete = true
+	}
+
+	// Track after-write watchers (doesn't affect type, but path should be included)
+	for _, filter := range f.AfterWrite {
+		if _, ok := pathInfo[filter.path]; !ok {
+			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
+		}
+	}
+
+	// Determine filter type and add limit info
+	result := make([]FilterInfo, 0, len(pathInfo))
+	for path, info := range pathInfo {
+		// Check if it's a limit filter
+		if limit, ok := limitFilters[path]; ok {
+			info.Type = "limit"
+			info.Limit = limit
+		} else if info.CanRead && info.CanWrite && info.CanDelete {
+			info.Type = "open"
+		} else if info.CanRead && !info.CanWrite {
+			info.Type = "read-only"
+		} else if info.CanWrite && !info.CanRead {
+			info.Type = "write-only"
+		} else {
+			info.Type = "custom"
+		}
+		result = append(result, *info)
+	}
+
+	return result
 }

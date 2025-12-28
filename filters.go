@@ -17,6 +17,7 @@ type (
 // Re-export filter functions from filters package
 var (
 	NoopHook         = filters.NoopHook
+	NoopNotify       = filters.NoopNotify
 	NoopFilter       = filters.NoopFilter
 	NoopObjectFilter = filters.NoopObjectFilter
 	NoopListFilter   = filters.NoopListFilter
@@ -85,4 +86,7 @@ func (server *Server) LimitFilter(path string, limit int) {
 	server.filters.AddAfterWrite(path, func(k string) {
 		lf.Check()
 	})
+
+	// Register for explorer display
+	server.RegisterLimitFilter(lf)
 }

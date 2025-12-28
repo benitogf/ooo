@@ -4,10 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Storage Explorer</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <link rel="stylesheet" href="styles.css">
     <script src="react.min.js"></script>
     <script src="react-dom.min.js"></script>
     <script src="babel.min.js"></script>
+    <script src="ooo-client.js"></script>
+    <script src="react-json-view.js"></script>
+    <script src="api.js"></script>
     <script type="module">
       import { JSONEditor } from './vanilla-jsoneditor.js';
       window.JSONEditor = JSONEditor;
@@ -34,16 +38,23 @@
         'components/Breadcrumb.jsx',
         'components/JsonEditorWrapper.jsx',
         'components/StorageList.jsx',
-        'components/StorageKeys.jsx',
+        'components/StorageKeysLive.jsx',
+        'components/PushDialog.jsx',
+        'components/EditKeyModal.jsx',
+        'components/PathNavigatorModal.jsx',
+        'components/StateModal.jsx',
+        'components/JsonTreeCell.jsx',
         'components/KeyEditor.jsx',
+        'components/KeyEditorLive.jsx',
         'components/StoragePush.jsx',
         'components/SettingsPage.jsx',
+        'components/StatePage.jsx',
         'components/ExplorerApp.jsx'
       ];
       
       loadJSX(jsxFiles).then(() => {
         function tryMount() {
-          if (window.ExplorerApp && window.JSONEditor) {
+          if (window.ExplorerApp && window.JSONEditor && window.Api) {
             ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(window.ExplorerApp));
           } else {
             setTimeout(tryMount, 50);

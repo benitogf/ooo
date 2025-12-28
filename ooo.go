@@ -14,13 +14,13 @@ import (
 	"time"
 
 	"github.com/benitogf/coat"
-	"github.com/benitogf/ooo/explorer"
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
 	"github.com/benitogf/ooo/storage"
 	"github.com/benitogf/ooo/stream"
+	"github.com/benitogf/ooo/ui"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/rs/cors"
@@ -104,6 +104,7 @@ type Server struct {
 	Router            *mux.Router
 	Stream            stream.Stream
 	filters           filters.Filters
+	limitFilters      map[string]int // tracks limit filter paths and their limits
 	NoBroadcastKeys   []string
 	Audit             audit
 	Workers           int
@@ -152,8 +153,8 @@ func (server *Server) Validate() error {
 }
 
 // getServerInfo returns server configuration for the explorer
-func (server *Server) getServerInfo() explorer.ServerInfo {
-	return explorer.ServerInfo{
+func (server *Server) getServerInfo() ui.ServerInfo {
+	return ui.ServerInfo{
 		Name:              server.Name,
 		Address:           server.Address,
 		Deadline:          server.Deadline,
@@ -168,6 +169,47 @@ func (server *Server) getServerInfo() explorer.ServerInfo {
 		Workers:           server.Workers,
 		Tick:              server.Tick,
 	}
+}
+
+// getFiltersInfo returns detailed filter information for the explorer
+func (server *Server) getFiltersInfo() []ui.FilterInfo {
+	filtersInfo := server.filters.PathsInfo(server.limitFilters)
+	result := make([]ui.FilterInfo, len(filtersInfo))
+	for i, f := range filtersInfo {
+		result[i] = ui.FilterInfo{
+			Path:      f.Path,
+			Type:      f.Type,
+			CanRead:   f.CanRead,
+			CanWrite:  f.CanWrite,
+			CanDelete: f.CanDelete,
+			IsGlob:    f.IsGlob,
+			Limit:     f.Limit,
+		}
+	}
+	return result
+}
+
+// RegisterLimitFilter registers a limit filter and tracks it for the ui.
+// The LimitFilter should already be created and its filters added to the server.
+// This method just tracks the limit value for display in the ui.
+func (server *Server) RegisterLimitFilter(lf *filters.LimitFilter) {
+	if server.limitFilters == nil {
+		server.limitFilters = make(map[string]int)
+	}
+	server.limitFilters[lf.Path()] = lf.Limit()
+}
+
+// getStreamState returns stream connection pool information for the explorer
+func (server *Server) getStreamState() []ui.PoolInfo {
+	state := server.Stream.GetState()
+	result := make([]ui.PoolInfo, len(state))
+	for i, p := range state {
+		result[i] = ui.PoolInfo{
+			Key:         p.Key,
+			Connections: p.Connections,
+		}
+	}
+	return result
 }
 
 // tcpKeepAliveListener sets TCP keep-alive timeouts on accepted
@@ -470,12 +512,14 @@ func (server *Server) defaults() {
 // setupRoutes configures the HTTP routes for the server.
 func (server *Server) setupRoutes() {
 	// https://ieftimov.com/post/make-resilient-golang-net-http-servers-using-timeouts-deadlines-context-cancellation/
-	explorerHandler := &explorer.Handler{
-		GetKeys:    server.Storage.Keys,
-		GetInfo:    server.getServerInfo,
-		GetFilters: server.filters.Paths,
-		AuditFunc:  server.Audit,
-		ClockFunc:  server.clock,
+	explorerHandler := &ui.Handler{
+		GetKeys:        server.Storage.Keys,
+		GetInfo:        server.getServerInfo,
+		GetFilters:     server.filters.Paths,
+		GetFiltersInfo: server.getFiltersInfo,
+		GetState:       server.getStreamState,
+		AuditFunc:      server.Audit,
+		ClockFunc:      server.clock,
 	}
 	server.Router.Handle("/", explorerHandler).Methods("GET")
 	server.Router.Handle("/vanilla-jsoneditor.js", explorerHandler).Methods("GET")
@@ -483,6 +527,13 @@ func (server *Server) setupRoutes() {
 	server.Router.Handle("/react-dom.min.js", explorerHandler).Methods("GET")
 	server.Router.Handle("/babel.min.js", explorerHandler).Methods("GET")
 	server.Router.Handle("/styles.css", explorerHandler).Methods("GET")
+	server.Router.Handle("/ooo-client.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/react-json-view.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/api.js", explorerHandler).Methods("GET")
+	server.Router.Handle("/favicon.ico", explorerHandler).Methods("GET")
+	server.Router.Handle("/favicon.png", explorerHandler).Methods("GET")
+	server.Router.Handle("/logo.jpg", explorerHandler).Methods("GET")
+	server.Router.Handle("/logo.png", explorerHandler).Methods("GET")
 	server.Router.PathPrefix("/components/").Handler(explorerHandler).Methods("GET")
 	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
 	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(

@@ -427,3 +427,44 @@ func (sm *Stream) GetCacheVersion(key string) (int64, error) {
 
 	return pool.cache.Version, nil
 }
+
+// PoolInfo contains information about a connection pool
+type PoolInfo struct {
+	Key         string `json:"key"`
+	Connections int    `json:"connections"`
+}
+
+// GetState returns information about all active connection pools
+func (sm *Stream) GetState() []PoolInfo {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+
+	var result []PoolInfo
+
+	// Add clock pool if it has connections
+	if sm.clockPool != nil {
+		sm.clockPool.mutex.RLock()
+		if len(sm.clockPool.connections) > 0 {
+			result = append(result, PoolInfo{
+				Key:         "(clock)",
+				Connections: len(sm.clockPool.connections),
+			})
+		}
+		sm.clockPool.mutex.RUnlock()
+	}
+
+	// Add all other pools with connections
+	for key, pool := range sm.pools {
+		pool.mutex.RLock()
+		connCount := len(pool.connections)
+		pool.mutex.RUnlock()
+		if connCount > 0 {
+			result = append(result, PoolInfo{
+				Key:         key,
+				Connections: connCount,
+			})
+		}
+	}
+
+	return result
+}

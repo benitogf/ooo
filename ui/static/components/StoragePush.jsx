@@ -60,7 +60,7 @@ function StoragePush({ filterPath }) {
   }
 
   return (
-    <div className="container">
+    <div className="container editor-page">
       <div className="edit-page-header">
         <button className="btn secondary" onClick={goBack}>
           <IconChevronLeft />
@@ -68,7 +68,7 @@ function StoragePush({ filterPath }) {
         </button>
         <span className="edit-page-title">Push to: {filterPath}</span>
       </div>
-      <div className="edit-page-content">
+      <div className="editor-wrapper">
         <JsonEditorWrapper content={{}} editorRef={editorRef} />
       </div>
       <div className="edit-page-actions">

@@ -1,4 +1,4 @@
-package explorer
+package ui
 
 import (
 	"embed"
@@ -29,18 +29,44 @@ type ServerInfo struct {
 	Tick              time.Duration `json:"tick"`
 }
 
+// FilterInfo contains detailed information about a filter path
+type FilterInfo struct {
+	Path      string `json:"path"`
+	Type      string `json:"type"`
+	CanRead   bool   `json:"canRead"`
+	CanWrite  bool   `json:"canWrite"`
+	CanDelete bool   `json:"canDelete"`
+	IsGlob    bool   `json:"isGlob"`
+	Limit     int    `json:"limit,omitempty"`
+}
+
 // FiltersInfo contains filter paths exposed to the explorer
 type FiltersInfo struct {
-	Paths []string `json:"paths"`
+	Paths   []string     `json:"paths"`
+	Filters []FilterInfo `json:"filters"`
+}
+
+// PoolInfo contains information about a connection pool
+type PoolInfo struct {
+	Key         string `json:"key"`
+	Connections int    `json:"connections"`
+}
+
+// StateInfo contains stream state information
+type StateInfo struct {
+	Pools            []PoolInfo `json:"pools"`
+	TotalConnections int        `json:"totalConnections"`
 }
 
 // Handler serves the storage explorer SPA
 type Handler struct {
-	GetKeys    func() ([]string, error)
-	GetInfo    func() ServerInfo
-	GetFilters func() []string
-	AuditFunc  func(r *http.Request) bool
-	ClockFunc  func(w http.ResponseWriter, r *http.Request)
+	GetKeys        func() ([]string, error)
+	GetInfo        func() ServerInfo
+	GetFilters     func() []string
+	GetFiltersInfo func() []FilterInfo
+	GetState       func() []PoolInfo
+	AuditFunc      func(r *http.Request) bool
+	ClockFunc      func(w http.ResponseWriter, r *http.Request)
 }
 
 // ServeHTTP handles requests to the explorer
@@ -71,6 +97,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "filters":
 		h.handleFilters(w, r)
 		return
+	case "state":
+		h.handleState(w, r)
+		return
 	}
 
 	// Serve static files (use HasSuffix to handle sub-path mounting)
@@ -93,6 +122,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasSuffix(path, "/styles.css") {
 		h.serveStatic(w, r, "styles.css")
+		return
+	}
+	if strings.HasSuffix(path, "/ooo-client.js") {
+		h.serveStatic(w, r, "ooo-client.js")
+		return
+	}
+	if strings.HasSuffix(path, "/react-json-view.js") {
+		h.serveStatic(w, r, "react-json-view.js")
+		return
+	}
+	if strings.HasSuffix(path, "/api.js") {
+		h.serveStatic(w, r, "api.js")
+		return
+	}
+	if strings.HasSuffix(path, "/favicon.ico") {
+		h.serveStatic(w, r, "favicon.ico")
+		return
+	}
+	if strings.HasSuffix(path, "/favicon.png") {
+		h.serveStatic(w, r, "favicon.png")
+		return
+	}
+	if strings.HasSuffix(path, "/logo.jpg") {
+		h.serveStatic(w, r, "logo.jpg")
+		return
+	}
+	if strings.HasSuffix(path, "/logo.png") {
+		h.serveStatic(w, r, "logo.png")
 		return
 	}
 	// Serve React JSX component files
@@ -196,8 +253,25 @@ func (h *Handler) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleFilters(w http.ResponseWriter, r *http.Request) {
 	paths := h.GetFilters()
+	var filtersInfo []FilterInfo
+	if h.GetFiltersInfo != nil {
+		filtersInfo = h.GetFiltersInfo()
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(FiltersInfo{Paths: paths})
+	json.NewEncoder(w).Encode(FiltersInfo{Paths: paths, Filters: filtersInfo})
+}
+
+func (h *Handler) handleState(w http.ResponseWriter, r *http.Request) {
+	var pools []PoolInfo
+	if h.GetState != nil {
+		pools = h.GetState()
+	}
+	totalConnections := 0
+	for _, p := range pools {
+		totalConnections += p.Connections
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(StateInfo{Pools: pools, TotalConnections: totalConnections})
 }
 
 func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) {

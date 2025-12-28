@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" alt="ooo logo" width="120" />
+</p>
+
 # ooo
 
 [![Test](https://github.com/benitogf/ooo/actions/workflows/tests.yml/badge.svg)](https://github.com/benitogf/ooo/actions/workflows/tests.yml)
@@ -83,13 +87,13 @@ app.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMes
   // returning an error will deny the write
   return data, nil
 })
-app.AfterWrite("books/*", func(index string) {
+app.AfterWriteFilter("books/*", func(index string) {
   // trigger after a write is done
   log.Println("wrote data on ", index)
 })
-app.ReadFilter("books/taup", func(index string, data json.RawMessage) (json.RawMessage, error) {
+app.ReadObjectFilter("books/taup", func(index string, data meta.Object) (meta.Object, error) {
   // returning an error will deny the read
-  return json.RawMessage(`{"intercepted":true}`), nil
+  return data, nil
 })
 app.DeleteFilter("books/taup", func(key string) (error) {
   // returning an error will prevent the delete
@@ -117,6 +121,7 @@ import (
     "net/http"
 
     "github.com/benitogf/ooo"
+    "github.com/benitogf/ooo/meta"
 )
 
 type Book struct {
@@ -156,20 +161,19 @@ func main() {
     })
 
     // Log after any write
-    app.AfterWrite("books/*", func(index string) {
+    app.AfterWriteFilter("books/*", func(index string) {
         log.Println("wrote book at", index)
     })
 
-    // Hide secrets on reads
-    app.ReadFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
-        var b Book
-        err := json.Unmarshal(data, &b)
-        if err != nil {
-            return nil, err
+    // Hide secrets on reads (for lists)
+    app.ReadListFilter("books/*", func(index string, objs []meta.Object) ([]meta.Object, error) {
+        for i := range objs {
+            var b Book
+            json.Unmarshal(objs[i].Data, &b)
+            b.Secret = ""
+            objs[i].Data, _ = json.Marshal(b)
         }
-        b.Secret = ""
-        out, _ := json.Marshal(b)
-        return out, nil
+        return objs, nil
     })
 
     // Prevent deleting a specific resource
@@ -353,42 +357,27 @@ if err != nil {
 You can also perform operations on remote OOO servers using the client functions:
 
 ```go
-// Create an HTTP client
-client := &http.Client{Timeout: 10 * time.Second}
+// Create a remote config
+cfg := io.RemoteConfig{
+    Client: &http.Client{Timeout: 10 * time.Second},
+    Host:   "localhost:8800",
+    SSL:    false, // set to true for HTTPS
+}
 
 // RemoteGet fetches an item from a remote server
-item, err := io.RemoteGet[YourType](
-    client,
-    false,  // useHTTPS
-    "localhost:8800",  // host:port
-    "path/to/item",
-)
+item, err := io.RemoteGet[YourType](cfg, "path/to/item")
 
 // RemoteSet updates or creates an item on a remote server
-err = io.RemoteSet(
-    client,
-    false,  // useHTTPS
-    "localhost:8800",
-    "path/to/item",
-    YourType{Field1: "value"},
-)
+err = io.RemoteSet(cfg, "path/to/item", YourType{Field1: "value"})
 
 // RemotePush adds an item to a list on a remote server
-err = io.RemotePush(
-    client,
-    false,  // useHTTPS
-    "localhost:8800",
-    "path/to/items/*",
-    YourType{Field1: "new item"},
-)
+err = io.RemotePush(cfg, "path/to/items/*", YourType{Field1: "new item"})
 
 // RemoteGetList fetches all items from a list on a remote server
-items, err := io.RemoteGetList[YourType](
-    client,
-    false,  // useHTTPS
-    "localhost:8800",
-    "path/to/items/*",
-)
+items, err := io.RemoteGetList[YourType](cfg, "path/to/items/*")
+
+// RemoteDelete deletes an item
+err = io.RemoteDelete(cfg, "path/to/item")
 ```
 
 #### Basic IO example
@@ -454,22 +443,38 @@ func main() {
 
 ### WebSocket client
 
-Use the Go websocket client to subscribe to real-time updates on any path. The API is defined in `client/client.go` as:
+Use the Go websocket client to subscribe to real-time updates on any path. There are two functions:
+
+- `Subscribe[T]` - for single object paths (non-glob)
+- `SubscribeList[T]` - for list paths (glob patterns like `todos/*`)
+
+Both use a `SubscribeConfig` struct for connection settings and event callbacks.
 
 ```go
-func Subscribe[T any](
-    ctx context.Context,
-    protocol string, // "ws" or "wss"
-    host string,     // e.g. "localhost:8800"
-    path string,     // e.g. "todos/*" or "todo"
-    callback OnMessageCallback[T], // func([]client.Meta[T])
-)
+// SubscribeConfig holds connection configuration
+type SubscribeConfig struct {
+    Ctx              context.Context
+    Protocol         string        // "ws" or "wss"
+    Host             string        // e.g. "localhost:8800"
+    Header           http.Header   // optional headers
+    HandshakeTimeout time.Duration // optional, defaults to 2s
+    Silence          bool          // suppress log output
+}
+
+// For single objects
+type SubscribeEvents[T any] struct {
+    OnMessage func(client.Meta[T])
+    OnError   func(error) // optional
+}
+
+// For lists
+type SubscribeListEvents[T any] struct {
+    OnMessage func([]client.Meta[T])
+    OnError   func(error) // optional
+}
 ```
 
-- For list paths (ending with `/*`), the callback receives the entire current list as `[]client.Meta[T]` on every update.
-- For single-item paths, the callback receives a slice with one element representing the current value.
-- The client automatically reconnects with backoff if the connection drops.
-- Cancel the provided `ctx` to stop receiving updates and close the connection.
+The client automatically reconnects with exponential backoff if the connection drops. Cancel the context to stop the subscription.
 
 #### Example: subscribe to a list
 
@@ -479,7 +484,6 @@ package main
 import (
     "context"
     "fmt"
-    "log"
     "time"
 
     "github.com/benitogf/ooo"
@@ -494,29 +498,37 @@ type Todo struct {
 }
 
 func main() {
-    // Start server (for demo). In production, use your existing host.
+    // Start server (for demo)
     server := &ooo.Server{Silence: true}
     server.Start("localhost:0")
     defer server.Close(nil)
 
-    // Seed one item so the first callback has data
+    // Seed one item
     _ = io.Push(server, "todos/*", Todo{Task: "seed", Due: time.Now().Add(1 * time.Hour)})
 
     ctx, cancel := context.WithCancel(context.Background())
     defer cancel()
 
-    go client.Subscribe[Todo](ctx, "ws", server.Address, "todos/*", func(items []client.Meta[Todo]) {
-        fmt.Println("list size:", len(items))
-        for i, it := range items {
-            fmt.Printf("%d. %s (due: %v)\n", i+1, it.Data.Task, it.Data.Due)
-        }
+    cfg := client.SubscribeConfig{
+        Ctx:      ctx,
+        Protocol: "ws",
+        Host:     server.Address,
+        Silence:  true,
+    }
+
+    go client.SubscribeList[Todo](cfg, "todos/*", client.SubscribeListEvents[Todo]{
+        OnMessage: func(items []client.Meta[Todo]) {
+            fmt.Println("list size:", len(items))
+            for i, it := range items {
+                fmt.Printf("%d. %s (due: %v)\n", i+1, it.Data.Task, it.Data.Due)
+            }
+        },
     })
 
     // Produce updates
     time.Sleep(50 * time.Millisecond)
     _ = io.Push(server, "todos/*", Todo{Task: "another", Due: time.Now().Add(2 * time.Hour)})
 
-    // Let some messages flow
     time.Sleep(300 * time.Millisecond)
 }
 ```
@@ -527,15 +539,19 @@ func main() {
 ctx, cancel := context.WithCancel(context.Background())
 defer cancel()
 
+cfg := client.SubscribeConfig{
+    Ctx:      ctx,
+    Protocol: "ws",
+    Host:     server.Address,
+}
+
 // Ensure path exists
 _ = io.Set(server, "todo", Todo{Task: "one", Due: time.Now().Add(24 * time.Hour)})
 
-go client.Subscribe[Todo](ctx, "ws", server.Address, "todo", func(items []client.Meta[Todo]) {
-    if len(items) == 0 {
-        return
-    }
-    current := items[0]
-    fmt.Println("current todo:", current.Data.Task)
+go client.Subscribe[Todo](cfg, "todo", client.SubscribeEvents[Todo]{
+    OnMessage: func(item client.Meta[Todo]) {
+        fmt.Println("current todo:", item.Data.Task)
+    },
 })
 
 // Update the item to trigger a message
@@ -544,17 +560,40 @@ _ = io.Set(server, "todo", Todo{Task: "updated"})
 
 #### HTTPS (wss) usage
 
-If your server is behind TLS, use the `wss` protocol and your HTTPS host:
+If your server is behind TLS, use the `wss` protocol:
 
 ```go
-ctx := context.Background()
-go client.Subscribe[Todo](ctx, "wss", "example.com:443", "todos/*", func(items []client.Meta[Todo]) {
-    // handle items
+cfg := client.SubscribeConfig{
+    Ctx:      ctx,
+    Protocol: "wss",
+    Host:     "example.com:443",
+}
+go client.SubscribeList[Todo](cfg, "todos/*", client.SubscribeListEvents[Todo]{
+    OnMessage: func(items []client.Meta[Todo]) {
+        // handle items
+    },
 })
 ```
 
 #### Tuning and lifecycle
 
-- The handshake timeout can be adjusted via `client.HandshakeTimeout`.
-- The callback runs in the client's goroutine; keep work minimal or offload to channels.
-- Call `cancel()` on the context to close the websocket and stop reconnection attempts.
+- `HandshakeTimeout` can be set in the config (default: 2 seconds)
+- Retry delays can be configured via `SubscribeConfig.Retry`
+- The callback runs in the client's goroutine; keep work minimal or offload to channels
+- Call `cancel()` on the context to close the websocket and stop reconnection attempts
+
+## UI
+
+ooo includes a built-in web-based ui to manage and monitor your data. The ui is automatically available at the root path (`/`) when the server starts.
+
+### Features
+
+- **Storage Browser** - Browse all registered filters and their data
+- **Live Mode** - Real-time WebSocket subscriptions with automatic updates
+- **Static Mode** - Traditional CRUD operations with JSON editor
+- **State Monitor** - View active WebSocket connections and subscriptions
+- **Filter Management** - Visual representation of filter types (open, read-only, write-only, custom, limit)
+
+
+![alt text](ui.png)
+![alt text](ui-table.png)
