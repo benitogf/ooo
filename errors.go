@@ -37,4 +37,5 @@ var (
 var (
 	ErrRouteNotDefined     = errors.New("ooo: route not defined, static mode")
 	ErrInvalidFilterResult = errors.New("ooo: invalid filter result")
+	ErrReservedPath        = errors.New("ooo: filter path conflicts with reserved UI paths")
 )

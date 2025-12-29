@@ -94,3 +94,13 @@ func Push[T any](server *Server, path string, item T) (string, error) {
 	}
 	return server.Storage.Push(path, data)
 }
+
+// Delete removes an item at the specified path from storage.
+// The path must not contain glob patterns.
+func Delete(server *Server, path string) error {
+	if key.IsGlob(path) {
+		log.Println("Delete["+path+"]: ", ErrPathGlobNotAllowed)
+		return ErrPathGlobNotAllowed
+	}
+	return server.Storage.Del(path)
+}

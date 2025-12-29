@@ -1,0 +1,2241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ooo - Real-Time State Management for Go</title>
+  <meta name="description" content="ooo is a lightweight Go library for real-time state management with WebSocket subscriptions, REST API, glob pattern routing, and built-in admin UI. Perfect for building reactive applications.">
+  <meta name="keywords" content="go, golang, state management, websocket, real-time, in-memory, key-value store, rest api, pub-sub, reactive, glob patterns, json patch, admin ui, data synchronization, event-driven, server-sent events">
+  <meta name="author" content="benitogf">
+  <meta name="robots" content="index, follow">
+  <link rel="canonical" href="https://benitogf.github.io/ooo/">
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://benitogf.github.io/ooo/">
+  <meta property="og:title" content="ooo - Real-Time State Management for Go">
+  <meta property="og:description" content="Lightweight Go library for real-time state management with WebSocket subscriptions, REST API, glob pattern routing, and built-in admin UI.">
+  <meta property="og:image" content="https://benitogf.github.io/ooo/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:url" content="https://benitogf.github.io/ooo/">
+  <meta name="twitter:title" content="ooo - Real-Time State Management for Go">
+  <meta name="twitter:description" content="Lightweight Go library for real-time state management with WebSocket subscriptions, REST API, glob pattern routing, and built-in admin UI.">
+  <meta name="twitter:image" content="https://benitogf.github.io/ooo/og-image.png">
+  
+  <!-- Favicons -->
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0b1219;
+      color: #e8eef4;
+      line-height: 1.6;
+    }
+    a { color: #00d4aa; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code {
+      font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+      background: #1e3a4a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+    pre {
+      background: #0d1117;
+      border: 1px solid #1e3a4a;
+      border-radius: 8px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      position: relative;
+    }
+    pre code { background: none; padding: 0; }
+
+    /* Header */
+    .header {
+      background: #0f1923;
+      border-bottom: 1px solid #1e3a4a;
+      padding: 16px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .header-inner {
+      max-width: 1200px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 700;
+      font-size: 18px;
+      color: #e8eef4;
+    }
+    .logo-icon { width: 32px; height: 32px; }
+    .logo-icon svg { width: 32px; height: 32px; }
+    .nav { display: flex; gap: 24px; }
+    .nav a { color: #8ba3b8; font-size: 14px; font-weight: 500; }
+    .nav a:hover { color: #00d4aa; text-decoration: none; }
+
+    /* Hero */
+    .hero {
+      text-align: center;
+      padding: 80px 24px;
+      background: linear-gradient(180deg, #0f1923 0%, #0b1219 100%);
+    }
+    .hero h1 {
+      font-size: 48px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      background: linear-gradient(135deg, #00d4aa 0%, #00e8bb 50%, #40f0d0 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 20px;
+      color: #8ba3b8;
+      max-width: 600px;
+      margin: 0 auto 32px;
+    }
+    .hero-buttons { display: flex; gap: 16px; justify-content: center; flex-wrap: wrap; }
+    .btn {
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+      cursor: pointer;
+      border: none;
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #00d4aa 0%, #00e8bb 50%, #40f0d0 100%);
+      color: #0f1923;
+    }
+    .btn-primary:hover { opacity: 0.9; text-decoration: none; }
+    .btn-secondary {
+      background: #162231;
+      border: 1px solid #1e3a4a;
+      color: #e8eef4;
+    }
+    .btn-secondary:hover { background: #1e3a4a; text-decoration: none; }
+    .btn-small { padding: 6px 12px; font-size: 12px; }
+
+    /* Container */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Section */
+    .section {
+      padding: 64px 0;
+    }
+    .section-title {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #e8eef4;
+    }
+    .section-subtitle {
+      font-size: 16px;
+      color: #8ba3b8;
+      margin-bottom: 32px;
+    }
+
+    /* Features */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+    .feature {
+      background: #141e2a;
+      border: 1px solid #1e3a4a;
+      border-radius: 12px;
+      padding: 24px;
+    }
+    .feature-icon {
+      width: 48px;
+      height: 48px;
+      background: rgba(0, 212, 170, 0.15);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 16px;
+      color: #00d4aa;
+    }
+    .feature h3 {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #e8eef4;
+    }
+    .feature p { color: #8ba3b8; font-size: 14px; }
+
+    /* Code Example */
+    .code-example {
+      background: #141e2a;
+      border: 1px solid #1e3a4a;
+      border-radius: 12px;
+      overflow: hidden;
+      position: relative;
+    }
+    .code-header {
+      background: #0f1923;
+      padding: 12px 16px;
+      border-bottom: 1px solid #1e3a4a;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .code-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .code-dot.red { background: #ff5f56; }
+    .code-dot.yellow { background: #ffbd2e; }
+    .code-dot.green { background: #27c93f; }
+    .code-title {
+      margin-left: 12px;
+      color: #8ba3b8;
+      font-size: 13px;
+      flex: 1;
+    }
+    .code-example pre {
+      margin: 0;
+      border: none;
+      border-radius: 0;
+    }
+    .copy-btn {
+      background: #1e3a4a;
+      border: none;
+      color: #8ba3b8;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.2s;
+    }
+    .copy-btn:hover { background: #2a4a5a; color: #e8eef4; }
+    .copy-btn.copied { background: #00d4aa; color: #0f1923; }
+
+    /* Ecosystem */
+    .ecosystem-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 20px;
+    }
+    .ecosystem-card {
+      background: #141e2a;
+      border: 1px solid #1e3a4a;
+      border-radius: 12px;
+      padding: 20px;
+      transition: all 0.2s;
+    }
+    .ecosystem-card:hover {
+      border-color: #00d4aa;
+      transform: translateY(-2px);
+      text-decoration: none;
+    }
+    .ecosystem-card h4 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #e8eef4;
+      margin-bottom: 8px;
+    }
+    .ecosystem-card p {
+      font-size: 13px;
+      color: #8ba3b8;
+    }
+
+    /* API Reference */
+    .api-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #141e2a;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .api-table th {
+      background: #0f1923;
+      padding: 12px 16px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 600;
+      color: #8ba3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .api-table td {
+      padding: 12px 16px;
+      border-top: 1px solid #1e3a4a;
+      font-size: 14px;
+    }
+    .api-table tr:hover td { background: #1a2a3a; }
+
+    /* Samples */
+    .sample-card {
+      background: #141e2a;
+      border: 1px solid #1e3a4a;
+      border-radius: 12px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .sample-header {
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .sample-header:hover { background: #1a2a3a; }
+    .sample-card.open .sample-header { background: #1e3a4a; border-left: 3px solid #00d4aa; }
+    .sample-info { flex: 1; }
+    .sample-info h4 {
+      font-size: 16px;
+      font-weight: 600;
+      color: #e8eef4;
+      margin-bottom: 4px;
+    }
+    .sample-info p { font-size: 13px; color: #8ba3b8; margin: 0; }
+    .sample-toggle {
+      color: #00d4aa;
+      font-size: 16px;
+      transition: transform 0.2s, background 0.2s;
+      background: #1e3a4a;
+      border-radius: 6px;
+      width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-left: 12px;
+      flex-shrink: 0;
+    }
+    .sample-toggle:hover { background: #2a4a5a; }
+    .sample-card.open .sample-toggle { transform: rotate(180deg); background: transparent; }
+    .sample-code {
+      display: none;
+      border-top: 1px solid #1e3a4a;
+    }
+    .sample-card.open .sample-code { display: block; }
+    .sample-links {
+      display: flex;
+      gap: 12px;
+      margin-left: auto;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .sample-links a {
+      font-size: 12px;
+      padding: 6px 12px;
+      background: #1e3a4a;
+      border: 1px solid #2a4a5a;
+      border-radius: 6px;
+      color: #e8eef4;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .sample-links a:hover { background: #2a4a5a; border-color: #00d4aa; text-decoration: none; }
+    .sample-links a svg { width: 14px; height: 14px; }
+
+    /* Footer */
+    .footer {
+      background: #0f1923;
+      border-top: 1px solid #1e3a4a;
+      padding: 32px 24px;
+      text-align: center;
+      color: #8ba3b8;
+      font-size: 14px;
+    }
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-bottom: 16px;
+    }
+
+    /* Syntax highlighting */
+    .keyword { color: #ff7b72; }
+    .string { color: #a5d6ff; }
+    .comment { color: #8b949e; }
+    .function { color: #d2a8ff; }
+    .type { color: #79c0ff; }
+
+    /* Info box */
+    .info-box {
+      background: rgba(0, 212, 170, 0.1);
+      border: 1px solid rgba(0, 212, 170, 0.3);
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .info-box ul {
+      margin: 8px 0 0 20px;
+      color: #8ba3b8;
+    }
+    .info-box li { margin-bottom: 4px; }
+
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 32px; }
+      .hero p { font-size: 16px; }
+      .nav { display: none; }
+      .section { padding: 48px 0; }
+      .sample-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <div class="header-inner">
+      <a href="#" class="logo" style="text-decoration: none; color: inherit;">
+        <div class="logo-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+            <path d="M26.25 20V10a2.5 2.5 0 0 0-1.25-2.16l-8.75-5a2.5 2.5 0 0 0-2.5 0l-8.75 5A2.5 2.5 0 0 0 3.75 10v10a2.5 2.5 0 0 0 1.25 2.16l8.75 5a2.5 2.5 0 0 0 2.5 0l8.75-5A2.5 2.5 0 0 0 26.25 20z" stroke="#00d4aa" stroke-width="2.5"/>
+          </svg>
+        </div>
+        ooo
+      </a>
+      <nav class="nav">
+        <a href="#features">Features</a>
+        <a href="#quickstart">Quickstart</a>
+        <a href="#api">API</a>
+        <a href="#filters">Filters</a>
+        <a href="#samples">Samples</a>
+        <a href="#ecosystem">Ecosystem</a>
+        <a href="https://github.com/benitogf/ooo" target="_blank">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>ooo</h1>
+    <p>State management with real-time network access. Fast, zero-configuration layer for storing and synchronizing application state using JSON Patch updates.</p>
+    <div class="hero-buttons">
+      <a href="https://github.com/benitogf/ooo" target="_blank" class="btn btn-primary">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        View on GitHub
+      </a>
+      <a href="#quickstart" class="btn btn-secondary">Get Started</a>
+    </div>
+    <div style="margin-top: 48px;">
+      <img src="ui-demo.webp" alt="ooo UI demo" style="max-width: 100%; width: 800px; border-radius: 12px; border: 1px solid #1e3a4a; box-shadow: 0 20px 40px rgba(0,0,0,0.4);" />
+    </div>
+  </section>
+
+  <section id="features" class="section">
+    <div class="container">
+      <h2 class="section-title">Features</h2>
+      <p class="section-subtitle">Everything you need to build realtime applications</p>
+      <div class="features">
+        <div class="feature">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          </div>
+          <h3>Dynamic Routing</h3>
+          <p>Automatic route handling with glob pattern support for lists and collections.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </div>
+          <h3>Real-time Updates</h3>
+          <p>WebSocket subscriptions with automatic reconnection and JSON patch updates.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <h3>Filters & Audit</h3>
+          <p>Built-in middleware for validation, transformation, and access control.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          </div>
+          <h3>Auto Timestamps</h3>
+          <p>Automatic created/updated timestamps using monotonic clock for ordering consistency.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+          </div>
+          <h3>Built-in UI</h3>
+          <p>Web-based admin interface for browsing and managing your data.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </div>
+          <h3>Typed Generics</h3>
+          <p>Go generics support for type-safe data operations and subscriptions.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart" class="section" style="background: #0f1923;">
+    <div class="container">
+      <h2 class="section-title">Quickstart</h2>
+      <p class="section-subtitle">Get up and running in minutes</p>
+      
+      <div class="code-example" style="margin-bottom: 24px;">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          <span class="code-title">Install</span>
+          <button class="copy-btn" onclick="copyCode(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <pre><code>go get github.com/benitogf/ooo</code></pre>
+      </div>
+
+      <div class="code-example">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          <span class="code-title">main.go</span>
+          <button class="copy-btn" onclick="copyCode(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> <span class="string">"github.com/benitogf/ooo"</span>
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+    server := ooo.<span class="type">Server</span>{}
+    server.<span class="function">Start</span>(<span class="string">"0.0.0.0:8800"</span>)
+    server.<span class="function">WaitClose</span>()
+}</code></pre>
+      </div>
+
+      <div class="info-box">
+        <strong style="color: #00d4aa;">What this does:</strong>
+        <ul>
+          <li>Starts an HTTP/WebSocket server on port 8800 with a built-in web UI</li>
+          <li>No filters set and <code>Static</code> mode is off — you can read/write any path</li>
+          <li>Default storage is in-memory. Use <a href="https://github.com/benitogf/ko" target="_blank">ko</a> for LevelDB or <a href="https://github.com/benitogf/nopog" target="_blank">nopog</a> for PostgreSQL persistence</li>
+          <li>Supports real-time subscriptions via WebSocket with JSON Patch updates</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="api" class="section">
+    <div class="container">
+      <h2 class="section-title">API Reference</h2>
+      <p class="section-subtitle">RESTful HTTP and WebSocket endpoints</p>
+      
+      <h3 style="margin-bottom: 16px; font-size: 18px; color: #8ba3b8;">UI & Management</h3>
+      <table class="api-table">
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Description</th>
+            <th>URL</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET</code></td>
+            <td>Web interface</td>
+            <td><code>http://{host}:{port}/</code></td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td>List all keys (paginated)</td>
+            <td><code>http://{host}:{port}/?api=keys</code></td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td>Server info</td>
+            <td><code>http://{host}:{port}/?api=info</code></td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td>Filter paths</td>
+            <td><code>http://{host}:{port}/?api=filters</code></td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td>Connection state</td>
+            <td><code>http://{host}:{port}/?api=state</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="margin: 16px 0 12px 0; padding: 12px 16px; background: rgba(0, 212, 170, 0.05); border-left: 3px solid #00d4aa; border-radius: 0 6px 6px 0;">
+        <h4 style="margin: 0 0 8px 0; font-size: 14px; color: #00d4aa; text-transform: uppercase; letter-spacing: 0.5px;">↳ Keys API Query Parameters</h4>
+        <p style="margin: 0; font-size: 13px; color: #8ba3b8;">Optional parameters for the <code>?api=keys</code> endpoint above</p>
+      </div>
+      <table class="api-table" style="margin-bottom: 32px; margin-left: 16px; width: calc(100% - 16px);">
+        <thead>
+          <tr>
+            <th>Parameter</th>
+            <th>Description</th>
+            <th>Default</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>page</code></td>
+            <td>Page number (1-indexed)</td>
+            <td>1</td>
+          </tr>
+          <tr>
+            <td><code>limit</code></td>
+            <td>Items per page (max 500)</td>
+            <td>50</td>
+          </tr>
+          <tr>
+            <td><code>filter</code></td>
+            <td>Filter by prefix or glob pattern</td>
+            <td>(none)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-bottom: 16px; font-size: 18px; color: #8ba3b8;">Data Operations</h3>
+      <table class="api-table" style="margin-bottom: 32px;">
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Description</th>
+            <th>URL</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>POST</code></td>
+            <td>Create/Update</td>
+            <td><code>http://{host}:{port}/{key}</code></td>
+          </tr>
+          <tr>
+            <td><code>GET</code></td>
+            <td>Read</td>
+            <td><code>http://{host}:{port}/{key}</code></td>
+          </tr>
+          <tr>
+            <td><code>PATCH</code></td>
+            <td>Partial update (JSON Patch)</td>
+            <td><code>http://{host}:{port}/{key}</code></td>
+          </tr>
+          <tr>
+            <td><code>DELETE</code></td>
+            <td>Delete</td>
+            <td><code>http://{host}:{port}/{key}</code></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3 style="margin-bottom: 16px; font-size: 18px; color: #8ba3b8;">WebSocket</h3>
+      <table class="api-table" style="margin-bottom: 32px;">
+        <thead>
+          <tr>
+            <th>Method</th>
+            <th>Description</th>
+            <th>URL</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>WS</code></td>
+            <td>Server clock</td>
+            <td><code>ws://{host}:{port}</code></td>
+          </tr>
+          <tr>
+            <td><code>WS</code></td>
+            <td>Subscribe to updates</td>
+            <td><code>ws://{host}:{port}/{key}</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="filters" class="section" style="background: #0f1923;">
+    <div class="container">
+      <h2 class="section-title">Filters</h2>
+      <p class="section-subtitle">Control access and transform data. Paths support glob patterns (<code>*</code>) and multi-level globs like <code>users/*/posts/*</code>.</p>
+      
+      <table class="api-table" style="margin-bottom: 32px;">
+        <thead>
+          <tr>
+            <th>Filter</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>OpenFilter</code></td><td>Enable route (required in static mode)</td></tr>
+          <tr><td><code>WriteFilter</code></td><td>Transform/validate before write</td></tr>
+          <tr><td><code>AfterWriteFilter</code></td><td>Callback after write completes</td></tr>
+          <tr><td><code>ReadObjectFilter</code></td><td>Transform single object on read</td></tr>
+          <tr><td><code>ReadListFilter</code></td><td>Transform list items on read</td></tr>
+          <tr><td><code>DeleteFilter</code></td><td>Control delete operations</td></tr>
+          <tr><td><code>LimitFilter</code></td><td>Maintain max entries in a list (auto-cleanup)</td></tr>
+        </tbody>
+      </table>
+
+      <div class="code-example">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          <span class="code-title">Filter Examples</span>
+          <button class="copy-btn" onclick="copyCode(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <pre><code><span class="comment">// Enable a route (required when Static=true)</span>
+server.<span class="function">OpenFilter</span>(<span class="string">"books/*"</span>)
+
+<span class="comment">// Validate/transform before write</span>
+server.<span class="function">WriteFilter</span>(<span class="string">"books/*"</span>, <span class="keyword">func</span>(index <span class="type">string</span>, data json.RawMessage) (json.RawMessage, <span class="type">error</span>) {
+    <span class="keyword">return</span> data, <span class="keyword">nil</span>
+})
+
+<span class="comment">// Limit list to N most recent entries (auto-deletes oldest)</span>
+<span class="comment">// Includes ReadListFilter, WriteFilter, DeleteFilter, AfterWriteFilter</span>
+server.<span class="function">LimitFilter</span>(<span class="string">"logs/*"</span>, <span class="type">100</span>)</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="io" class="section">
+    <div class="container">
+      <h2 class="section-title">I/O Operations</h2>
+      <p class="section-subtitle">Type-safe data operations with Go generics. Click to expand code.</p>
+      
+      <h3 style="margin-bottom: 16px; font-size: 18px; color: #8ba3b8;">Local Operations</h3>
+      <div style="display: flex; flex-direction: column; margin-bottom: 32px;">
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>Get</h4>
+              <p>Retrieve a single item from the specified path</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">Get</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment">// Get retrieves a single item from the specified path</span>
+item, err := ooo.<span class="function">Get</span>[YourType](server, <span class="string">"path/to/item"</span>)
+<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+    log.<span class="function">Fatal</span>(err)
+}
+fmt.<span class="function">Printf</span>(<span class="string">"Item: %+v\n"</span>, item.Data)</code></pre>
+          </div>
+        </div>
+
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>GetList</h4>
+              <p>Retrieve all items from a list path (glob pattern)</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">GetList</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment">// GetList retrieves all items from a list path (ends with "/*")</span>
+items, err := ooo.<span class="function">GetList</span>[YourType](server, <span class="string">"path/to/items/*"</span>)
+<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+    log.<span class="function">Fatal</span>(err)
+}
+<span class="keyword">for</span> _, item := <span class="keyword">range</span> items {
+    fmt.<span class="function">Printf</span>(<span class="string">"Item: %+v (created: %v)\n"</span>, item.Data, item.Created)
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>Set</h4>
+              <p>Create or update an item at the specified path</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">Set</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment">// Set creates or updates an item at the specified path</span>
+err := ooo.<span class="function">Set</span>(server, <span class="string">"path/to/item"</span>, YourType{
+    Field1: <span class="string">"value1"</span>,
+    Field2: <span class="string">"value2"</span>,
+})
+<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+    log.<span class="function">Fatal</span>(err)
+}</code></pre>
+          </div>
+        </div>
+
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>Push</h4>
+              <p>Add an item to a list (path must end with "/*")</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">Push</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment">// Push adds an item to a list (path must end with "/*")</span>
+index, err := ooo.<span class="function">Push</span>(server, <span class="string">"path/to/items/*"</span>, YourType{
+    Field1: <span class="string">"new item"</span>,
+    Field2: <span class="string">"another value"</span>,
+})
+<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+    log.<span class="function">Fatal</span>(err)
+}
+fmt.<span class="function">Println</span>(<span class="string">"Created at:"</span>, index)</code></pre>
+          </div>
+        </div>
+
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>Delete</h4>
+              <p>Remove item(s) at the specified path or glob pattern</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">Delete</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment">// Delete removes item(s) at the specified path</span>
+<span class="comment">// For single item: ooo.Delete(server, "path/to/item")</span>
+<span class="comment">// For glob pattern: ooo.Delete(server, "items/*") removes all matching items</span>
+err := ooo.<span class="function">Delete</span>(server, <span class="string">"path/to/item"</span>)
+<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+    log.<span class="function">Fatal</span>(err)
+}</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <h3 style="margin-bottom: 16px; font-size: 18px; color: #8ba3b8;">Remote Operations</h3>
+      <div class="code-example" style="margin-bottom: 16px;">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          <span class="code-title">RemoteConfig</span>
+          <button class="copy-btn" onclick="copyCode(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <pre><code>cfg := io.<span class="type">RemoteConfig</span>{
+    Client: &amp;http.<span class="type">Client</span>{Timeout: <span class="type">10</span> * time.Second},
+    Host:   <span class="string">"localhost:8800"</span>,
+    SSL:    <span class="keyword">false</span>, <span class="comment">// set to true for HTTPS</span>
+}</code></pre>
+      </div>
+      <div style="display: flex; flex-direction: column;">
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>RemoteGet / RemoteGetList</h4>
+              <p>Fetch single item or list from remote server</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">RemoteGet</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code>item, err := io.<span class="function">RemoteGet</span>[YourType](cfg, <span class="string">"path/to/item"</span>)
+
+items, err := io.<span class="function">RemoteGetList</span>[YourType](cfg, <span class="string">"path/to/items/*"</span>)</code></pre>
+          </div>
+        </div>
+
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>RemoteSet / RemotePush</h4>
+              <p>Create/update item or add to list on remote server</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">RemoteSet</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code>err := io.<span class="function">RemoteSet</span>(cfg, <span class="string">"path/to/item"</span>, YourType{Field1: <span class="string">"value"</span>})
+
+err := io.<span class="function">RemotePush</span>(cfg, <span class="string">"path/to/items/*"</span>, YourType{Field1: <span class="string">"new item"</span>})</code></pre>
+          </div>
+        </div>
+
+        <div class="sample-card">
+          <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+            <div class="sample-info">
+              <h4>RemoteDelete</h4>
+              <p>Delete item(s) from remote server (supports glob patterns)</p>
+            </div>
+            <span class="sample-toggle">▼</span>
+          </div>
+          <div class="sample-code">
+            <div class="code-header">
+              <span class="code-dot red"></span>
+              <span class="code-dot yellow"></span>
+              <span class="code-dot green"></span>
+              <span class="code-title">RemoteDelete</span>
+              <button class="copy-btn" onclick="copyCode(this)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Copy
+              </button>
+            </div>
+            <pre><code><span class="comment">// Delete single item or use glob pattern for multiple items</span>
+err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"path/to/item"</span>)
+err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"items/*"</span>)</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="subscribe" class="section" style="background: #0f1923;">
+    <div class="container">
+      <h2 class="section-title">Subscribe Clients</h2>
+      <p class="section-subtitle">Real-time WebSocket subscriptions with Go generics</p>
+      
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 24px;">
+        <div class="code-example">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">SubscribeList</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">go</span> client.<span class="function">SubscribeList</span>(client.<span class="type">SubscribeConfig</span>{
+    Ctx:  ctx,
+    Server: client.<span class="type">Server</span>{Protocol: <span class="string">"ws"</span>, Host: <span class="string">"localhost:8800"</span>},
+}, <span class="string">"items/*"</span>, client.<span class="type">SubscribeListEvents</span>[<span class="type">Item</span>]{
+    OnMessage: <span class="keyword">func</span>(items []client.<span class="type">Meta</span>[<span class="type">Item</span>]) { <span class="comment">/* handle */</span> },
+    OnError:   <span class="keyword">func</span>(err <span class="type">error</span>) { <span class="comment">/* handle */</span> },
+})</code></pre>
+        </div>
+        <div class="code-example">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">Subscribe (single item)</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">go</span> client.<span class="function">Subscribe</span>(client.<span class="type">SubscribeConfig</span>{
+    Ctx:  ctx,
+    Server: client.<span class="type">Server</span>{Protocol: <span class="string">"ws"</span>, Host: <span class="string">"localhost:8800"</span>},
+}, <span class="string">"config"</span>, client.<span class="type">SubscribeEvents</span>[<span class="type">Config</span>]{
+    OnMessage: <span class="keyword">func</span>(item client.<span class="type">Meta</span>[<span class="type">Config</span>]) { <span class="comment">/* handle */</span> },
+    OnError:   <span class="keyword">func</span>(err <span class="type">error</span>) { <span class="comment">/* handle */</span> },
+})</code></pre>
+        </div>
+      </div>
+
+      <p style="margin-top: 24px; color: #8ba3b8;">
+        For JavaScript, use <a href="https://github.com/benitogf/ooo-client" target="_blank">ooo-client</a>.
+      </p>
+    </div>
+  </section>
+
+  <section id="samples" class="section">
+    <div class="container">
+      <h2 class="section-title">Samples</h2>
+      <p class="section-subtitle">Complete examples demonstrating various features. Click to expand code.</p>
+
+      <!-- SAMPLES_START -->
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>01 - Basic Server</h4>
+            <p>Minimal server setup - the simplest way to start an ooo server</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/01_basic_server" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> <span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := ooo.<span class="type">Server</span>{}
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>02 - Static Routes, Filters & Audit</h4>
+            <p>Static mode, write/read/delete filters, and API key authentication</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/02_static_routes_filters_audit" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;encoding/json&#34;</span>
+	<span class="string">&#34;errors&#34;</span>
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;net/http&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/meta&#34;</span>
+)
+
+<span class="keyword">type</span> <span class="type">Book</span> <span class="keyword">struct</span> {
+	Title  string <span class="string">`json:<span class="string">&#34;title&#34;</span>`</span>
+	Author string <span class="string">`json:<span class="string">&#34;author&#34;</span>`</span>
+	Secret string <span class="string">`json:<span class="string">&#34;secret,omitempty&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+
+	<span class="comment">// Only allow requests that carry a valid API key</span>
+	server.Audit = <span class="keyword">func</span>(r *http.<span class="type">Request</span>) <span class="type">bool</span> {
+		<span class="keyword">return</span> r.Header.<span class="function">Get</span>(<span class="string">&#34;X-API-Key&#34;</span>) == <span class="string">&#34;secret&#34;</span>
+	}
+
+	<span class="comment">// Make the list route available while Static mode is enabled</span>
+	server.<span class="function">OpenFilter</span>(<span class="string">&#34;books/*&#34;</span>)
+	server.<span class="function">OpenFilter</span>(<span class="string">&#34;books/locked&#34;</span>) <span class="comment">// single resource example</span>
+
+	<span class="comment">// Sanitize/validate before writes to the list</span>
+	server.<span class="function">WriteFilter</span>(<span class="string">&#34;books/*&#34;</span>, <span class="keyword">func</span>(index string, data json.<span class="type">RawMessage</span>) (json.<span class="type">RawMessage</span>, <span class="type">error</span>) {
+		<span class="keyword">var</span> b <span class="type">Book</span>
+		err := json.<span class="function">Unmarshal</span>(data, &amp;b)
+		<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+			<span class="keyword">return</span> <span class="keyword">nil</span>, err
+		}
+		<span class="keyword">if</span> b.Title == <span class="string">&#34;&#34;</span> {
+			<span class="keyword">return</span> <span class="keyword">nil</span>, errors.<span class="function">New</span>(<span class="string">&#34;title is required&#34;</span>)
+		}
+		<span class="keyword">if</span> b.Author == <span class="string">&#34;&#34;</span> {
+			b.Author = <span class="string">&#34;unknown&#34;</span>
+		}
+		<span class="comment">// Persist possibly modified payload</span>
+		out, _ := json.<span class="function">Marshal</span>(b)
+		<span class="keyword">return</span> out, <span class="keyword">nil</span>
+	})
+
+	<span class="comment">// Log after any write</span>
+	server.<span class="function">AfterWriteFilter</span>(<span class="string">&#34;books/*&#34;</span>, <span class="keyword">func</span>(index string) {
+		log.<span class="function">Println</span>(<span class="string">&#34;wrote book at&#34;</span>, index)
+	})
+
+	<span class="comment">// Hide secrets on reads (for lists)</span>
+	server.<span class="function">ReadListFilter</span>(<span class="string">&#34;books/*&#34;</span>, <span class="keyword">func</span>(index string, objs []meta.<span class="type">Object</span>) ([]meta.<span class="type">Object</span>, <span class="type">error</span>) {
+		<span class="keyword">for</span> i := <span class="keyword">range</span> objs {
+			<span class="keyword">var</span> b <span class="type">Book</span>
+			json.<span class="function">Unmarshal</span>(objs[i].Data, &amp;b)
+			b.Secret = <span class="string">&#34;&#34;</span>
+			objs[i].Data, _ = json.<span class="function">Marshal</span>(b)
+		}
+		<span class="keyword">return</span> objs, <span class="keyword">nil</span>
+	})
+
+	<span class="comment">// Prevent deleting a specific resource</span>
+	server.<span class="function">DeleteFilter</span>(<span class="string">&#34;books/locked&#34;</span>, <span class="keyword">func</span>(key string) <span class="type">error</span> {
+		<span class="keyword">return</span> errors.<span class="function">New</span>(<span class="string">&#34;this book cannot be deleted&#34;</span>)
+	})
+
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>03 - Storage API</h4>
+            <p>Direct storage read/write operations without HTTP</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/03_storage_api" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;encoding/json&#34;</span>
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;strconv&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/monotonic&#34;</span>
+)
+
+<span class="keyword">type</span> Game <span class="keyword">struct</span> {
+	Started int64 <span class="string">`json:<span class="string">&#34;started&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Initialize the monotonic clock for consistent timestamps</span>
+	monotonic.<span class="function">Init</span>()
+	<span class="keyword">defer</span> monotonic.<span class="function">Stop</span>()
+
+	<span class="comment">// Create a static server - only filtered routes are accessible</span>
+	server := ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+
+	<span class="comment">// Define the path so it&#39;s available through HTTP/WebSocket</span>
+	server.<span class="function">OpenFilter</span>(<span class="string">&#34;game&#34;</span>)
+
+	<span class="comment">// Start the server with default memory storage</span>
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+
+	<span class="comment">// Write data using monotonic timestamp for ordering consistency</span>
+	<span class="comment">// monotonic.Now() returns nanoseconds that always increase</span>
+	timestamp := strconv.<span class="function">FormatInt</span>(monotonic.<span class="function">Now</span>(), 10)
+	index, err := server.<span class="type">Storage</span>.<span class="function">Set</span>(<span class="string">&#34;game&#34;</span>, json.<span class="type">RawMessage</span>(<span class="string">`{<span class="string">&#34;started&#34;</span>: `</span>+timestamp+<span class="string">`}`</span>))
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	log.<span class="function">Println</span>(<span class="string">&#34;stored in&#34;</span>, index)
+
+	<span class="comment">// Read data back from storage</span>
+	dataObject, err := server.<span class="type">Storage</span>.<span class="function">Get</span>(<span class="string">&#34;game&#34;</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	log.<span class="function">Println</span>(<span class="string">&#34;created:&#34;</span>, dataObject.Created)
+	log.<span class="function">Println</span>(<span class="string">&#34;updated:&#34;</span>, dataObject.Updated)
+	log.<span class="function">Println</span>(<span class="string">&#34;data:&#34;</span>, <span class="function">string</span>(dataObject.Data))
+
+	<span class="comment">// Parse JSON to struct</span>
+	game := Game{}
+	err = json.<span class="function">Unmarshal</span>(dataObject.Data, &amp;game)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	log.<span class="function">Println</span>(<span class="string">&#34;started:&#34;</span>, game.Started)
+
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>04 - I/O Operations</h4>
+            <p>Typed I/O helpers with Go generics (Get, Set, Push, GetList)</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/04_io_operations" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;fmt&#34;</span>
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;time&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+)
+
+<span class="keyword">type</span> <span class="type">Todo</span> <span class="keyword">struct</span> {
+	Task      string    <span class="string">`json:<span class="string">&#34;task&#34;</span>`</span>
+	Completed <span class="type">bool</span>      <span class="string">`json:<span class="string">&#34;completed&#34;</span>`</span>
+	Due       time.Time <span class="string">`json:<span class="string">&#34;due&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Start a local server for testing</span>
+	server := &amp;ooo.<span class="type">Server</span>{Silence: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;localhost:0&#34;</span>)
+	<span class="keyword">defer</span> server.<span class="function">Close</span>(<span class="keyword">nil</span>)
+
+	<span class="comment">// Add some todos using Push (for lists)</span>
+	_, err := ooo.<span class="function">Push</span>(server, <span class="string">&#34;todos/*&#34;</span>, <span class="type">Todo</span>{
+		Task:      <span class="string">&#34;todo 1&#34;</span>,
+		Completed: <span class="keyword">false</span>,
+		Due:       time.<span class="function">Now</span>().<span class="function">Add</span>(24 * time.Hour),
+	})
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+
+	_, err = ooo.<span class="function">Push</span>(server, <span class="string">&#34;todos/*&#34;</span>, <span class="type">Todo</span>{
+		Task:      <span class="string">&#34;todo 2&#34;</span>,
+		Completed: <span class="keyword">false</span>,
+		Due:       time.<span class="function">Now</span>().<span class="function">Add</span>(48 * time.Hour),
+	})
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+
+	<span class="comment">// Get all todos using GetList</span>
+	todos, err := ooo.GetList[<span class="type">Todo</span>](server, <span class="string">&#34;todos/*&#34;</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+
+	fmt.<span class="function">Println</span>(<span class="string">&#34;All todos:&#34;</span>)
+	<span class="keyword">for</span> i, todo := <span class="keyword">range</span> todos {
+		fmt.<span class="function">Printf</span>(<span class="string">&#34;%d. %s (Due: %v)\n&#34;</span>, i+1, todo.Data.Task, todo.Data.Due)
+	}
+
+	<span class="comment">// Set a single item</span>
+	err = ooo.<span class="function">Set</span>(server, <span class="string">&#34;config&#34;</span>, <span class="keyword">map</span>[string]string{<span class="string">&#34;theme&#34;</span>: <span class="string">&#34;dark&#34;</span>})
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+
+	<span class="comment">// Get a single item</span>
+	config, err := ooo.Get[<span class="keyword">map</span>[string]string](server, <span class="string">&#34;config&#34;</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Printf</span>(<span class="string">&#34;Config: %+v\n&#34;</span>, config.Data)
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>05 - WebSocket Subscribe List</h4>
+            <p>Real-time subscription to list paths with typed callbacks</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/05_websocket_subscribe_list" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;context&#34;</span>
+	<span class="string">&#34;fmt&#34;</span>
+	<span class="string">&#34;time&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/client&#34;</span>
+)
+
+<span class="keyword">type</span> <span class="type">Todo</span> <span class="keyword">struct</span> {
+	Task      string    <span class="string">`json:<span class="string">&#34;task&#34;</span>`</span>
+	Completed <span class="type">bool</span>      <span class="string">`json:<span class="string">&#34;completed&#34;</span>`</span>
+	Due       time.Time <span class="string">`json:<span class="string">&#34;due&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Start server (for demo)</span>
+	server := &amp;ooo.<span class="type">Server</span>{Silence: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;localhost:0&#34;</span>)
+	<span class="keyword">defer</span> server.<span class="function">Close</span>(<span class="keyword">nil</span>)
+
+	<span class="comment">// Seed one item</span>
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;todos/*&#34;</span>, <span class="type">Todo</span>{Task: <span class="string">&#34;seed&#34;</span>, Due: time.<span class="function">Now</span>().<span class="function">Add</span>(1 * time.Hour)})
+
+	ctx, cancel := context.<span class="function">WithCancel</span>(context.<span class="function">Background</span>())
+	<span class="keyword">defer</span> <span class="function">cancel</span>()
+
+	cfg := client.<span class="type">SubscribeConfig</span>{
+		Ctx:     ctx,
+		<span class="type">Server</span>:  client.<span class="type">Server</span>{Protocol: <span class="string">&#34;ws&#34;</span>, Host: server.Address},
+		Silence: <span class="keyword">true</span>,
+	}
+
+	<span class="keyword">go</span> client.SubscribeList[<span class="type">Todo</span>](cfg, <span class="string">&#34;todos/*&#34;</span>, client.<span class="type">SubscribeListEvents</span>[<span class="type">Todo</span>]{
+		OnMessage: <span class="keyword">func</span>(items []client.<span class="type">Meta</span>[<span class="type">Todo</span>]) {
+			fmt.<span class="function">Println</span>(<span class="string">&#34;list size:&#34;</span>, <span class="function">len</span>(items))
+			<span class="keyword">for</span> i, it := <span class="keyword">range</span> items {
+				fmt.<span class="function">Printf</span>(<span class="string">&#34;%d. %s (due: %v)\n&#34;</span>, i+1, it.Data.Task, it.Data.Due)
+			}
+		},
+		OnError: <span class="keyword">func</span>(err <span class="type">error</span>) {
+			fmt.<span class="function">Println</span>(<span class="string">&#34;connection <span class="type">error</span>:&#34;</span>, err)
+		},
+	})
+
+	<span class="comment">// Produce updates</span>
+	time.<span class="function">Sleep</span>(50 * time.Millisecond)
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;todos/*&#34;</span>, <span class="type">Todo</span>{Task: <span class="string">&#34;another&#34;</span>, Due: time.<span class="function">Now</span>().<span class="function">Add</span>(2 * time.Hour)})
+
+	time.<span class="function">Sleep</span>(300 * time.Millisecond)
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>06 - WebSocket Subscribe Single</h4>
+            <p>Real-time subscription to single item paths</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/06_websocket_subscribe_single" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;context&#34;</span>
+	<span class="string">&#34;fmt&#34;</span>
+	<span class="string">&#34;time&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/client&#34;</span>
+)
+
+<span class="keyword">type</span> <span class="type">Todo</span> <span class="keyword">struct</span> {
+	Task      string    <span class="string">`json:<span class="string">&#34;task&#34;</span>`</span>
+	Completed <span class="type">bool</span>      <span class="string">`json:<span class="string">&#34;completed&#34;</span>`</span>
+	Due       time.Time <span class="string">`json:<span class="string">&#34;due&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Start server (for demo)</span>
+	server := &amp;ooo.<span class="type">Server</span>{Silence: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;localhost:0&#34;</span>)
+	<span class="keyword">defer</span> server.<span class="function">Close</span>(<span class="keyword">nil</span>)
+
+	ctx, cancel := context.<span class="function">WithCancel</span>(context.<span class="function">Background</span>())
+	<span class="keyword">defer</span> <span class="function">cancel</span>()
+
+	cfg := client.<span class="type">SubscribeConfig</span>{
+		Ctx:    ctx,
+		<span class="type">Server</span>: client.<span class="type">Server</span>{Protocol: <span class="string">&#34;ws&#34;</span>, Host: server.Address},
+	}
+
+	<span class="comment">// Ensure path exists</span>
+	ooo.<span class="function">Set</span>(server, <span class="string">&#34;todo&#34;</span>, <span class="type">Todo</span>{Task: <span class="string">&#34;one&#34;</span>, Due: time.<span class="function">Now</span>().<span class="function">Add</span>(24 * time.Hour)})
+
+	<span class="keyword">go</span> client.Subscribe[<span class="type">Todo</span>](cfg, <span class="string">&#34;todo&#34;</span>, client.SubscribeEvents[<span class="type">Todo</span>]{
+		OnMessage: <span class="keyword">func</span>(item client.<span class="type">Meta</span>[<span class="type">Todo</span>]) {
+			fmt.<span class="function">Println</span>(<span class="string">&#34;current todo:&#34;</span>, item.Data.Task)
+		},
+		OnError: <span class="keyword">func</span>(err <span class="type">error</span>) {
+			fmt.<span class="function">Println</span>(<span class="string">&#34;connection <span class="type">error</span>:&#34;</span>, err)
+		},
+	})
+
+	<span class="comment">// Update the item to trigger a message</span>
+	time.<span class="function">Sleep</span>(50 * time.Millisecond)
+	ooo.<span class="function">Set</span>(server, <span class="string">&#34;todo&#34;</span>, <span class="type">Todo</span>{Task: <span class="string">&#34;updated&#34;</span>, Due: time.<span class="function">Now</span>().<span class="function">Add</span>(48 * time.Hour)})
+
+	time.<span class="function">Sleep</span>(300 * time.Millisecond)
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>07 - WebSocket Subscribe Multiple</h4>
+            <p>Subscribe to multiple list paths with different types using WaitGroup synchronization</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/07_websocket_subscribe_multiple" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;context&#34;</span>
+	<span class="string">&#34;fmt&#34;</span>
+	<span class="string">&#34;sync&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/client&#34;</span>
+)
+
+<span class="keyword">type</span> Product <span class="keyword">struct</span> {
+	ID    <span class="type">int</span>    <span class="string">`json:<span class="string">&#34;id&#34;</span>`</span>
+	Name  string <span class="string">`json:<span class="string">&#34;name&#34;</span>`</span>
+	Price <span class="type">int</span>    <span class="string">`json:<span class="string">&#34;price&#34;</span>`</span>
+}
+
+<span class="keyword">type</span> Order <span class="keyword">struct</span> {
+	ID        <span class="type">int</span> <span class="string">`json:<span class="string">&#34;id&#34;</span>`</span>
+	ProductID <span class="type">int</span> <span class="string">`json:<span class="string">&#34;product_id&#34;</span>`</span>
+	Quantity  <span class="type">int</span> <span class="string">`json:<span class="string">&#34;quantity&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Start server for demo</span>
+	server := &amp;ooo.<span class="type">Server</span>{Silence: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;localhost:0&#34;</span>)
+	<span class="keyword">defer</span> server.<span class="function">Close</span>(<span class="keyword">nil</span>)
+
+	ctx, cancel := context.<span class="function">WithCancel</span>(context.<span class="function">Background</span>())
+	<span class="keyword">defer</span> <span class="function">cancel</span>()
+
+	cfg := client.<span class="type">SubscribeConfig</span>{
+		Ctx:     ctx,
+		<span class="type">Server</span>:  client.<span class="type">Server</span>{Protocol: <span class="string">&#34;ws&#34;</span>, Host: server.Address},
+		Silence: <span class="keyword">true</span>,
+	}
+
+	<span class="comment">// Use WaitGroup to synchronize async operations</span>
+	<span class="keyword">var</span> wg sync.WaitGroup
+	wg.<span class="function">Add</span>(3) <span class="comment">// Expect 3 updates</span>
+
+	<span class="keyword">go</span> client.<span class="function">SubscribeMultipleList2</span>(
+		cfg,
+		[2]string{<span class="string">&#34;products/*&#34;</span>, <span class="string">&#34;orders/*&#34;</span>},
+		client.SubscribeMultipleList2Events[Product, Order]{
+			OnMessage: <span class="keyword">func</span>(products client.MultiState[Product], orders client.MultiState[Order]) {
+				<span class="comment">// Called when either subscription updates</span>
+				<span class="comment">// Use .Updated to check which one changed</span>
+				<span class="keyword">if</span> products.Updated {
+					fmt.<span class="function">Println</span>(<span class="string">&#34;products updated:&#34;</span>, <span class="function">len</span>(products.Data))
+					wg.<span class="function">Done</span>()
+				}
+				<span class="keyword">if</span> orders.Updated {
+					fmt.<span class="function">Println</span>(<span class="string">&#34;orders updated:&#34;</span>, <span class="function">len</span>(orders.Data))
+					wg.<span class="function">Done</span>()
+				}
+			},
+			OnError: <span class="keyword">func</span>(productsErr, ordersErr <span class="type">error</span>) {
+				<span class="keyword">if</span> productsErr != <span class="keyword">nil</span> {
+					fmt.<span class="function">Println</span>(<span class="string">&#34;products <span class="type">error</span>:&#34;</span>, productsErr)
+				}
+				<span class="keyword">if</span> ordersErr != <span class="keyword">nil</span> {
+					fmt.<span class="function">Println</span>(<span class="string">&#34;orders <span class="type">error</span>:&#34;</span>, ordersErr)
+				}
+			},
+		},
+	)
+
+	<span class="comment">// Create some data - updates trigger OnMessage callbacks</span>
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;products/*&#34;</span>, Product{ID: 1, Name: <span class="string">&#34;Widget&#34;</span>, Price: 100})
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;orders/*&#34;</span>, Order{ID: 1, ProductID: 1, Quantity: 5})
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;products/*&#34;</span>, Product{ID: 2, Name: <span class="string">&#34;Gadget&#34;</span>, Price: 200})
+
+	wg.<span class="function">Wait</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>08 - Remote I/O Operations</h4>
+            <p>HTTP client operations with RemoteGet, RemoteSet, RemotePush, RemoteDelete</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/08_remote_io_operations" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;fmt&#34;</span>
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;net/http&#34;</span>
+	<span class="string">&#34;time&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/io&#34;</span>
+)
+
+<span class="keyword">type</span> <span class="type">Todo</span> <span class="keyword">struct</span> {
+	Task      string    <span class="string">`json:<span class="string">&#34;task&#34;</span>`</span>
+	Completed <span class="type">bool</span>      <span class="string">`json:<span class="string">&#34;completed&#34;</span>`</span>
+	Due       time.Time <span class="string">`json:<span class="string">&#34;due&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Start a local server for testing</span>
+	server := &amp;ooo.<span class="type">Server</span>{Silence: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;localhost:0&#34;</span>)
+	<span class="keyword">defer</span> server.<span class="function">Close</span>(<span class="keyword">nil</span>)
+
+	<span class="comment">// Create a remote config</span>
+	cfg := io.<span class="type">RemoteConfig</span>{
+		<span class="type">Client</span>: &amp;http.<span class="type">Client</span>{Timeout: 10 * time.Second},
+		Host:   server.Address,
+		SSL:    <span class="keyword">false</span>, <span class="comment">// set to true for HTTPS</span>
+	}
+
+	<span class="comment">// RemoteSet - create/update a single item</span>
+	err := io.<span class="function">RemoteSet</span>(cfg, <span class="string">&#34;config&#34;</span>, <span class="keyword">map</span>[string]string{<span class="string">&#34;theme&#34;</span>: <span class="string">&#34;dark&#34;</span>})
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Println</span>(<span class="string">&#34;Set config successfully&#34;</span>)
+
+	<span class="comment">// RemoteGet - retrieve a single item</span>
+	config, err := io.RemoteGet[<span class="keyword">map</span>[string]string](cfg, <span class="string">&#34;config&#34;</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Printf</span>(<span class="string">&#34;Got config: %+v\n&#34;</span>, config.Data)
+
+	<span class="comment">// RemotePush - add items to a list</span>
+	err = io.<span class="function">RemotePush</span>(cfg, <span class="string">&#34;todos/*&#34;</span>, <span class="type">Todo</span>{
+		Task:      <span class="string">&#34;First task&#34;</span>,
+		Completed: <span class="keyword">false</span>,
+		Due:       time.<span class="function">Now</span>().<span class="function">Add</span>(24 * time.Hour),
+	})
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Println</span>(<span class="string">&#34;Pushed first todo&#34;</span>)
+
+	err = io.<span class="function">RemotePush</span>(cfg, <span class="string">&#34;todos/*&#34;</span>, <span class="type">Todo</span>{
+		Task:      <span class="string">&#34;Second task&#34;</span>,
+		Completed: <span class="keyword">false</span>,
+		Due:       time.<span class="function">Now</span>().<span class="function">Add</span>(48 * time.Hour),
+	})
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Println</span>(<span class="string">&#34;Pushed second todo&#34;</span>)
+
+	<span class="comment">// RemoteGetList - retrieve all items from a list</span>
+	todos, err := io.RemoteGetList[<span class="type">Todo</span>](cfg, <span class="string">&#34;todos/*&#34;</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Printf</span>(<span class="string">&#34;Got %d todos:\n&#34;</span>, <span class="function">len</span>(todos))
+	<span class="keyword">for</span> i, todo := <span class="keyword">range</span> todos {
+		fmt.<span class="function">Printf</span>(<span class="string">&#34;  %d. %s (due: %v)\n&#34;</span>, i+1, todo.Data.Task, todo.Data.Due)
+	}
+
+	<span class="comment">// RemoteDelete - delete an item</span>
+	err = io.<span class="function">RemoteDelete</span>(cfg, <span class="string">&#34;config&#34;</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	fmt.<span class="function">Println</span>(<span class="string">&#34;Deleted config&#34;</span>)
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>09 - Persistent Storage with Ko</h4>
+            <p>LevelDB-backed persistent storage using the ko package</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/09_persistent_storage_ko" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="comment">// To use: go get github.com/benitogf/ko</span>
+
+<span class="comment">//</span>
+<span class="comment">// Requires: go get github.com/benitogf/ko</span>
+<span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ko&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/storage&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Create persistent storage with LevelDB backend</span>
+	store := &amp;ko.<span class="type">Storage</span>{<span class="type">Path</span>: <span class="string">&#34;./data&#34;</span>}
+	err := store.<span class="function">Start</span>([]string{}, <span class="keyword">nil</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+
+	<span class="comment">// Consume storage broadcast channel (required)</span>
+	<span class="keyword">go</span> storage.<span class="function">WatchStorageNoop</span>(store)
+
+	<span class="comment">// Create server with persistent storage</span>
+	server := ooo.<span class="type">Server</span>{
+		<span class="type">Storage</span>: store,
+	}
+
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;<span class="type">Server</span> running with persistent storage at ./data&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>10 - JWT Authentication</h4>
+            <p>JWT-based authentication using the auth package</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/10_jwt_auth" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="comment">// To use: go get github.com/benitogf/auth github.com/benitogf/ko</span>
+
+<span class="comment">//</span>
+<span class="comment">// Requires: go get github.com/benitogf/auth</span>
+<span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;net/http&#34;</span>
+	<span class="string">&#34;time&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/auth&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ko&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/storage&#34;</span>
+	<span class="string">&#34;github.com/gorilla/mux&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// Auth storage for users</span>
+	authStore := &amp;ko.<span class="type">Storage</span>{<span class="type">Path</span>: <span class="string">&#34;./auth_data&#34;</span>}
+	err := authStore.<span class="function">Start</span>([]string{}, <span class="keyword">nil</span>)
+	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+	<span class="keyword">go</span> storage.<span class="function">WatchStorageNoop</span>(authStore)
+
+	<span class="comment">// Create JWT auth with 10 minute token expiry</span>
+	tokenAuth := auth.<span class="function">New</span>(
+		auth.<span class="function">NewJwtStore</span>(<span class="string">&#34;your-secret-key&#34;</span>, time.Minute*10),
+		authStore,
+	)
+
+	<span class="comment">// Create server with static mode</span>
+	server := ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+
+	<span class="comment">// Audit middleware - check JWT for protected routes</span>
+	server.Audit = <span class="keyword">func</span>(r *http.<span class="type">Request</span>) <span class="type">bool</span> {
+		<span class="comment">// Public routes</span>
+		<span class="keyword">if</span> r.URL.<span class="type">Path</span> == <span class="string">&#34;/register&#34;</span> || r.URL.<span class="type">Path</span> == <span class="string">&#34;/authorize&#34;</span> {
+			<span class="keyword">return</span> <span class="keyword">true</span>
+		}
+		<span class="comment">// Protected routes require valid token</span>
+		<span class="keyword">return</span> tokenAuth.<span class="function">Verify</span>(r)
+	}
+
+	<span class="comment">// Enable data routes</span>
+	server.<span class="function">OpenFilter</span>(<span class="string">&#34;data/*&#34;</span>)
+
+	<span class="comment">// Add auth routes (/register, /authorize, /verify)</span>
+	server.Router = mux.<span class="function">NewRouter</span>()
+	tokenAuth.<span class="function">Router</span>(&amp;server)
+
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;<span class="type">Server</span> running with JWT auth&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;POST /register - register user&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;POST /authorize - login and get token&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;GET /data/* - protected route (requires token)&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>11 - Limit Filter</h4>
+            <p>Capped collections with automatic cleanup of oldest entries</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/11_limit_filter" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+
+	<span class="comment">// Keep only the 100 most recent log entries</span>
+	<span class="comment">// When a new entry is added and count &gt; 100, oldest is deleted</span>
+	server.<span class="function">LimitFilter</span>(<span class="string">&#34;logs/*&#34;</span>, 100)
+
+	<span class="comment">// Keep only 50 most recent notifications per user</span>
+	server.<span class="function">LimitFilter</span>(<span class="string">&#34;notifications/*&#34;</span>, 50)
+
+	log.<span class="function">Println</span>(<span class="string">&#34;<span class="type">Server</span> running with limit filters&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;POST /logs/* - capped at 100 entries&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;POST /notifications/* - capped at 50 entries&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>12 - Limit Filter with Validation</h4>
+            <p>Capped collections with strict schema validation on writes</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/12_limit_filter_with_validation" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;encoding/json&#34;</span>
+	<span class="string">&#34;errors&#34;</span>
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;strings&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+)
+
+<span class="comment">// LogEntry defines the exact schema for log entries</span>
+<span class="keyword">type</span> <span class="type">LogEntry</span> <span class="keyword">struct</span> {
+	Level   string <span class="string">`json:<span class="string">&#34;level&#34;</span>`</span>
+	Message string <span class="string">`json:<span class="string">&#34;message&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+
+	<span class="comment">// Add write validation that enforces strict schema</span>
+	server.<span class="function">WriteFilter</span>(<span class="string">&#34;logs/*&#34;</span>, <span class="keyword">func</span>(index string, data json.<span class="type">RawMessage</span>) (json.<span class="type">RawMessage</span>, <span class="type">error</span>) {
+		<span class="comment">// Use DisallowUnknownFields to reject extra fields</span>
+		decoder := json.<span class="function">NewDecoder</span>(strings.<span class="function">NewReader</span>(<span class="function">string</span>(data)))
+		decoder.<span class="function">DisallowUnknownFields</span>()
+
+		<span class="keyword">var</span> entry <span class="type">LogEntry</span>
+		<span class="keyword">if</span> err := decoder.<span class="function">Decode</span>(&amp;entry); err != <span class="keyword">nil</span> {
+			<span class="keyword">return</span> <span class="keyword">nil</span>, errors.<span class="function">New</span>(<span class="string">&#34;invalid schema: &#34;</span> + err.<span class="function">Error</span>())
+		}
+
+		<span class="comment">// Validate required fields</span>
+		<span class="keyword">if</span> entry.Level == <span class="string">&#34;&#34;</span> {
+			<span class="keyword">return</span> <span class="keyword">nil</span>, errors.<span class="function">New</span>(<span class="string">&#34;level is required&#34;</span>)
+		}
+		<span class="keyword">if</span> entry.Message == <span class="string">&#34;&#34;</span> {
+			<span class="keyword">return</span> <span class="keyword">nil</span>, errors.<span class="function">New</span>(<span class="string">&#34;message is required&#34;</span>)
+		}
+
+		<span class="comment">// Validate level values</span>
+		validLevels := <span class="keyword">map</span>[string]<span class="type">bool</span>{<span class="string">&#34;debug&#34;</span>: <span class="keyword">true</span>, <span class="string">&#34;info&#34;</span>: <span class="keyword">true</span>, <span class="string">&#34;warn&#34;</span>: <span class="keyword">true</span>, <span class="string">&#34;<span class="type">error</span>&#34;</span>: <span class="keyword">true</span>}
+		<span class="keyword">if</span> !validLevels[entry.Level] {
+			<span class="keyword">return</span> <span class="keyword">nil</span>, errors.<span class="function">New</span>(<span class="string">&#34;level must be one of: debug, info, warn, <span class="type">error</span>&#34;</span>)
+		}
+
+		<span class="keyword">return</span> data, <span class="keyword">nil</span>
+	})
+
+	<span class="comment">// Add limit filter to cap entries</span>
+	server.<span class="function">LimitFilter</span>(<span class="string">&#34;logs/*&#34;</span>, 100)
+
+	log.<span class="function">Println</span>(<span class="string">&#34;<span class="type">Server</span> running with validated limit filter&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;POST /logs/* - validates schema and caps at 100 entries&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;Valid request:&#34;</span>)
+	log.<span class="function">Println</span>(`  curl -X POST http:<span class="comment">//localhost:8800/logs/1 -d &#39;{&#34;level&#34;:&#34;info&#34;,&#34;message&#34;:&#34;test&#34;}&#39;`)</span>
+	log.<span class="function">Println</span>(<span class="string">&#34;&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;Invalid requests (will be rejected):&#34;</span>)
+	log.<span class="function">Println</span>(`  curl -X POST http:<span class="comment">//localhost:8800/logs/1 -d &#39;{&#34;level&#34;:&#34;info&#34;}&#39;  # missing message`)</span>
+	log.<span class="function">Println</span>(`  curl -X POST http:<span class="comment">//localhost:8800/logs/1 -d &#39;{&#34;level&#34;:&#34;info&#34;,&#34;message&#34;:&#34;test&#34;,&#34;extra&#34;:&#34;field&#34;}&#39;  # extra field`)</span>
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>13 - Custom Endpoints with nopog</h4>
+            <p>PostgreSQL storage with custom HTTP endpoints, JSONB field queries, and range queries by timestamp.</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/13_custom_endpoints_nopog" target="_blank" onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              Copy
+            </button>
+          </div>
+          <pre><code><span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;encoding/json&#34;</span>
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;net/http&#34;</span>
+	<span class="string">&#34;strconv&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/nopog&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/key&#34;</span>
+	<span class="string">&#34;github.com/gorilla/mux&#34;</span>
+)
+
+<span class="comment">// Product represents an item in the catalog</span>
+<span class="keyword">type</span> Product <span class="keyword">struct</span> {
+	Name     string <span class="string">`json:<span class="string">&#34;name&#34;</span>`</span>
+	Category string <span class="string">`json:<span class="string">&#34;category&#34;</span>`</span>
+	Price    <span class="type">int</span>    <span class="string">`json:<span class="string">&#34;price&#34;</span>`</span>
+}
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	<span class="comment">// PostgreSQL storage for large-scale persistent data</span>
+	db := &amp;nopog.<span class="type">Storage</span>{
+		Name:     <span class="string">&#34;mydb&#34;</span>,
+		Host:     <span class="string">&#34;localhost&#34;</span>,
+		User:     <span class="string">&#34;postgres&#34;</span>,
+		Password: <span class="string">&#34;postgres&#34;</span>,
+	}
+	<span class="keyword">if</span> err := db.<span class="function">Start</span>(); err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(<span class="string">&#34;Failed to connect:&#34;</span>, err)
+	}
+	<span class="keyword">defer</span> db.<span class="function">Close</span>()
+
+	<span class="comment">// Create table (idempotent)</span>
+	<span class="keyword">if</span> err := db.<span class="function">CreateTable</span>(<span class="string">&#34;catalog&#34;</span>); err != <span class="keyword">nil</span> {
+		log.<span class="function">Fatal</span>(err)
+	}
+
+	server := ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+
+	<span class="comment">// GET /api/products - List all products</span>
+	<span class="comment">// Uses single glob pattern (fast prefix matching)</span>
+	server.Router.<span class="function">HandleFunc</span>(<span class="string">&#34;/api/products&#34;</span>, <span class="keyword">func</span>(w http.ResponseWriter, r *http.<span class="type">Request</span>) {
+		results, err := db.<span class="function">Get</span>(<span class="string">&#34;catalog&#34;</span>, <span class="string">&#34;products/*&#34;</span>)
+		<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+			http.<span class="function">Error</span>(w, err.<span class="function">Error</span>(), 500)
+			<span class="keyword">return</span>
+		}
+		json.<span class="function">NewEncoder</span>(w).<span class="function">Encode</span>(results)
+	}).<span class="function">Methods</span>(<span class="string">&#34;GET&#34;</span>)
+
+	<span class="comment">// GET /api/products/search?category=electronics</span>
+	<span class="comment">// Uses JSONB field query for efficient filtering</span>
+	server.Router.<span class="function">HandleFunc</span>(<span class="string">&#34;/api/products/search&#34;</span>, <span class="keyword">func</span>(w http.ResponseWriter, r *http.<span class="type">Request</span>) {
+		category := r.URL.<span class="function">Query</span>().<span class="function">Get</span>(<span class="string">&#34;category&#34;</span>)
+		results, err := db.<span class="function">GetByField</span>(<span class="string">&#34;catalog&#34;</span>, <span class="string">&#34;products/*&#34;</span>, <span class="string">&#34;category&#34;</span>, category)
+		<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+			http.<span class="function">Error</span>(w, err.<span class="function">Error</span>(), 500)
+			<span class="keyword">return</span>
+		}
+		json.<span class="function">NewEncoder</span>(w).<span class="function">Encode</span>(results)
+	}).<span class="function">Methods</span>(<span class="string">&#34;GET&#34;</span>)
+
+	<span class="comment">// GET /api/products/recent?from=1234567890&amp;to=1234567899&amp;limit=10</span>
+	<span class="comment">// Range query by timestamp (microseconds)</span>
+	server.Router.<span class="function">HandleFunc</span>(<span class="string">&#34;/api/products/recent&#34;</span>, <span class="keyword">func</span>(w http.ResponseWriter, r *http.<span class="type">Request</span>) {
+		from, _ := strconv.<span class="function">ParseInt</span>(r.URL.<span class="function">Query</span>().<span class="function">Get</span>(<span class="string">&#34;from&#34;</span>), 10, 64)
+		to, _ := strconv.<span class="function">ParseInt</span>(r.URL.<span class="function">Query</span>().<span class="function">Get</span>(<span class="string">&#34;to&#34;</span>), 10, 64)
+		limit, _ := strconv.<span class="function">Atoi</span>(r.URL.<span class="function">Query</span>().<span class="function">Get</span>(<span class="string">&#34;limit&#34;</span>))
+		<span class="keyword">if</span> limit == 0 {
+			limit = 10
+		}
+		results, err := db.<span class="function">GetNRange</span>(<span class="string">&#34;catalog&#34;</span>, <span class="string">&#34;products/*&#34;</span>, from, to, limit)
+		<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+			http.<span class="function">Error</span>(w, err.<span class="function">Error</span>(), 500)
+			<span class="keyword">return</span>
+		}
+		json.<span class="function">NewEncoder</span>(w).<span class="function">Encode</span>(results)
+	}).<span class="function">Methods</span>(<span class="string">&#34;GET&#34;</span>)
+
+	<span class="comment">// POST /api/products - Create a product</span>
+	<span class="comment">// Uses key.Build to generate a UUID for the glob pattern (safe key)</span>
+	server.Router.<span class="function">HandleFunc</span>(<span class="string">&#34;/api/products&#34;</span>, <span class="keyword">func</span>(w http.ResponseWriter, r *http.<span class="type">Request</span>) {
+		<span class="keyword">var</span> p Product
+		<span class="keyword">if</span> err := json.<span class="function">NewDecoder</span>(r.Body).<span class="function">Decode</span>(&amp;p); err != <span class="keyword">nil</span> {
+			http.<span class="function">Error</span>(w, err.<span class="function">Error</span>(), 400)
+			<span class="keyword">return</span>
+		}
+		data, _ := json.<span class="function">Marshal</span>(p)
+		<span class="comment">// key.Build generates a UUID - safe for glob patterns regardless of user input</span>
+		productKey := key.<span class="function">Build</span>(<span class="string">&#34;products/*&#34;</span>)
+		ts, err := db.<span class="function">Set</span>(<span class="string">&#34;catalog&#34;</span>, productKey, <span class="function">string</span>(data))
+		<span class="keyword">if</span> err != <span class="keyword">nil</span> {
+			http.<span class="function">Error</span>(w, err.<span class="function">Error</span>(), 500)
+			<span class="keyword">return</span>
+		}
+		w.<span class="function">WriteHeader</span>(http.StatusCreated)
+		json.<span class="function">NewEncoder</span>(w).<span class="function">Encode</span>(<span class="keyword">map</span>[string]any{<span class="string">&#34;created&#34;</span>: ts, <span class="string">&#34;key&#34;</span>: productKey})
+	}).<span class="function">Methods</span>(<span class="string">&#34;POST&#34;</span>)
+
+	<span class="comment">// DELETE /api/products/{id} - Delete by UUID</span>
+	server.Router.<span class="function">HandleFunc</span>(<span class="string">&#34;/api/products/{id}&#34;</span>, <span class="keyword">func</span>(w http.ResponseWriter, r *http.<span class="type">Request</span>) {
+		id := mux.<span class="function">Vars</span>(r)[<span class="string">&#34;id&#34;</span>]
+		<span class="keyword">if</span> err := db.<span class="function">Del</span>(<span class="string">&#34;catalog&#34;</span>, <span class="string">&#34;products/&#34;</span>+id); err != <span class="keyword">nil</span> {
+			http.<span class="function">Error</span>(w, err.<span class="function">Error</span>(), 500)
+			<span class="keyword">return</span>
+		}
+		w.<span class="function">WriteHeader</span>(http.StatusNoContent)
+	}).<span class="function">Methods</span>(<span class="string">&#34;DELETE&#34;</span>)
+
+	log.<span class="function">Println</span>(<span class="string">&#34;<span class="type">Server</span> running on :8800&#34;</span>)
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+        </div>
+      </div>
+
+<!-- SAMPLES_END -->
+
+      <p style="margin-top: 24px; color: #8ba3b8;">
+        See all samples including ecosystem integrations (ko, auth, nopog) on <a href="https://github.com/benitogf/ooo/tree/master/samples" target="_blank">GitHub</a>.
+      </p>
+    </div>
+  </section>
+
+  <section id="ecosystem" class="section" style="background: #0f1923;">
+    <div class="container">
+      <h2 class="section-title">Ecosystem</h2>
+      <p class="section-subtitle">Related projects and integrations</p>
+      
+      <div class="ecosystem-grid">
+        <a href="https://github.com/benitogf/ooo" target="_blank" class="ecosystem-card">
+          <h4>ooo</h4>
+          <p>Core server - state management with WebSocket/REST API.</p>
+        </a>
+        <a href="https://github.com/benitogf/ko" target="_blank" class="ecosystem-card">
+          <h4>ko</h4>
+          <p>Persistent storage adapter using LevelDB.</p>
+        </a>
+        <a href="https://github.com/benitogf/ooo-client" target="_blank" class="ecosystem-card">
+          <h4>ooo-client</h4>
+          <p>JavaScript client with reconnecting WebSocket.</p>
+        </a>
+        <a href="https://github.com/benitogf/auth" target="_blank" class="ecosystem-card">
+          <h4>auth</h4>
+          <p>JWT authentication middleware.</p>
+        </a>
+        <a href="https://github.com/benitogf/mono" target="_blank" class="ecosystem-card">
+          <h4>mono</h4>
+          <p>Full-stack boilerplate (Go + React).</p>
+        </a>
+        <a href="https://github.com/benitogf/nopog" target="_blank" class="ecosystem-card">
+          <h4>nopog</h4>
+          <p>PostgreSQL adapter for large-scale storage.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="footer-links">
+      <a href="https://github.com/benitogf/ooo" target="_blank">GitHub</a>
+      <a href="https://github.com/benitogf/ooo/tree/master/samples" target="_blank">Samples</a>
+      <a href="https://pkg.go.dev/github.com/benitogf/ooo" target="_blank">Go Docs</a>
+    </div>
+    <p>MIT License &copy; 2024</p>
+  </footer>
+
+  <script>
+    function copyCode(btn) {
+      const codeBlock = btn.closest('.code-example, .sample-code').querySelector('pre code');
+      const text = codeBlock.textContent;
+      
+      navigator.clipboard.writeText(text).then(() => {
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
+        
+        setTimeout(() => {
+          btn.classList.remove('copied');
+          btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';
+        }, 2000);
+      });
+    }
+  </script>
+</body>
+</html>

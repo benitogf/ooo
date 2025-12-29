@@ -12,6 +12,25 @@ import (
 //go:embed all:static
 var staticFiles embed.FS
 
+// ReservedPaths are paths used by the UI that cannot be used as filter paths.
+// This list is exported so the ooo core can check for conflicts.
+var ReservedPaths = []string{
+	"vanilla-jsoneditor.js",
+	"react.min.js",
+	"react-dom.min.js",
+	"babel.min.js",
+	"styles.css",
+	"ooo-client.js",
+	"react-json-view.js",
+	"api.js",
+	"favicon.ico",
+	"favicon.png",
+	"favicon.svg",
+	"logo.jpg",
+	"logo.png",
+	"components",
+}
+
 // ServerInfo contains server configuration exposed to the explorer
 type ServerInfo struct {
 	Name              string        `json:"name"`

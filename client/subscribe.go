@@ -38,6 +38,13 @@ var (
 	ErrGlobRequired      = errors.New("client: glob pattern required for SubscribeList, use Subscribe")
 )
 
+// Server holds the protocol and host for WebSocket connections.
+// This type is shared across all subscription functions.
+type Server struct {
+	Protocol string
+	Host     string
+}
+
 type Meta[T any] struct {
 	Created int64  `json:"created"`
 	Updated int64  `json:"updated"`
@@ -60,12 +67,11 @@ type RetryConfig struct {
 }
 
 // SubscribeConfig holds connection configuration for Subscribe.
-// Required fields: Ctx, Protocol, Host.
+// Required fields: Ctx, Server.
 // Optional fields: Header, HandshakeTimeout, Retry, Silence.
 type SubscribeConfig struct {
 	Ctx              context.Context
-	Protocol         string
-	Host             string
+	Server           Server
 	Header           http.Header
 	HandshakeTimeout time.Duration
 	Retry            RetryConfig
@@ -78,10 +84,10 @@ func (c *SubscribeConfig) Validate() error {
 	if c.Ctx == nil {
 		return ErrCtxRequired
 	}
-	if c.Protocol == "" {
+	if c.Server.Protocol == "" {
 		return ErrProtocolRequired
 	}
-	if c.Host == "" {
+	if c.Server.Host == "" {
 		return ErrHostRequired
 	}
 	if c.HandshakeTimeout == 0 {
@@ -104,7 +110,7 @@ func (c *SubscribeConfig) Validate() error {
 		c.Retry.MaxThreshold = DefaultMaxRetryThreshold
 	}
 	// Initialize console with host as identifier
-	c.console = coat.NewConsole(c.Host, c.Silence)
+	c.console = coat.NewConsole(c.Server.Host, c.Silence)
 	return nil
 }
 
@@ -155,7 +161,7 @@ type subscribeState[T any] struct {
 
 // logPrefix returns a consistent log prefix for this subscription.
 func (s *subscribeState[T]) logPrefix() string {
-	return "subscribe[" + s.cfg.Host + "/" + s.path + "]"
+	return "subscribe[" + s.cfg.Server.Host + "/" + s.path + "]"
 }
 
 // connect establishes a WebSocket connection.
@@ -293,7 +299,7 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 		cfg:    cfg,
 		path:   path,
 		events: events,
-		wsURL:  url.URL{Scheme: cfg.Protocol, Host: cfg.Host, Path: path},
+		wsURL:  url.URL{Scheme: cfg.Server.Protocol, Host: cfg.Server.Host, Path: path},
 	}
 
 	state.startCloseWatcher()
@@ -330,7 +336,7 @@ type subscribeListState[T any] struct {
 
 // logPrefix returns a consistent log prefix for this subscription.
 func (s *subscribeListState[T]) logPrefix() string {
-	return "subscribeList[" + s.cfg.Host + "/" + s.path + "]"
+	return "subscribeList[" + s.cfg.Server.Host + "/" + s.path + "]"
 }
 
 // connect establishes a WebSocket connection.
@@ -473,7 +479,7 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 		cfg:    cfg,
 		path:   path,
 		events: events,
-		wsURL:  url.URL{Scheme: cfg.Protocol, Host: cfg.Host, Path: path},
+		wsURL:  url.URL{Scheme: cfg.Server.Protocol, Host: cfg.Server.Host, Path: path},
 	}
 
 	state.startCloseWatcher()

@@ -44,10 +44,9 @@ func TestClientList(t *testing.T) {
 
 	wg.Add(1)
 	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:      ctx,
-		Protocol: "ws",
-		Host:     server.Address,
-		Silence:  true,
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: server.Address},
+		Silence: true,
 	}, "devices/*", client.SubscribeListEvents[Device]{
 		OnMessage: func(devices []client.Meta[Device]) {
 			if len(devices) > 0 {
@@ -83,10 +82,9 @@ func TestClientClose(t *testing.T) {
 	go func() {
 		defer exited.Done()
 		client.SubscribeList(client.SubscribeConfig{
-			Ctx:      ctx,
-			Protocol: "ws",
-			Host:     server.Address,
-			Silence:  true,
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
 		}, "devices/*", client.SubscribeListEvents[Device]{
 			OnMessage: func(devices []client.Meta[Device]) {
 				connected.Done()
@@ -115,10 +113,9 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 	go func() {
 		defer exited.Done()
 		client.SubscribeList(client.SubscribeConfig{
-			Ctx:      ctx,
-			Protocol: "ws",
-			Host:     server.Address,
-			Silence:  true,
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
 		}, "devices/*", client.SubscribeListEvents[Device]{
 			OnMessage: func(devices []client.Meta[Device]) {
 				connected.Done()
@@ -149,8 +146,7 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 		defer exited.Done()
 		client.SubscribeList(client.SubscribeConfig{
 			Ctx:              ctx,
-			Protocol:         "ws",
-			Host:             "notAnIP",
+			Server:           client.Server{Protocol: "ws", Host: "notAnIP"},
 			HandshakeTimeout: 10 * time.Millisecond,
 			Silence:          true,
 		}, "devices/*", client.SubscribeListEvents[Device]{
@@ -192,10 +188,9 @@ func TestClientListCallbackCurry(t *testing.T) {
 
 	wg.Add(1)
 	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:      ctx,
-		Protocol: "ws",
-		Host:     server.Address,
-		Silence:  true,
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: server.Address},
+		Silence: true,
 	}, "devices/*", client.SubscribeListEvents[Device]{
 		OnMessage: makeDevicesCallback(),
 	})

@@ -4,21 +4,47 @@
 
 # ooo
 
+<p align="center">
+  <img src="ui-demo.gif" alt="ooo UI demo" width="800" />
+</p>
+
 [![Test](https://github.com/benitogf/ooo/actions/workflows/tests.yml/badge.svg)](https://github.com/benitogf/ooo/actions/workflows/tests.yml)
 
-Zero configuration data persistence and communication layer.
+State management with real-time network access.
 
-Dynamic websocket and restful http service to quickly prototype realtime applications.
+**ooo** provides a fast, zero-configuration In-memory layer for storing and synchronizing application state or settings. It uses an embedded storage engine with optional persistence via [ko](https://github.com/benitogf/ko), and delivers changes to subscribers using [JSON Patch](http://jsonpatch.com) for efficient updates.
 
-## features
+### When to use ooo
 
-- dynamic routing
-- glob pattern routes for lists
-- [patch](http://jsonpatch.com) updates on lists subscriptions
-- version check on subscriptions (no message on version match)
-- restful CRUD service that reflects interactions to real-time subscriptions
-- filtering and audit middleware
-- auto managed timestamps (created, updated)
+- **Application state/settings** that need real-time sync across clients
+- **Prototyping** real-time features quickly
+- **Small to medium datasets** where speed matters more than scale
+
+### When NOT to use ooo
+
+For large-scale data storage (millions of records, complex queries), use a dedicated database like [nopog](https://github.com/benitogf/nopog). You can combine both: ooo for real-time state, nopog for bulk data.
+
+## Ecosystem
+
+| Package | Description |
+|---------|-------------|
+| [ooo](https://github.com/benitogf/ooo) | Core server - in-memory state with WebSocket/REST API |
+| [ko](https://github.com/benitogf/ko) | Persistent storage adapter (LevelDB) |
+| [ooo-client](https://github.com/benitogf/ooo-client) | JavaScript client with reconnecting WebSocket |
+| [auth](https://github.com/benitogf/auth) | JWT authentication middleware |
+| [mono](https://github.com/benitogf/mono) | Full-stack boilerplate (Go + React) |
+| [nopog](https://github.com/benitogf/nopog) | PostgreSQL adapter for large-scale storage |
+
+## Features
+
+- Dynamic routing with glob patterns for collections
+- Real-time subscriptions via WebSocket
+- [JSON Patch](http://jsonpatch.com) updates for efficient sync
+- Version checking (no data sent on version match while reconnecting)
+- RESTful CRUD reflected to subscribers
+- Filtering and audit middleware
+- Auto-managed timestamps (created, updated) with a monotonic clock for consistency on ntp/ptp synchronizations
+- Built-in web UI for data management
 
 ## quickstart
 
@@ -41,9 +67,9 @@ package main
 import "github.com/benitogf/ooo"
 
 func main() {
-  app := ooo.Server{}
-  app.Start("0.0.0.0:8800")
-  app.WaitClose()
+  server := ooo.Server{}
+  server.Start("0.0.0.0:8800")
+  server.WaitClose()
 }
 ```
 
@@ -52,253 +78,156 @@ run the service:
 go run main.go
 ```
 
-# routes
+# API Reference
 
-| method | description | url    |
-| ------------- |:-------------:| -----:|
-| GET | key list | http://{host}:{port} |
-| websocket| clock | ws://{host}:{port} |
-| POST | create/update | http://{host}:{port}/{key} |
-| GET | read | http://{host}:{port}/{key} |
-| DELETE | delete | http://{host}:{port}/{key} |
-| websocket| subscribe | ws://{host}:{port}/{key} |
+### UI & Management
+
+| Method | Description | URL |
+|--------|-------------|-----|
+| GET | Web interface | `http://{host}:{port}/` |
+| GET | List all keys (paginated) | `http://{host}:{port}/?api=keys` |
+| GET | Server info | `http://{host}:{port}/?api=info` |
+| GET | Filter paths | `http://{host}:{port}/?api=filters` |
+| GET | Connection state | `http://{host}:{port}/?api=state` |
+
+#### Keys API Query Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `page` | Page number (1-indexed) | 1 |
+| `limit` | Items per page (max 500) | 50 |
+| `filter` | Filter by prefix or glob pattern | (none) |
+
+### Data Operations
+
+| Method | Description | URL |
+|--------|-------------|-----|
+| POST | Create/Update | `http://{host}:{port}/{key}` |
+| GET | Read | `http://{host}:{port}/{key}` |
+| PATCH | Partial update (JSON Patch) | `http://{host}:{port}/{key}` |
+| DELETE | Delete | `http://{host}:{port}/{key}` |
+
+### WebSocket
+
+| Method | Description | URL |
+|--------|-------------|-----|
+| WS | Server clock | `ws://{host}:{port}` |
+| WS | Subscribe to path | `ws://{host}:{port}/{key}` |
 
 
 # control
 
 ### static routes
 
-Activating this flag will limit the server to process requests defined in read and write filters
+Activating this flag will limit the server to process requests defined by filters
 
 ```golang
-app := ooo.Server{}
-app.Static = true
+server := ooo.Server{}
+server.Static = true
 ```
 
 
-### filters
+### Filters
 
-- Write filters will be called before processing a write operation
-- Read filters will be called before sending the results of a read operation
-- if the static flag is enabled only filtered routes will be available
+Filters control access and transform data. When `Static` mode is enabled, only filtered routes are available.
 
-```golang
-app.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
-  // returning an error will deny the write
-  return data, nil
-})
-app.AfterWriteFilter("books/*", func(index string) {
-  // trigger after a write is done
-  log.Println("wrote data on ", index)
-})
-app.ReadObjectFilter("books/taup", func(index string, data meta.Object) (meta.Object, error) {
-  // returning an error will deny the read
-  return data, nil
-})
-app.DeleteFilter("books/taup", func(key string) (error) {
-  // returning an error will prevent the delete
-  return errors.New("can't delete")
-})
-```
+Paths support glob patterns (`*`) and multi-level globs like `users/*/posts/*`.
 
-### audit
+| Filter | Description |
+|--------|-------------|
+| `OpenFilter` | Enable route (required in static mode) |
+| `WriteFilter` | Transform/validate before write |
+| `AfterWriteFilter` | Callback after write completes |
+| `ReadObjectFilter` | Transform single object on read |
+| `ReadListFilter` | Transform list items on read |
+| `DeleteFilter` | Control delete operations |
+| `LimitFilter` | Maintain max entries in a list (auto-cleanup) |
 
-```golang
-app.Audit = func(r *http.Request) bool {
-  return false // condition to allow access to the resource
-}
-```
-
-### Example: static routes + filters + audit
+#### OpenFilter
 
 ```go
-package main
-
-import (
-    "encoding/json"
-    "errors"
-    "log"
-    "net/http"
-
-    "github.com/benitogf/ooo"
-    "github.com/benitogf/ooo/meta"
-)
-
-type Book struct {
-    Title  string `json:"title"`
-    Author string `json:"author"`
-    Secret string `json:"secret,omitempty"`
-}
-
-func main() {
-    app := ooo.Server{Static: true}
-
-    // Only allow requests that carry a valid API key
-    app.Audit = func(r *http.Request) bool {
-        return r.Header.Get("X-API-Key") == "secret"
-    }
-
-    // Make the list route available while Static mode is enabled
-    app.OpenFilter("books/*")
-    app.OpenFilter("books/locked") // single resource example
-
-    // Sanitize/validate before writes to the list
-    app.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
-        var b Book
-        err := json.Unmarshal(data, &b)
-        if err != nil {
-            return nil, err
-        }
-        if b.Title == "" {
-            return nil, errors.New("title is required")
-        }
-        if b.Author == "" {
-            b.Author = "unknown"
-        }
-        // Persist possibly modified payload
-        out, _ := json.Marshal(b)
-        return out, nil
-    })
-
-    // Log after any write
-    app.AfterWriteFilter("books/*", func(index string) {
-        log.Println("wrote book at", index)
-    })
-
-    // Hide secrets on reads (for lists)
-    app.ReadListFilter("books/*", func(index string, objs []meta.Object) ([]meta.Object, error) {
-        for i := range objs {
-            var b Book
-            json.Unmarshal(objs[i].Data, &b)
-            b.Secret = ""
-            objs[i].Data, _ = json.Marshal(b)
-        }
-        return objs, nil
-    })
-
-    // Prevent deleting a specific resource
-    app.DeleteFilter("books/locked", func(key string) error {
-        return errors.New("this book cannot be deleted")
-    })
-
-    app.Start("0.0.0.0:8800")
-    app.WaitClose()
-}
+// Enable a route (required when Static=true)
+server.OpenFilter("books/*")
 ```
 
-You can try it with curl:
+#### WriteFilter
 
-```bash
-# Create a book (note the X-API-Key header and list path with /*)
-curl -sS -H 'X-API-Key: secret' -H 'Content-Type: application/json' \
-  -d '{"title":"Dune","author":"Frank Herbert","secret":"token"}' \
-  http://localhost:8800/books/*
-
-# Read all books (secrets are removed by the ReadFilter)
-curl -sS -H 'X-API-Key: secret' http://localhost:8800/books/* | jq .
-
-# Attempt a write without the API key (Audit will reject it)
-curl -sS -H 'Content-Type: application/json' \
-  -d '{"title":"NoAuth"}' http://localhost:8800/books/* -i
-
-# Attempt to delete the protected resource
-curl -sS -X DELETE -H 'X-API-Key: secret' http://localhost:8800/books/locked -i
-```
-
-### subscribe events capture
-
-```golang
-// new subscription event
-server.OnSubscribe = func(key string) error {
-  log.Println(key)
-  // returning an error will deny the subscription
-  return nil
-}
-// closing subscription event
-server.OnUnsubscribe = func(key string) {
-  log.Println(key)
-}
-```
-
-### extra routes
-
-```golang
-// Define custom endpoints
-app.Router = mux.NewRouter()
-app.Router.HandleFunc("/test", func(w http.ResponseWriter, r *http.Request) {
-  w.Header().Set("Content-Type", "application/json")
-  fmt.Fprintf(w, "{}")
+```go
+// Validate/transform before write
+server.WriteFilter("books/*", func(index string, data json.RawMessage) (json.RawMessage, error) {
+    // return error to deny, or modified data
+    return data, nil
 })
-app.Start("0.0.0.0:8800")
 ```
 
-### write/read storage api
+#### AfterWriteFilter
 
-```golang
-package main
+```go
+// Callback after write completes
+server.AfterWriteFilter("books/*", func(index string) {
+    log.Println("wrote:", index)
+})
+```
 
-import (
-	"encoding/json"
-	"log"
-	"strconv"
-	"time"
+#### ReadObjectFilter
 
-	"github.com/benitogf/ooo"
-	"github.com/benitogf/ooo/meta"
-)
+```go
+// Transform single object on read
+server.ReadObjectFilter("books/special", func(index string, data meta.Object) (meta.Object, error) {
+    return data, nil
+})
+```
 
-type Game struct {
-	Started int64 `json:"started"`
+#### ReadListFilter
+
+```go
+// Transform list items on read
+server.ReadListFilter("books/*", func(index string, items []meta.Object) ([]meta.Object, error) {
+    return items, nil
+})
+```
+
+#### DeleteFilter
+
+```go
+// Control delete (return error to prevent)
+server.DeleteFilter("books/protected", func(key string) error {
+    return errors.New("cannot delete")
+})
+```
+
+#### LimitFilter
+
+`LimitFilter` is implemented using a `ReadListFilter` (to limit visible items), a noop `WriteFilter` (to allow writes), a `DeleteFilter` (to allow deletes), and an `AfterWriteFilter` (to trigger cleanup). This means it includes open read and write access.
+
+```go
+// Limit list to N most recent entries (auto-deletes oldest)
+server.LimitFilter("logs/*", 100)
+```
+
+### Audit
+
+```go
+server.Audit = func(r *http.Request) bool {
+    // return true to allow, false to deny (401)
+    return r.Header.Get("X-API-Key") == "secret"
 }
+```
 
-// not good practice, for illustration purposes only
-// handle errors responsably :)
-func panicHandle(err error) {
-	if err != nil {
-		panic(err)
-	}
-}
+### Custom Routes
 
-func main() {
-	// create a static server
-	server := ooo.Server{
-		Static: true,
-	}
-	// define the path so it's available throug http/ws
-	server.OpenFilter("game")
-
-	// start the server/storage (default to memory storage)
-	server.Start("0.0.0.0:8800")
-
-	// write
-	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
-	index, err := server.Storage.Set("game", json.RawMessage(`{"started": `+timestamp+`}`))
-	panicHandle(err)
-	log.Println("stored in", index)
-
-	// read
-	data, err := server.Storage.Get("game")
-	panicHandle(err)
-	dataObject, err := meta.Decode(data)
-	panicHandle(err)
-	log.Println("created", dataObject.Created)
-	log.Println("updated", dataObject.Updated)
-	log.Println("data", string(dataObject.Data))
-
-	// parse json to struct
-	game := Game{}
-	err = json.Unmarshal(dataObject.Data, &game)
-	panicHandle(err)
-	log.Println("started", game.Started)
-
-	// close server handler
-	server.WaitClose()
-}
+```go
+server.Router = mux.NewRouter()
+server.Router.HandleFunc("/custom", func(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    fmt.Fprintf(w, `{"status":"ok"}`)
+})
+server.Start("0.0.0.0:8800")
 ```
 
 ## I/O Operations
 
-The `ooo` package provides functions for working with data through the OOO server. These functions handle JSON serialization/deserialization and provide a more convenient way to work with your data structures.
+These functions handle JSON serialization/deserialization and provide a more convenient way to work with your data structures than using storage api directly.
 
 ### Basic Operations
 
@@ -306,7 +235,7 @@ The `ooo` package provides functions for working with data through the OOO serve
 
 ```go
 // Get retrieves a single item from the specified path
-item, err := io.Get[YourType](server, "path/to/item")
+item, err := ooo.Get[YourType](server, "path/to/item")
 if err != nil {
     log.Fatal(err)
 }
@@ -317,7 +246,7 @@ fmt.Printf("Item: %+v\n", item.Data)
 
 ```go
 // GetList retrieves all items from a list path (ends with "/*")
-items, err := io.GetList[YourType](server, "path/to/items/*")
+items, err := ooo.GetList[YourType](server, "path/to/items/*")
 if err != nil {
     log.Fatal(err)
 }
@@ -330,7 +259,7 @@ for _, item := range items {
 
 ```go
 // Set creates or updates an item at the specified path
-err := io.Set(server, "path/to/item", YourType{
+err := ooo.Set(server, "path/to/item", YourType{
     Field1: "value1",
     Field2: "value2",
 })
@@ -343,10 +272,23 @@ if err != nil {
 
 ```go
 // Push adds an item to a list (path must end with "/*")
-err := io.Push(server, "path/to/items/*", YourType{
+index, err := ooo.Push(server, "path/to/items/*", YourType{
     Field1: "new item",
     Field2: "another value",
 })
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Println("Created at:", index)
+```
+
+#### Delete Item(s)
+
+```go
+// Delete removes item(s) at the specified path
+// For single item: ooo.Delete(server, "path/to/item")
+// For glob pattern: ooo.Delete(server, "items/*") removes all matching items
+err := ooo.Delete(server, "path/to/item")
 if err != nil {
     log.Fatal(err)
 }
@@ -354,302 +296,95 @@ if err != nil {
 
 ### Remote Operations
 
-You can also perform operations on remote OOO servers using the client functions:
+Perform operations on remote ooo servers using the `io` package.
+
+#### RemoteConfig
 
 ```go
-// Create a remote config
 cfg := io.RemoteConfig{
     Client: &http.Client{Timeout: 10 * time.Second},
     Host:   "localhost:8800",
     SSL:    false, // set to true for HTTPS
 }
+```
 
-// RemoteGet fetches an item from a remote server
+#### RemoteGet
+
+```go
 item, err := io.RemoteGet[YourType](cfg, "path/to/item")
+```
 
-// RemoteSet updates or creates an item on a remote server
-err = io.RemoteSet(cfg, "path/to/item", YourType{Field1: "value"})
+#### RemoteSet
 
-// RemotePush adds an item to a list on a remote server
-err = io.RemotePush(cfg, "path/to/items/*", YourType{Field1: "new item"})
+```go
+err := io.RemoteSet(cfg, "path/to/item", YourType{Field1: "value"})
+```
 
-// RemoteGetList fetches all items from a list on a remote server
+#### RemotePush
+
+```go
+err := io.RemotePush(cfg, "path/to/items/*", YourType{Field1: "new item"})
+```
+
+#### RemoteGetList
+
+```go
 items, err := io.RemoteGetList[YourType](cfg, "path/to/items/*")
-
-// RemoteDelete deletes an item
-err = io.RemoteDelete(cfg, "path/to/item")
 ```
 
-#### Basic IO example
-
-Here's a complete example demonstrating the usage of these functions:
+#### RemoteDelete
 
 ```go
-package main
-
-import (
-	"fmt"
-	"log"
-	"net/http"
-	"time"
-
-	"github.com/benitogf/ooo"
-	"github.com/benitogf/ooo/io"
-)
-
-type Todo struct {
-	Task      string    `json:"task"`
-	Completed bool      `json:"completed"`
-	Due       time.Time `json:"due"`
-}
-
-func main() {
-	// Start a local server for testing
-	server := &ooo.Server{Silence: true}
-	server.Start("localhost:0")
-	defer server.Close(nil)
-
-	// Add some todos
-	err := io.Push(server, "todos/*", Todo{
-		Task:      "todo 1",
-		Completed: false,
-		Due:       time.Now().Add(24 * time.Hour),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	err = io.Push(server, "todos/*", Todo{
-		Task:      "todo 2",
-		Completed: false,
-		Due:       time.Now().Add(48 * time.Hour),
-	})
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Get all todos
-	todos, err := io.GetList[Todo](server, "todos/*")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	fmt.Println("All todos:")
-	for i, todo := range todos {
-		fmt.Printf("%d. %s (Due: %v)\n", i+1, todo.Data.Task, todo.Data.Due)
-	}
-}
+err := io.RemoteDelete(cfg, "path/to/item")
 ```
 
-### WebSocket client
 
-Use the Go websocket client to subscribe to real-time updates on any path. There are two functions:
+### Subscribe Clients
 
-- `Subscribe[T]` - for single object paths (non-glob)
-- `SubscribeList[T]` - for list paths (glob patterns like `todos/*`)
+Use the Go WebSocket client to subscribe to real-time updates.
 
-Both use a `SubscribeConfig` struct for connection settings and event callbacks.
+#### SubscribeList
 
 ```go
-// SubscribeConfig holds connection configuration
-type SubscribeConfig struct {
-    Ctx              context.Context
-    Protocol         string        // "ws" or "wss"
-    Host             string        // e.g. "localhost:8800"
-    Header           http.Header   // optional headers
-    HandshakeTimeout time.Duration // optional, defaults to 2s
-    Silence          bool          // suppress log output
-}
-
-// For single objects
-type SubscribeEvents[T any] struct {
-    OnMessage func(client.Meta[T])
-    OnError   func(error) // optional
-}
-
-// For lists
-type SubscribeListEvents[T any] struct {
-    OnMessage func([]client.Meta[T])
-    OnError   func(error) // optional
-}
-```
-
-The client automatically reconnects with exponential backoff if the connection drops. Cancel the context to stop the subscription.
-
-#### Example: subscribe to a list
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-    "time"
-
-    "github.com/benitogf/ooo"
-    "github.com/benitogf/ooo/io"
-    "github.com/benitogf/ooo/client"
-)
-
-type Todo struct {
-    Task      string    `json:"task"`
-    Completed bool      `json:"completed"`
-    Due       time.Time `json:"due"`
-}
-
-func main() {
-    // Start server (for demo)
-    server := &ooo.Server{Silence: true}
-    server.Start("localhost:0")
-    defer server.Close(nil)
-
-    // Seed one item
-    _ = io.Push(server, "todos/*", Todo{Task: "seed", Due: time.Now().Add(1 * time.Hour)})
-
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    cfg := client.SubscribeConfig{
-        Ctx:      ctx,
-        Protocol: "ws",
-        Host:     server.Address,
-        Silence:  true,
-    }
-
-    go client.SubscribeList[Todo](cfg, "todos/*", client.SubscribeListEvents[Todo]{
-        OnMessage: func(items []client.Meta[Todo]) {
-            fmt.Println("list size:", len(items))
-            for i, it := range items {
-                fmt.Printf("%d. %s (due: %v)\n", i+1, it.Data.Task, it.Data.Due)
-            }
-        },
-        OnError: func(err error) {
-            fmt.Println("connection error:", err)
-        },
-    })
-
-    // Produce updates
-    time.Sleep(50 * time.Millisecond)
-    _ = io.Push(server, "todos/*", Todo{Task: "another", Due: time.Now().Add(2 * time.Hour)})
-
-    time.Sleep(300 * time.Millisecond)
-}
-```
-
-#### Example: subscribe to a single item
-
-```go
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-cfg := client.SubscribeConfig{
-    Ctx:      ctx,
-    Protocol: "ws",
-    Host:     server.Address,
-}
-
-// Ensure path exists
-_ = io.Set(server, "todo", Todo{Task: "one", Due: time.Now().Add(24 * time.Hour)})
-
-go client.Subscribe[Todo](cfg, "todo", client.SubscribeEvents[Todo]{
-    OnMessage: func(item client.Meta[Todo]) {
-        fmt.Println("current todo:", item.Data.Task)
-    },
-    OnError: func(err error) {
-        fmt.Println("connection error:", err)
-    },
-})
-
-// Update the item to trigger a message
-_ = io.Set(server, "todo", Todo{Task: "updated"})
-```
-
-#### HTTPS (wss) usage
-
-If your server is behind TLS, use the `wss` protocol:
-
-```go
-cfg := client.SubscribeConfig{
-    Ctx:      ctx,
-    Protocol: "wss",
-    Host:     "example.com:443",
-}
-go client.SubscribeList[Todo](cfg, "todos/*", client.SubscribeListEvents[Todo]{
-    OnMessage: func(items []client.Meta[Todo]) {
-        // handle items
-    },
-    OnError: func(err error) {
-        // handle connection error
-    },
+go client.SubscribeList(client.SubscribeConfig{
+    Ctx:  ctx,
+    Server: client.Server{Protocol: "ws", Host: "localhost:8800"},
+}, "items/*", client.SubscribeListEvents[Item]{
+    OnMessage: func(items []client.Meta[Item]) { /* handle updates */ },
+    OnError:   func(err error) { /* handle error */ },
 })
 ```
 
-#### Tuning and lifecycle
-
-- `HandshakeTimeout` can be set in the config (default: 2 seconds)
-- Retry delays can be configured via `SubscribeConfig.Retry`
-- The callback runs in the client's goroutine; keep work minimal or offload to channels
-- Call `cancel()` on the context to close the websocket and stop reconnection attempts
-
-#### Subscribe to multiple paths
-
-Use `SubscribeMultipleList2`, `SubscribeMultipleList3`, or `SubscribeMultipleList4` to subscribe to multiple paths with different types and receive combined state updates in a single callback.
+#### Subscribe
 
 ```go
-type User struct {
-    ID   int    `json:"id"`
-    Name string `json:"name"`
-}
+go client.Subscribe(client.SubscribeConfig{
+    Ctx:  ctx,
+    Server: client.Server{Protocol: "ws", Host: "localhost:8800"},
+}, "config", client.SubscribeEvents[Config]{
+    OnMessage: func(item client.Meta[Config]) { /* handle updates */ },
+    OnError:   func(err error) { /* handle error */ },
+})
+```
 
-type Post struct {
-    ID    int    `json:"id"`
-    Title string `json:"title"`
-}
+#### SubscribeMultipleList2
 
-ctx, cancel := context.WithCancel(context.Background())
-defer cancel()
-
-client.SubscribeMultipleList2(
-    ctx,
-    client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-    client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-    client.SubscribeMultipleList2Events[User, Post]{
-        OnMessage: func(users client.MultiState[User], posts client.MultiState[Post]) {
-            // Called when either subscription updates
-            // Use .Updated to check which one changed
-            if users.Updated {
-                fmt.Println("users updated:", len(users.Data))
-            }
-            if posts.Updated {
-                fmt.Println("posts updated:", len(posts.Data))
-            }
-        },
-        OnError: func(usersErr, postsErr error) {
-            // Per-connection errors (nil if no error on that connection)
-            if usersErr != nil {
-                fmt.Println("users connection error:", usersErr)
-            }
-            if postsErr != nil {
-                fmt.Println("posts connection error:", postsErr)
-            }
+```go
+go client.SubscribeMultipleList2(
+    client.SubscribeConfig{
+        Ctx:  ctx,
+        Server: client.Server{Protocol: "ws", Host: "localhost:8800"},
+    },
+    [2]string{"products/*", "orders/*"},
+    client.SubscribeMultipleList2Events[Product, Order]{
+        OnMessage: func(products client.MultiState[Product], orders client.MultiState[Order]) {
+            // products.Updated / orders.Updated indicates which changed
         },
     },
 )
 ```
 
-The `MultiState[T]` struct contains:
-- `Data []Meta[T]` - the current list of items
-- `Updated bool` - true if this subscription triggered the callback
-
-For 3 or 4 paths, use `SubscribeMultipleList3Events` or `SubscribeMultipleList4Events` with corresponding `OnError` signatures:
-
-```go
-// 3 paths
-OnError: func(err1, err2, err3 error)
-
-// 4 paths  
-OnError: func(err1, err2, err3, err4 error)
-```
+For JavaScript, use [ooo-client](https://github.com/benitogf/ooo-client).
 
 ## UI
 
@@ -662,7 +397,3 @@ ooo includes a built-in web-based ui to manage and monitor your data. The ui is 
 - **Static Mode** - Traditional CRUD operations with JSON editor
 - **State Monitor** - View active WebSocket connections and subscriptions
 - **Filter Management** - Visual representation of filter types (open, read-only, write-only, custom, limit)
-
-
-![alt text](ui.png)
-![alt text](ui-table.png)

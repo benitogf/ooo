@@ -466,10 +466,9 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 
 	wg.Add(1)
 	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:      context.Background(),
-		Protocol: "ws",
-		Host:     server.Address,
-		Silence:  true,
+		Ctx:     context.Background(),
+		Server:  client.Server{Protocol: "ws", Host: server.Address},
+		Silence: true,
 	}, "/test/*", client.SubscribeListEvents[TestData]{
 		OnMessage: func(m []client.Meta[TestData]) {
 			entriesLock.Lock()
@@ -566,10 +565,9 @@ func StreamBroadcastPatchTest(t *testing.T, server *Server) {
 
 	wg.Add(1)
 	go client.Subscribe(client.SubscribeConfig{
-		Ctx:      context.Background(),
-		Protocol: "ws",
-		Host:     server.Address,
-		Silence:  true,
+		Ctx:     context.Background(),
+		Server:  client.Server{Protocol: "ws", Host: server.Address},
+		Silence: true,
 	}, "test", client.SubscribeEvents[TestData]{
 		OnMessage: func(m client.Meta[TestData]) {
 			current = m.Data

@@ -1,4 +1,4 @@
-on: [pull_request]
+on: [pull_request, push]
 name: Test
 jobs:
   test:
@@ -9,43 +9,19 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
     - name: Install Go
-      uses: actions/setup-go@v2
+      uses: actions/setup-go@v4
       with:
         go-version: ${{ matrix.go-version }}
     - name: Checkout code
-      uses: actions/checkout@v2
-    - name: install
-      run: |
-        go get github.com/gorilla/mux
-        go get github.com/gorilla/websocket
-        go get github.com/rs/cors
-        go get github.com/benitogf/coat
-        go get github.com/stretchr/testify
-        go get golang.org/x/tools/cmd/cover
-        go get github.com/benitogf/jsonpatch
-        go get github.com/nsf/jsondiff
-        go get github.com/gorilla/handlers
-        go get github.com/pkg/expect
-        go get github.com/getlantern/httptest
-        go get github.com/goccy/go-json
-        go get github.com/tidwall/gjson
-        go get github.com/tidwall/sjson
-    - name: lint
-      run: |
-        go vet .
-        go vet ./stream/
-        go vet ./key/
-        go vet ./messages/
-        go vet ./meta/
-        go vet ./client/
-        go vet ./io/
-    - name: Test Main
-      run: go test -v -coverprofile cover.out -count 1 -failfast -race -bench .
-    - name: Test Stream
-      run: go test -v -coverprofile cover.out -count 1 -failfast -race ./stream/
-    - name: Test Key
-      run: go test -v -coverprofile cover.out -count 1 -failfast -race ./key/
-    - name: Test Client
-      run: go test -v -coverprofile cover.out -count 1 -failfast -race ./client/
-    - name: Test IO
-      run: go test -v -coverprofile cover.out -count 1 -failfast -race ./io/
+      uses: actions/checkout@v4
+    - name: Download dependencies
+      run: go mod download
+    - name: Vet all packages
+      run: go vet ./...
+    - name: Test all packages
+      run: go test -v -coverprofile cover.out -count 1 -failfast -race -timeout 60s ./...
+    - name: Upload coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ matrix.os }}
+        path: cover.out
