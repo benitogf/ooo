@@ -34,6 +34,7 @@ For large-scale data storage (millions of records, complex queries), use a dedic
 | [auth](https://github.com/benitogf/auth) | JWT authentication middleware |
 | [mono](https://github.com/benitogf/mono) | Full-stack boilerplate (Go + React) |
 | [nopog](https://github.com/benitogf/nopog) | PostgreSQL adapter for large-scale storage |
+| [pivot](https://github.com/benitogf/pivot) | Multi-instance synchronization (AP distributed) |
 
 ## Features
 

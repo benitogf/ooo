@@ -20,6 +20,7 @@ func (server *Server) sendTime() {
 }
 
 func (server *Server) startClock() {
+	defer server.clockWg.Done()
 	ticker := time.NewTicker(server.Tick)
 	for {
 		<-ticker.C
@@ -27,7 +28,6 @@ func (server *Server) startClock() {
 			server.sendTime()
 			continue
 		}
-
 		return
 	}
 }

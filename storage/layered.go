@@ -39,6 +39,7 @@ type Layered struct {
 	watcher         *ShardedChan
 	active          bool
 	beforeRead      func(key string)
+	afterWrite      func(key string)
 }
 
 // NewLayered creates a new layered storage
@@ -74,6 +75,7 @@ func (l *Layered) Start(opt Options) error {
 	l.watcher = NewShardedChan(workers)
 	l.noBroadcastKeys = opt.NoBroadcastKeys
 	l.beforeRead = opt.BeforeRead
+	l.afterWrite = opt.AfterWrite
 
 	// Start layers from slowest to fastest
 	if l.embedded != nil {
@@ -453,6 +455,9 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "set", Object: obj})
 	}
+	if l.afterWrite != nil {
+		l.afterWrite(path)
+	}
 
 	return index, nil
 }
@@ -491,6 +496,9 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 
 	if !key.Contains(l.noBroadcastKeys, newPath) && l.Active() {
 		l.sendEvent(Event{Key: newPath, Operation: "set", Object: obj})
+	}
+	if l.afterWrite != nil {
+		l.afterWrite(newPath)
 	}
 
 	return index, nil
@@ -604,6 +612,9 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "set", Object: obj})
 	}
+	if l.afterWrite != nil {
+		l.afterWrite(path)
+	}
 
 	return index, nil
 }
@@ -631,6 +642,9 @@ func (l *Layered) Del(path string) error {
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "del", Object: obj})
+	}
+	if l.afterWrite != nil {
+		l.afterWrite(path)
 	}
 
 	return nil
@@ -678,5 +692,26 @@ func (l *Layered) WatchSharded() *ShardedChan {
 func (l *Layered) sendEvent(event Event) {
 	if l.watcher != nil {
 		l.watcher.Send(event)
+	}
+}
+
+// WatchWithCallback starts goroutines that watch all sharded channels and call
+// the provided callback for each event. Use this for external storages that need
+// to trigger sync on storage events.
+func WatchWithCallback(dataStore Database, callback func(Event)) {
+	shardedWatcher := dataStore.WatchSharded()
+	if shardedWatcher == nil {
+		return
+	}
+	for i := 0; i < shardedWatcher.Count(); i++ {
+		go func(ch StorageChan) {
+			for {
+				event, ok := <-ch
+				if !ok || !dataStore.Active() {
+					return
+				}
+				callback(event)
+			}
+		}(shardedWatcher.Shard(i))
 	}
 }

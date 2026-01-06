@@ -131,4 +131,40 @@ const IconX = () => (
   </svg>
 );
 
-window.Icons = { IconBox, IconDatabase, IconSettings, IconHome, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconSend, IconRefresh, IconFilter, IconLive, IconEye, IconEdit, IconWifi, IconWifiOff, IconActivity, IconX };
+const IconServer = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect>
+    <rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect>
+    <line x1="6" y1="6" x2="6.01" y2="6"></line>
+    <line x1="6" y1="18" x2="6.01" y2="18"></line>
+  </svg>
+);
+
+const IconCloud = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"></path>
+  </svg>
+);
+
+const IconCloudOff = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="1" y1="1" x2="23" y2="23"></line>
+    <path d="M22.61 16.95A5 5 0 0 0 18 10h-1.26a8 8 0 0 0-7.05-6M5 5a8 8 0 0 0 4 15h9a5 5 0 0 0 1.7-.3"></path>
+  </svg>
+);
+
+const IconCheck = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <polyline points="20 6 9 17 4 12"></polyline>
+  </svg>
+);
+
+const IconAlertCircle = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <circle cx="12" cy="12" r="10"></circle>
+    <line x1="12" y1="8" x2="12" y2="12"></line>
+    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+  </svg>
+);
+
+window.Icons = { IconBox, IconDatabase, IconSettings, IconHome, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconSend, IconRefresh, IconFilter, IconLive, IconEye, IconEdit, IconWifi, IconWifiOff, IconActivity, IconX, IconServer, IconCloud, IconCloudOff, IconCheck, IconAlertCircle };

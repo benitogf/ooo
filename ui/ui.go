@@ -77,6 +77,21 @@ type StateInfo struct {
 	TotalConnections int        `json:"totalConnections"`
 }
 
+// PivotNodeStatus represents the health status of a single node
+type PivotNodeStatus struct {
+	Address   string `json:"address"`
+	Healthy   bool   `json:"healthy"`
+	LastCheck string `json:"lastCheck"`
+}
+
+// PivotInfo contains pivot synchronization status
+type PivotInfo struct {
+	Role       string            `json:"role"`       // "pivot", "node", or "none"
+	PivotIP    string            `json:"pivotIP"`    // Empty for pivot server, pivot address for nodes
+	Nodes      []PivotNodeStatus `json:"nodes"`      // Node health status (only for pivot servers)
+	SyncedKeys []string          `json:"syncedKeys"` // Keys being synchronized
+}
+
 // Handler serves the storage explorer SPA
 type Handler struct {
 	GetKeys        func() ([]string, error)
@@ -84,6 +99,7 @@ type Handler struct {
 	GetFilters     func() []string
 	GetFiltersInfo func() []FilterInfo
 	GetState       func() []PoolInfo
+	GetPivotInfo   func() *PivotInfo // Optional: returns nil if pivot not configured
 	AuditFunc      func(r *http.Request) bool
 	ClockFunc      func(w http.ResponseWriter, r *http.Request)
 }
@@ -118,6 +134,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case "state":
 		h.handleState(w, r)
+		return
+	case "pivot":
+		h.handlePivot(w, r)
 		return
 	}
 
@@ -291,6 +310,21 @@ func (h *Handler) handleState(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(StateInfo{Pools: pools, TotalConnections: totalConnections})
+}
+
+func (h *Handler) handlePivot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if h.GetPivotInfo == nil {
+		// Pivot not configured - return "none" role
+		json.NewEncoder(w).Encode(PivotInfo{Role: "none"})
+		return
+	}
+	info := h.GetPivotInfo()
+	if info == nil {
+		json.NewEncoder(w).Encode(PivotInfo{Role: "none"})
+		return
+	}
+	json.NewEncoder(w).Encode(info)
 }
 
 func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) {

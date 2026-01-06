@@ -5,9 +5,14 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/benitogf/ooo/monotonic"
 	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
+
+func init() {
+	monotonic.Init()
+}
 
 func TestStorage(t *testing.T) {
 	if runtime.GOOS != "windows" {
@@ -99,6 +104,17 @@ func TestGetN(t *testing.T) {
 	StorageGetNTest(server, t, 10)
 }
 
+func TestGetNRange(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := &Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+	StorageGetNRangeTest(server, t, 10)
+}
+
 func TestKeysRange(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
@@ -179,6 +195,19 @@ func TestBeforeRead(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 	StorageBeforeReadTest(db, t)
+}
+
+func TestStorageAfterWrite(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	db := storage.New(storage.LayeredConfig{
+		Memory: storage.NewMemoryLayer(),
+	})
+	err := db.Start(storage.Options{})
+	require.NoError(t, err)
+	defer db.Close()
+	StorageAfterWriteTest(db, t)
 }
 
 func TestWatchStorageNoop(t *testing.T) {

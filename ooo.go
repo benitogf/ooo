@@ -102,6 +102,7 @@ type Server struct {
 	watchWg           sync.WaitGroup
 	listenWg          sync.WaitGroup
 	handlerWg         sync.WaitGroup
+	clockWg           sync.WaitGroup
 	server            *http.Server
 	Name              string
 	Router            *mux.Router
@@ -576,6 +577,7 @@ func (server *Server) StartWithError(address string) error {
 		return err
 	}
 	server.Console = coat.NewConsole(server.Address, server.Silence)
+	server.clockWg.Add(1)
 	go server.startClock()
 	return nil
 }
@@ -595,6 +597,7 @@ func (server *Server) Close(sig os.Signal) {
 	if atomic.LoadInt64(&server.closing) != 1 {
 		atomic.StoreInt64(&server.closing, 1)
 		atomic.StoreInt64(&server.active, 0)
+		server.clockWg.Wait() // Wait for clock goroutine to exit before touching Stream
 		// Force close all stream connections first
 		server.Stream.CloseAll()
 		// Shutdown HTTP server to stop accepting new connections

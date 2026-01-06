@@ -26,6 +26,7 @@ These samples demonstrate integration with other packages in the ecosystem. They
 | [11_limit_filter](./11_limit_filter) | Capped collections with auto-cleanup | (none) |
 | [12_limit_filter_with_validation](./12_limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
 | [13_custom_endpoints_nopog](./13_custom_endpoints_nopog) | Custom HTTP endpoints with PostgreSQL storage | `go get github.com/benitogf/nopog` |
+| [14_pivot_synchronization](./14_pivot_synchronization) | Multi-instance synchronization | `go get github.com/benitogf/pivot` |
 
 ## Running Samples
 
@@ -54,3 +55,4 @@ go get github.com/benitogf/auth github.com/benitogf/ko
 - [auth](https://github.com/benitogf/auth) - JWT authentication middleware
 - [mono](https://github.com/benitogf/mono) - Full-stack boilerplate (Go + React)
 - [nopog](https://github.com/benitogf/nopog) - PostgreSQL adapter for large-scale storage
+- [pivot](https://github.com/benitogf/pivot) - Multi-instance synchronization

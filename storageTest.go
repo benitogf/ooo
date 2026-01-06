@@ -1157,6 +1157,62 @@ func StorageBeforeReadTest(db storage.Database, t *testing.T) {
 	db.Clear()
 }
 
+// StorageAfterWriteTest tests that the AfterWrite callback is called on write operations
+func StorageAfterWriteTest(db storage.Database, t *testing.T) {
+	// Track which keys were written
+	writeKeys := []string{}
+	var writeMutex sync.Mutex
+
+	// Start storage with afterWrite callback
+	db.Close()
+	err := db.Start(storage.Options{
+		AfterWrite: func(key string) {
+			writeMutex.Lock()
+			writeKeys = append(writeKeys, key)
+			writeMutex.Unlock()
+		},
+	})
+	require.NoError(t, err)
+
+	// Drain watcher channels to prevent blocking
+	go storage.WatchStorageNoop(db)
+
+	db.Clear()
+
+	// Clear tracked keys before testing writes
+	writeMutex.Lock()
+	writeKeys = []string{}
+	writeMutex.Unlock()
+
+	// Test Set (new key)
+	key, err := db.Set("test/1", TEST_DATA)
+	require.NoError(t, err)
+	writeMutex.Lock()
+	require.Len(t, writeKeys, 1)
+	require.Equal(t, "test/"+key, writeKeys[0])
+	writeKeys = []string{}
+	writeMutex.Unlock()
+
+	// Test Set (update existing key)
+	key, err = db.Set("test/1", TEST_DATA_UPDATE)
+	require.NoError(t, err)
+	writeMutex.Lock()
+	require.Len(t, writeKeys, 1)
+	require.Equal(t, "test/"+key, writeKeys[0])
+	writeKeys = []string{}
+	writeMutex.Unlock()
+
+	// Test Del
+	err = db.Del("test/1")
+	require.NoError(t, err)
+	writeMutex.Lock()
+	require.Len(t, writeKeys, 1)
+	require.Equal(t, "test/1", writeKeys[0])
+	writeMutex.Unlock()
+
+	db.Clear()
+}
+
 // WatchStorageNoopTest tests that WatchStorageNoop properly drains events from sharded channels
 func WatchStorageNoopTest(db storage.Database, t *testing.T) {
 	// Start a goroutine to drain the watcher

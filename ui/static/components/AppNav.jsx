@@ -1,10 +1,11 @@
-function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChange, onStateClick, stateModalOpen }) {
+function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChange, onStateClick, stateModalOpen, onPivotClick, pivotModalOpen }) {
   const { useState, useEffect, useRef } = React;
-  const { IconBox, IconDatabase, IconActivity } = window.Icons;
+  const { IconBox, IconDatabase, IconActivity, IconServer, IconCloud, IconCloudOff } = window.Icons;
   const StateModal = window.StateModal;
-  
+
   const [serverTime, setServerTime] = useState(null);
   const [clockConnected, setClockConnected] = useState(false);
+  const [pivotRole, setPivotRole] = useState(null);
   const prevConnected = useRef(false);
 
   useEffect(() => {
@@ -14,6 +15,22 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
       onConnectionChange(clockConnected);
     }
   }, [clockConnected, onConnectionChange]);
+
+  useEffect(() => {
+    // Fetch pivot role on mount
+    fetch('/?api=pivot')
+      .then(res => res.json())
+      .then(data => setPivotRole(data.role || 'none'))
+      .catch(() => setPivotRole('none'));
+  }, []);
+
+  const getPivotIcon = () => {
+    switch (pivotRole) {
+      case 'pivot': return <IconServer />;
+      case 'node': return <IconCloud />;
+      default: return <IconCloudOff />;
+    }
+  };
 
   useEffect(() => {
     // Subscribe to server clock using native WebSocket
@@ -26,11 +43,11 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
     const connect = () => {
       ws = new WebSocket(wsUrl);
       ws.binaryType = 'arraybuffer';
-      
+
       ws.onopen = () => {
         setClockConnected(true);
       };
-      
+
       ws.onmessage = (event) => {
         try {
           const decoder = new TextDecoder('utf8');
@@ -43,14 +60,14 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
           console.warn('Clock parse error:', e);
         }
       };
-      
+
       ws.onclose = () => {
         setClockConnected(false);
         setServerTime(null); // Clear stale time when disconnected
         // Reconnect after 3 seconds
         reconnectTimeout = setTimeout(connect, 3000);
       };
-      
+
       ws.onerror = () => {
         setClockConnected(false);
         setServerTime(null); // Clear stale time on error
@@ -72,7 +89,7 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
     if (!date) return '--:--:--';
     return date.toLocaleTimeString();
   };
-  
+
   return (
     <nav className="top-nav">
       <div className="logo">
@@ -80,7 +97,7 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
         <span>{appName}</span>
       </div>
       <div className="nav-tabs" style={{ visibility: activeTab ? 'visible' : 'hidden' }}>
-        <button 
+        <button
           className={`nav-tab ${activeTab === 'storage' ? 'active' : ''}`}
           onClick={() => onNavigate('/storage')}
         >
@@ -90,7 +107,17 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
         </button>
       </div>
       <div className="nav-right">
-        <button 
+        {pivotRole && (
+          <button
+            className={`pivot-btn ${pivotModalOpen ? 'active' : ''}`}
+            onClick={onPivotClick}
+            title="Pivot Status"
+          >
+            {getPivotIcon()}
+            <span className={`pivot-role-badge ${pivotRole}`}>{pivotRole}</span>
+          </button>
+        )}
+        <button
           className={`state-btn ${stateModalOpen ? 'active' : ''}`}
           onClick={onStateClick}
           title="Server State"

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/benitogf/ooo/meta"
@@ -429,4 +430,92 @@ func (m *mockEmbeddedLayer) Load() (map[string]*meta.Object, error) {
 		data[k] = &obj
 	}
 	return data, nil
+}
+
+func TestWatchWithCallback(t *testing.T) {
+	t.Parallel()
+
+	storage := New(LayeredConfig{
+		Memory: NewMemoryLayer(),
+	})
+	err := storage.Start(Options{})
+	require.NoError(t, err)
+	defer storage.Close()
+
+	// Track events received
+	var events []Event
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	// Start watching with callback
+	WatchWithCallback(storage, func(event Event) {
+		mu.Lock()
+		events = append(events, event)
+		mu.Unlock()
+		wg.Done()
+	})
+
+	// Expect 3 events: set, set, delete
+	wg.Add(3)
+
+	// Trigger events
+	_, err = storage.Set("test/1", testData)
+	require.NoError(t, err)
+
+	_, err = storage.Set("test/2", testDataUpdate)
+	require.NoError(t, err)
+
+	err = storage.Del("test/1")
+	require.NoError(t, err)
+
+	// Wait for all events
+	wg.Wait()
+
+	// Verify events (order may vary due to sharded channels)
+	mu.Lock()
+	require.Equal(t, 3, len(events))
+
+	// Count operations by type
+	setCount := 0
+	delCount := 0
+	for _, e := range events {
+		switch e.Operation {
+		case "set":
+			setCount++
+		case "del":
+			delCount++
+		}
+	}
+	require.Equal(t, 2, setCount, "should have 2 set events")
+	require.Equal(t, 1, delCount, "should have 1 delete event")
+	mu.Unlock()
+}
+
+func TestWatchStorageNoop(t *testing.T) {
+	t.Parallel()
+
+	storage := New(LayeredConfig{
+		Memory: NewMemoryLayer(),
+	})
+	err := storage.Start(Options{})
+	require.NoError(t, err)
+	defer storage.Close()
+
+	// Start noop watcher - should drain events without blocking
+	WatchStorageNoop(storage)
+
+	// These should not block even though no one is reading events
+	_, err = storage.Set("test/1", testData)
+	require.NoError(t, err)
+
+	_, err = storage.Set("test/2", testDataUpdate)
+	require.NoError(t, err)
+
+	err = storage.Del("test/1")
+	require.NoError(t, err)
+
+	// Verify storage operations completed
+	obj, err := storage.Get("test/2")
+	require.NoError(t, err)
+	require.Equal(t, testDataUpdate, json.RawMessage(obj.Data))
 }

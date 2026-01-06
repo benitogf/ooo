@@ -40,6 +40,7 @@ type Event struct {
 type Options struct {
 	NoBroadcastKeys []string
 	BeforeRead      func(key string)
+	AfterWrite      func(key string)
 	Workers         int
 }
 

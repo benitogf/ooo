@@ -20,6 +20,7 @@ type Sample struct {
 	Folder      string
 	Title       string
 	Description string
+	Files       []string // List of .go files (empty means single main.go)
 }
 
 const githubIcon = `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>`
@@ -120,11 +121,11 @@ func discoverSamples(samplesDir string) ([]Sample, error) {
 		}
 
 		folderName := entry.Name()
-		mainFile := filepath.Join(samplesDir, folderName, "main.go")
 		readmeFile := filepath.Join(samplesDir, folderName, "README.md")
 
-		// Skip if no main.go exists
-		if _, err := os.Stat(mainFile); os.IsNotExist(err) {
+		// Find all .go files in the sample directory
+		goFiles, err := findGoFiles(filepath.Join(samplesDir, folderName))
+		if err != nil || len(goFiles) == 0 {
 			continue
 		}
 
@@ -135,6 +136,7 @@ func discoverSamples(samplesDir string) ([]Sample, error) {
 			Folder:      folderName,
 			Title:       title,
 			Description: description,
+			Files:       goFiles,
 		})
 	}
 
@@ -144,6 +146,27 @@ func discoverSamples(samplesDir string) ([]Sample, error) {
 	})
 
 	return samples, nil
+}
+
+// findGoFiles returns all .go files in a directory, sorted
+func findGoFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".go") {
+			files = append(files, entry.Name())
+		}
+	}
+
+	sort.Strings(files)
+	return files, nil
 }
 
 // parseReadme extracts title and description from a README.md file
@@ -206,31 +229,25 @@ func formatFolderName(name string) string {
 }
 
 func generateSampleCard(samplesDir string, sample Sample) (string, error) {
-	mainFile := filepath.Join(samplesDir, sample.Folder, "main.go")
-	code, err := os.ReadFile(mainFile)
+	// Check if this is a multi-file sample
+	if len(sample.Files) > 1 {
+		return generateMultiFileSampleCard(samplesDir, sample)
+	}
+
+	// Single file sample (original behavior)
+	fileName := "main.go"
+	if len(sample.Files) == 1 {
+		fileName = sample.Files[0]
+	}
+
+	filePath := filepath.Join(samplesDir, sample.Folder, fileName)
+	code, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", fmt.Errorf("could not read %s: %v", mainFile, err)
+		return "", fmt.Errorf("could not read %s: %v", filePath, err)
 	}
 
 	// Remove build directives and package comment lines at the top
-	codeStr := string(code)
-	lines := strings.Split(codeStr, "\n")
-	var filteredLines []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		// Skip build directives and generated code comments
-		if strings.HasPrefix(trimmed, "//go:build") ||
-			strings.HasPrefix(trimmed, "// +build") ||
-			strings.HasPrefix(trimmed, "// Code generated") ||
-			strings.HasPrefix(trimmed, "// Package ") ||
-			strings.HasPrefix(trimmed, "// This ") ||
-			strings.HasPrefix(trimmed, "// -") {
-			continue
-		}
-		filteredLines = append(filteredLines, line)
-	}
-	codeStr = strings.Join(filteredLines, "\n")
-	codeStr = strings.TrimSpace(codeStr)
+	codeStr := filterCode(string(code))
 
 	// Apply syntax highlighting
 	highlighted := highlightGo(codeStr)
@@ -254,7 +271,7 @@ func generateSampleCard(samplesDir string, sample Sample) (string, error) {
             <span class="code-dot red"></span>
             <span class="code-dot yellow"></span>
             <span class="code-dot green"></span>
-            <span class="code-title">main.go</span>
+            <span class="code-title">%s</span>
             <button class="copy-btn" onclick="copyCode(this)">
               %s
               Copy
@@ -264,7 +281,82 @@ func generateSampleCard(samplesDir string, sample Sample) (string, error) {
         </div>
       </div>
 
-`, sample.Title, sample.Description, sample.Folder, githubIcon, copyIcon, highlighted), nil
+`, sample.Title, sample.Description, sample.Folder, githubIcon, fileName, copyIcon, highlighted), nil
+}
+
+func generateMultiFileSampleCard(samplesDir string, sample Sample) (string, error) {
+	var filesHTML bytes.Buffer
+
+	for _, fileName := range sample.Files {
+		filePath := filepath.Join(samplesDir, sample.Folder, fileName)
+		code, err := os.ReadFile(filePath)
+		if err != nil {
+			return "", fmt.Errorf("could not read %s: %v", filePath, err)
+		}
+
+		codeStr := filterCode(string(code))
+		highlighted := highlightGo(codeStr)
+
+		filesHTML.WriteString(fmt.Sprintf(`          <div class="sample-file">
+            <div class="sample-file-header" onclick="this.parentElement.classList.toggle('file-open')">
+              <span class="sample-file-name">%s</span>
+              <span class="sample-file-toggle">▼</span>
+            </div>
+            <div class="sample-file-code">
+              <div class="code-header">
+                <span class="code-dot red"></span>
+                <span class="code-dot yellow"></span>
+                <span class="code-dot green"></span>
+                <span class="code-title">%s</span>
+                <button class="copy-btn" onclick="copyCode(this)">
+                  %s
+                  Copy
+                </button>
+              </div>
+              <pre><code>%s</code></pre>
+            </div>
+          </div>
+`, fileName, fileName, copyIcon, highlighted))
+	}
+
+	return fmt.Sprintf(`      <div class="sample-card multi-file">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>%s</h4>
+            <p>%s</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/%s" target="_blank" onclick="event.stopPropagation()">
+              %s
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code sample-files">
+%s        </div>
+      </div>
+
+`, sample.Title, sample.Description, sample.Folder, githubIcon, filesHTML.String()), nil
+}
+
+func filterCode(code string) string {
+	lines := strings.Split(code, "\n")
+	var filteredLines []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		// Skip build directives and generated code comments
+		if strings.HasPrefix(trimmed, "//go:build") ||
+			strings.HasPrefix(trimmed, "// +build") ||
+			strings.HasPrefix(trimmed, "// Code generated") ||
+			strings.HasPrefix(trimmed, "// Package ") ||
+			strings.HasPrefix(trimmed, "// This ") ||
+			strings.HasPrefix(trimmed, "// -") {
+			continue
+		}
+		filteredLines = append(filteredLines, line)
+	}
+	return strings.TrimSpace(strings.Join(filteredLines, "\n"))
 }
 
 func highlightGo(code string) string {

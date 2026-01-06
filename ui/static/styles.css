@@ -1616,3 +1616,237 @@ thead .actions-col svg {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* Pivot Status Styles */
+.pivot-status {
+  background: #161b22;
+  border: 1px solid #1e3a4a;
+  border-radius: 10px;
+  max-width: 500px;
+  width: 100%;
+}
+.pivot-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #1e3a4a;
+}
+.pivot-status-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e8eef4;
+}
+.pivot-status-header .close-btn {
+  background: none;
+  border: none;
+  color: #8b949e;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pivot-status-header .close-btn:hover {
+  color: #e8eef4;
+}
+.pivot-status-header .close-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.pivot-status-content {
+  padding: 20px;
+}
+.pivot-role {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 16px;
+  background: #0d1117;
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+.pivot-role .role-icon {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1e3a4a;
+  border-radius: 8px;
+  color: #00d4aa;
+}
+.pivot-role .role-icon svg {
+  width: 24px;
+  height: 24px;
+}
+.pivot-role .role-info {
+  flex: 1;
+}
+.pivot-role .role-label {
+  font-size: 18px;
+  font-weight: 600;
+  color: #e8eef4;
+  margin-bottom: 4px;
+}
+.pivot-role .role-description {
+  font-size: 13px;
+  color: #8b949e;
+}
+.pivot-section {
+  margin-top: 16px;
+}
+.pivot-section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pivot-section .node-summary {
+  font-size: 12px;
+  font-weight: normal;
+  text-transform: none;
+  display: flex;
+  gap: 12px;
+}
+.pivot-section .healthy-count {
+  color: #00d4aa;
+}
+.pivot-section .unhealthy-count {
+  color: #ff6b6b;
+}
+.synced-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.synced-key {
+  background: #1e3a4a;
+  color: #79c0ff;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+.no-nodes {
+  color: #8b949e;
+  font-size: 13px;
+  padding: 12px;
+  background: #0d1117;
+  border-radius: 8px;
+  text-align: center;
+}
+.node-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.node-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #0d1117;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+}
+.node-item.healthy {
+  border-left-color: #00d4aa;
+}
+.node-item.unhealthy {
+  border-left-color: #ff6b6b;
+}
+.node-item .node-status-icon {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.node-item.healthy .node-status-icon {
+  color: #00d4aa;
+}
+.node-item.unhealthy .node-status-icon {
+  color: #ff6b6b;
+}
+.node-item .node-status-icon svg {
+  width: 18px;
+  height: 18px;
+}
+.node-item .node-info {
+  flex: 1;
+}
+.node-item .node-address {
+  font-size: 14px;
+  font-weight: 500;
+  color: #e8eef4;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+.node-item .node-last-check {
+  font-size: 12px;
+  color: #8b949e;
+  margin-top: 2px;
+}
+.pivot-connection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: #0d1117;
+  border-radius: 8px;
+  color: #79c0ff;
+  font-family: 'Monaco', 'Menlo', monospace;
+  font-size: 14px;
+}
+.pivot-connection svg {
+  width: 20px;
+  height: 20px;
+  color: #00d4aa;
+}
+
+/* Pivot button in nav */
+.pivot-btn {
+  background: none;
+  border: 1px solid #1e3a4a;
+  color: #8b949e;
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  transition: all 0.2s;
+}
+.pivot-btn:hover {
+  background: #1e3a4a;
+  color: #e8eef4;
+}
+.pivot-btn.active {
+  background: #1e3a4a;
+  border-color: #00d4aa;
+  color: #00d4aa;
+}
+.pivot-btn svg {
+  width: 16px;
+  height: 16px;
+}
+.pivot-btn .pivot-role-badge {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pivot-btn .pivot-role-badge.pivot {
+  color: #00d4aa;
+}
+.pivot-btn .pivot-role-badge.node {
+  color: #79c0ff;
+}
+.pivot-btn .pivot-role-badge.none {
+  color: #8b949e;
+}

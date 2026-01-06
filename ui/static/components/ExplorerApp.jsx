@@ -8,13 +8,15 @@ function ExplorerApp() {
   const KeyEditorLive = window.KeyEditorLive;
   const StoragePush = window.StoragePush;
   const StateModal = window.StateModal;
-  
+  const PivotStatus = window.PivotStatus;
+
   const [route, setRoute] = useState({ page: 'storage', keyPath: '', filterPath: '', keyType: '', fromFilter: '', liveMode: false });
   const [filterCount, setFilterCount] = useState(0);
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [serverName, setServerName] = useState('');
   const [isConnected, setIsConnected] = useState(true);
   const [stateModalOpen, setStateModalOpen] = useState(false);
+  const [pivotModalOpen, setPivotModalOpen] = useState(false);
 
   const handleConnectionChange = useCallback((connected) => {
     setIsConnected(connected);
@@ -24,7 +26,7 @@ function ExplorerApp() {
     fetch('/?api=info')
       .then(res => res.json())
       .then(data => setServerName(data.name || ''))
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const parseHash = useCallback(() => {
@@ -72,7 +74,7 @@ function ExplorerApp() {
     fetch('/?api=filters')
       .then(res => res.json())
       .then(data => setFilterCount((data.paths || []).length))
-      .catch(() => {});
+      .catch(() => { });
   }, [route.page]);
 
   const navigate = (path) => {
@@ -87,6 +89,10 @@ function ExplorerApp() {
     setStateModalOpen(prev => !prev);
   };
 
+  const togglePivotModal = () => {
+    setPivotModalOpen(prev => !prev);
+  };
+
   const getBreadcrumb = () => {
     const livePrefix = route.liveMode ? 'Live: ' : '';
     switch (route.page) {
@@ -99,14 +105,16 @@ function ExplorerApp() {
 
   return (
     <div className={isConnected ? '' : 'app-offline'}>
-      <AppNav 
-        appName={serverName} 
-        activeTab={getActiveTab()} 
-        filterCount={filterCount} 
+      <AppNav
+        appName={serverName}
+        activeTab={getActiveTab()}
+        filterCount={filterCount}
         onNavigate={navigate}
         onConnectionChange={handleConnectionChange}
         onStateClick={toggleStateModal}
         stateModalOpen={stateModalOpen}
+        onPivotClick={togglePivotModal}
+        pivotModalOpen={pivotModalOpen}
       />
       <Breadcrumb current={getBreadcrumb()} />
       <div className="app-content">
@@ -117,10 +125,17 @@ function ExplorerApp() {
         {route.page === 'push' && <StoragePush filterPath={route.filterPath} />}
       </div>
 
-      <StateModal 
-        visible={stateModalOpen} 
-        onClose={() => setStateModalOpen(false)} 
+      <StateModal
+        visible={stateModalOpen}
+        onClose={() => setStateModalOpen(false)}
       />
+      {pivotModalOpen && (
+        <div className="modal-overlay" onClick={() => setPivotModalOpen(false)}>
+          <div onClick={e => e.stopPropagation()}>
+            <PivotStatus onClose={() => setPivotModalOpen(false)} />
+          </div>
+        </div>
+      )}
       {!isConnected && (
         <div className="offline-overlay">
           <div className="offline-message">
