@@ -7,8 +7,10 @@ import (
 	"strings"
 
 	"github.com/benitogf/ooo/key"
+	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
+	"github.com/goccy/go-json"
 	"github.com/gorilla/mux"
 )
 
@@ -79,29 +81,42 @@ func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "%s", ErrInvalidKey)
 		return
 	}
-	err := key.ValidateGlob(_key)
+	if key.IsGlob(_key) {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", ErrGlobNotAllowed)
+		return
+	}
+
+	patchData, err := messages.DecodeReader(r.Body)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	event, err := messages.DecodeReader(r.Body)
+	currentObj, err := server.Storage.Get(_key)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprintf(w, "%s", ErrNotFound)
+		return
+	}
+
+	mergedBytes, _, err := merge.MergeBytes(currentObj.Data, patchData)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	data, err := server.filters.Write.Check(_key, event, server.Static)
+	data, err := server.filters.Write.Check(_key, json.RawMessage(mergedBytes), server.Static)
 	if err != nil {
-		server.Console.Err("setError["+_key+"]", err)
+		server.Console.Err("patchError["+_key+"]", err)
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
 	}
 
-	index, err := server.Storage.Patch(_key, data)
+	index, err := server.Storage.Set(_key, data)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "%s", err)

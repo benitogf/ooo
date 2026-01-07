@@ -123,35 +123,6 @@ func TestMemoryStoragePush(t *testing.T) {
 	require.Equal(t, index, objs[0].Index)
 }
 
-func TestMemoryStoragePatch(t *testing.T) {
-	t.Parallel()
-
-	storage := New(LayeredConfig{
-		Memory: NewMemoryLayer(),
-	})
-	err := storage.Start(Options{})
-	require.NoError(t, err)
-	defer storage.Close()
-
-	// Set initial data
-	_, err = storage.Set("test", json.RawMessage(`{"a": 1, "b": 2}`))
-	require.NoError(t, err)
-
-	// Patch
-	_, err = storage.Patch("test", json.RawMessage(`{"b": 3, "c": 4}`))
-	require.NoError(t, err)
-
-	obj, err := storage.Get("test")
-	require.NoError(t, err)
-
-	var result map[string]int
-	err = json.Unmarshal(obj.Data, &result)
-	require.NoError(t, err)
-	require.Equal(t, 1, result["a"])
-	require.Equal(t, 3, result["b"])
-	require.Equal(t, 4, result["c"])
-}
-
 func TestMemoryStorageGetN(t *testing.T) {
 	t.Parallel()
 

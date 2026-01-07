@@ -352,7 +352,7 @@ func TestRestPatch(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
-	req := httptest.NewRequest(http.MethodPatch, "/test/*", bytes.NewBuffer(testUpdate))
+	req := httptest.NewRequest(http.MethodPatch, "/test/1", bytes.NewBuffer(testUpdate))
 	w := httptest.NewRecorder()
 	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -362,6 +362,57 @@ func TestRestPatch(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, string(testOutput), string(obj.Data))
+}
+
+func TestRestPatchWriteFilterOnMergedData(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+
+	// Write filter that requires "requiredField" to exist in the data
+	// This would fail if filter was applied to partial patch data only
+	server.WriteFilter("filteredpatch", func(key string, data json.RawMessage) (json.RawMessage, error) {
+		var obj map[string]interface{}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			return nil, err
+		}
+		if _, ok := obj["requiredField"]; !ok {
+			return nil, errors.New("requiredField is missing")
+		}
+		return data, nil
+	})
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Create initial data directly in storage (bypassing write filter for setup)
+	// {"requiredField":"exists","otherField":"value1"}
+	_, err := server.Storage.Set("filteredpatch", json.RawMessage(`{"requiredField":"exists","otherField":"value1"}`))
+	require.NoError(t, err)
+
+	// Patch with only otherField (no requiredField in patch): {"otherField":"patched"}
+	// If filter was applied to patch data only, this would fail because requiredField is missing
+	// But with merged data, requiredField exists from original data, so it should pass
+	var patchData = []byte(`{"otherField":"patched"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/filteredpatch", bytes.NewBuffer(patchData))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Verify the data was patched correctly
+	obj, err := server.Storage.Get("filteredpatch")
+	require.NoError(t, err)
+
+	var result map[string]interface{}
+	err = json.Unmarshal(obj.Data, &result)
+	require.NoError(t, err)
+
+	// Both fields should exist: requiredField from original, otherField patched
+	require.Equal(t, "exists", result["requiredField"])
+	require.Equal(t, "patched", result["otherField"])
 }
 
 func TestRestInvalidKey(t *testing.T) {
@@ -432,13 +483,13 @@ func TestRestPatchStorageError(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	// Try to patch non-existent key
+	// Try to patch non-existent key - should return 404 Not Found
 	data := json.RawMessage(`{"new":"value"}`)
 	req := httptest.NewRequest("PATCH", "/nonexistent", bytes.NewBuffer(data))
 	w := httptest.NewRecorder()
 	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
-	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestRestGetWithVersion(t *testing.T) {

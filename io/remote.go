@@ -449,6 +449,90 @@ func RemoteGetListWithContext[T any](ctx context.Context, cfg RemoteConfig, path
 	return items, nil
 }
 
+// RemotePatch patches an item at the given path (non-list path only).
+// Use RemotePatchWithContext for cancellation support.
+func RemotePatch[T any](cfg RemoteConfig, path string, item T) error {
+	return RemotePatchWithContext(context.Background(), cfg, path, item)
+}
+
+// RemotePatchWithContext patches an item at the given path with context support.
+func RemotePatchWithContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) error {
+	err := cfg.Validate()
+	if err != nil {
+		return err
+	}
+	if key.IsGlob(path) {
+		log.Println("RemotePatch["+path+"]: ", ErrPathGlobNotAllowed)
+		return ErrPathGlobNotAllowed
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		log.Printf("RemotePatch[%s]: failed to marshal data: %v", path, err)
+		return err
+	}
+
+	_, err = cfg.doWithRetry(ctx, "RemotePatch", path, func() (*http.Request, error) {
+		req, err := http.NewRequest("PATCH", cfg.URL(path), bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range cfg.Header {
+			req.Header[k] = v
+		}
+		return req, nil
+	})
+	return err
+}
+
+// RemotePatchWithResponse patches an item at the given path and returns the response.
+func RemotePatchWithResponse[T any](cfg RemoteConfig, path string, item T) (IndexResponse, error) {
+	return RemotePatchWithResponseContext(context.Background(), cfg, path, item)
+}
+
+// RemotePatchWithResponseContext patches an item at the given path with context support and returns the response.
+func RemotePatchWithResponseContext[T any](ctx context.Context, cfg RemoteConfig, path string, item T) (IndexResponse, error) {
+	err := cfg.Validate()
+	if err != nil {
+		return IndexResponse{}, err
+	}
+	if key.IsGlob(path) {
+		log.Println("RemotePatch["+path+"]: ", ErrPathGlobNotAllowed)
+		return IndexResponse{}, ErrPathGlobNotAllowed
+	}
+
+	data, err := json.Marshal(item)
+	if err != nil {
+		log.Printf("RemotePatch[%s]: failed to marshal data: %v", path, err)
+		return IndexResponse{}, err
+	}
+
+	result, err := cfg.doWithRetry(ctx, "RemotePatch", path, func() (*http.Request, error) {
+		req, err := http.NewRequest("PATCH", cfg.URL(path), bytes.NewReader(data))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range cfg.Header {
+			req.Header[k] = v
+		}
+		return req, nil
+	})
+	if err != nil {
+		return IndexResponse{}, err
+	}
+
+	var idxResp IndexResponse
+	err = json.Unmarshal(result.body, &idxResp)
+	if err != nil || idxResp.Index == "" {
+		log.Printf("RemotePatchWithResponse[%s]: failed to decode index response: %v", path, err)
+		return IndexResponse{}, err
+	}
+
+	return idxResp, nil
+}
+
 // RemoteDelete deletes an item at the given path.
 // Use RemoteDeleteWithContext for cancellation support.
 func RemoteDelete(cfg RemoteConfig, path string) error {

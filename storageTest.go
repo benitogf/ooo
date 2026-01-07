@@ -1245,16 +1245,4 @@ func StorageBatchSetTest(server *Server, t *testing.T, n int) {
 		require.Equal(t, testData, json.RawMessage(string(obj.Data)))
 	}
 
-	// test data merge
-	testUpdateData := json.RawMessage(`{"another":"1234","newKey":"new"}`)
-	expectedNewData := json.RawMessage(`{"another":"1234","newKey":"new","test":"123"}`)
-	_, err := server.Storage.Patch("test/*", testUpdateData)
-	require.NoError(t, err)
-
-	for i := 1; i < n; i++ {
-		_key := strconv.Itoa(i)
-		obj, err := server.Storage.Get("test/" + _key)
-		require.NoError(t, err)
-		require.Equal(t, expectedNewData, json.RawMessage(string(obj.Data)))
-	}
 }

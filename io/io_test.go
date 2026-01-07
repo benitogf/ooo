@@ -310,3 +310,147 @@ func TestLocalPathValidation(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "glob required")
 }
+
+func TestLocalPatch(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Set initial data
+	err := ooo.Set(server, THING1_PATH, Thing{
+		This: "original",
+		That: "value",
+	})
+	require.NoError(t, err)
+
+	// Patch with partial data - only update "this" field
+	err = ooo.Patch(server, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.NoError(t, err)
+
+	// Verify the patch was applied correctly
+	thing, err := ooo.Get[Thing](server, THING1_PATH)
+	require.NoError(t, err)
+	require.Equal(t, "patched", thing.Data.This)
+	require.Equal(t, "value", thing.Data.That) // Original value preserved
+}
+
+func TestLocalPatchNotFound(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Patch non-existent item should fail
+	err := ooo.Patch(server, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.Error(t, err)
+}
+
+func TestLocalPatchGlobNotAllowed(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Patch with glob path should fail
+	err := ooo.Patch(server, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob not allowed")
+}
+
+func TestRemotePatch(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Set initial data
+	err := ooio.RemoteSet(cfg, THING1_PATH, Thing{
+		This: "original",
+		That: "value",
+	})
+	require.NoError(t, err)
+
+	// Patch with partial data - only update "this" field
+	err = ooio.RemotePatch(cfg, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.NoError(t, err)
+
+	// Verify the patch was applied correctly
+	thing, err := ooio.RemoteGet[Thing](cfg, THING1_PATH)
+	require.NoError(t, err)
+	require.Equal(t, "patched", thing.Data.This)
+	require.Equal(t, "value", thing.Data.That) // Original value preserved
+}
+
+func TestRemotePatchNotFound(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Patch non-existent item should fail
+	err := ooio.RemotePatch(cfg, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.Error(t, err)
+}
+
+func TestRemotePatchGlobNotAllowed(t *testing.T) {
+	cfg := ooio.RemoteConfig{
+		Client: &http.Client{},
+		Host:   "localhost:8080",
+	}
+
+	// RemotePatch with glob path should fail
+	err := ooio.RemotePatch(cfg, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is not allowed")
+}
+
+func TestRemotePatchWithResponse(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Set initial data
+	err := ooio.RemoteSet(cfg, THING1_PATH, Thing{
+		This: "original",
+		That: "value",
+	})
+	require.NoError(t, err)
+
+	// Patch with response
+	resp, err := ooio.RemotePatchWithResponse(cfg, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Index)
+}

@@ -7,7 +7,6 @@ import (
 	"github.com/goccy/go-json"
 
 	"github.com/benitogf/ooo/key"
-	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
 )
@@ -502,88 +501,6 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 	}
 
 	return index, nil
-}
-
-// patchSingle applies a patch to a single key
-func (l *Layered) patchSingle(path string, data json.RawMessage, now int64) (*meta.Object, error) {
-	obj, err := l.Get(path)
-	if err != nil {
-		return nil, err
-	}
-
-	merged, info, err := merge.MergeBytes(obj.Data, data)
-	if err != nil {
-		return nil, err
-	}
-
-	if len(info.Replaced) == 0 {
-		return nil, ErrNoop
-	}
-
-	index := key.LastIndex(path)
-	created, updated := l.peek(path, now)
-
-	newObj := &meta.Object{
-		Created: created,
-		Updated: updated,
-		Index:   index,
-		Path:    path,
-		Data:    merged,
-	}
-
-	// Write to all layers
-	if l.memory != nil {
-		_ = l.memory.Set(path, newObj)
-	}
-	if l.embedded != nil {
-		_ = l.embedded.Set(path, newObj)
-	}
-
-	return newObj, nil
-}
-
-// Patch applies a patch to matching keys
-func (l *Layered) Patch(path string, data json.RawMessage) (string, error) {
-	if !key.IsValid(path) {
-		return path, ErrInvalidPath
-	}
-	if len(data) == 0 {
-		return path, ErrInvalidStorageData
-	}
-
-	now := monotonic.Now()
-
-	if !key.HasGlob(path) {
-		obj, err := l.patchSingle(path, data, now)
-		if err != nil {
-			return path, err
-		}
-		if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
-			l.sendEvent(Event{Key: path, Operation: "set", Object: obj})
-		}
-		return path, nil
-	}
-
-	// Get all matching keys
-	keys, err := l.Keys()
-	if err != nil {
-		return path, err
-	}
-
-	for _, k := range keys {
-		if !key.Match(path, k) {
-			continue
-		}
-		obj, err := l.patchSingle(k, data, now)
-		if err != nil {
-			return path, err
-		}
-		if !key.Contains(l.noBroadcastKeys, k) && l.Active() {
-			l.sendEvent(Event{Key: k, Operation: "set", Object: obj})
-		}
-	}
-
-	return path, nil
 }
 
 // SetWithMeta set entries with metadata created/updated values

@@ -6,6 +6,7 @@ import (
 
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
+	"github.com/benitogf/ooo/merge"
 	"github.com/goccy/go-json"
 )
 
@@ -103,4 +104,35 @@ func Delete(server *Server, path string) error {
 		return ErrPathGlobNotAllowed
 	}
 	return server.Storage.Del(path)
+}
+
+// Patch applies a partial update to an existing item at the specified path.
+// The path must not contain glob patterns and the item must already exist.
+// The patch is merged with the existing data using JSON merge semantics.
+func Patch[T any](server *Server, path string, item T) error {
+	if key.IsGlob(path) {
+		log.Println("Patch["+path+"]: ", ErrPathGlobNotAllowed)
+		return ErrPathGlobNotAllowed
+	}
+
+	currentObj, err := server.Storage.Get(path)
+	if err != nil {
+		log.Println("Patch["+path+"]: failed to get current data", err)
+		return err
+	}
+
+	patchData, err := json.Marshal(item)
+	if err != nil {
+		log.Println("Patch["+path+"]: failed to marshal patch data", err)
+		return err
+	}
+
+	mergedBytes, _, err := merge.MergeBytes(currentObj.Data, patchData)
+	if err != nil {
+		log.Println("Patch["+path+"]: failed to merge data", err)
+		return err
+	}
+
+	_, err = server.Storage.Set(path, mergedBytes)
+	return err
 }

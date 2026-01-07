@@ -147,7 +147,6 @@ type Database interface {
 	GetNRange(path string, limit int, from, to int64) ([]meta.Object, error)
 	Set(key string, data json.RawMessage) (string, error)
 	Push(path string, data json.RawMessage) (string, error)
-	Patch(key string, data json.RawMessage) (string, error)
 	SetWithMeta(key string, data json.RawMessage, created, updated int64) (string, error)
 	SetAndUnlock(key string, data json.RawMessage) (string, error)
 	Unlock(key string) error

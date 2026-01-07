@@ -87,11 +87,6 @@ func (a *Adapter) Push(path string, data json.RawMessage) (string, error) {
 	return a.db.Push(path, data)
 }
 
-// Patch applies a patch to matching keys
-func (a *Adapter) Patch(key string, data json.RawMessage) (string, error) {
-	return a.db.Patch(key, data)
-}
-
 // SetWithMeta stores a value with metadata
 func (a *Adapter) SetWithMeta(key string, data json.RawMessage, created, updated int64) (string, error) {
 	return a.db.SetWithMeta(key, data, created, updated)
