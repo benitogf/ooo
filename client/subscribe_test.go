@@ -37,14 +37,12 @@ func TestClientList(t *testing.T) {
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	wg := sync.WaitGroup{}
 
 	wg.Add(1)
 	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:     ctx,
+		Ctx:     t.Context(),
 		Server:  client.Server{Protocol: "ws", Host: server.Address},
 		Silence: true,
 	}, "devices/*", client.SubscribeListEvents[Device]{
@@ -170,8 +168,6 @@ func TestClientListCallbackCurry(t *testing.T) {
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	wg := sync.WaitGroup{}
 
@@ -188,7 +184,7 @@ func TestClientListCallbackCurry(t *testing.T) {
 
 	wg.Add(1)
 	go client.SubscribeList(client.SubscribeConfig{
-		Ctx:     ctx,
+		Ctx:     t.Context(),
 		Server:  client.Server{Protocol: "ws", Host: server.Address},
 		Silence: true,
 	}, "devices/*", client.SubscribeListEvents[Device]{

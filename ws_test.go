@@ -16,6 +16,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestWsTime tests clock websocket connections
+// Note: Uses raw websocket because clock endpoint sends raw timestamp strings, not JSON objects
 func TestWsTime(t *testing.T) {
 	t.Parallel()
 	var wg sync.WaitGroup
@@ -27,8 +29,10 @@ func TestWsTime(t *testing.T) {
 	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/"}
 	c1, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
+	defer c1.Close()
 	c2, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
+	defer c2.Close()
 
 	// Wait for 2 messages on c1 and 1 message on c2
 	c1Count := 0
@@ -53,14 +57,12 @@ func TestWsTime(t *testing.T) {
 	_, message, err := c2.ReadMessage()
 	require.NoError(t, err)
 	server.Console.Log("time c2", string(message))
-	c2.Close()
 
 	wg.Wait()
-
-	err = c1.Close()
-	require.NoError(t, err)
 }
 
+// TestWebSocketSubscriptionEvents tests OnSubscribe/OnUnsubscribe callbacks
+// Note: Uses raw websocket to test subscription lifecycle events
 func TestWebSocketSubscriptionEvents(t *testing.T) {
 	server := Server{}
 	server.Silence = true
@@ -95,7 +97,7 @@ func TestWebSocketSubscriptionEvents(t *testing.T) {
 	subscribedWg.Wait()
 	require.Equal(t, "testkey", subscribed)
 
-	// Close connection
+	// Close connection - this triggers OnUnsubscribe
 	c.Close()
 
 	unsubscribedWg.Wait()
@@ -123,6 +125,8 @@ func TestWebSocketSubscriptionDenied(t *testing.T) {
 	require.Nil(t, c)
 }
 
+// TestWebSocketWithVersion tests version query parameter behavior
+// Note: Uses raw websocket to test ?v= query parameter which client package doesn't expose
 func TestWebSocketWithVersion(t *testing.T) {
 	var wg sync.WaitGroup
 	server := Server{}
@@ -203,6 +207,8 @@ func TestWebSocketFilteredRoute(t *testing.T) {
 	require.Nil(t, c)
 }
 
+// TestWebSocketConcurrentConnections tests multiple simultaneous connections
+// Note: Uses raw websocket to test concurrent connection handling
 func TestWebSocketConcurrentConnections(t *testing.T) {
 	server := Server{}
 	server.Silence = true
@@ -216,7 +222,7 @@ func TestWebSocketConcurrentConnections(t *testing.T) {
 	var wg sync.WaitGroup
 	numConnections := 5
 
-	for i := 0; i < numConnections; i++ {
+	for i := range numConnections {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
@@ -326,6 +332,8 @@ func TestWebSocketReadFilter(t *testing.T) {
 	require.NotContains(t, string(message), "original")
 }
 
+// TestWebSocketGlobKey tests glob pattern in websocket path
+// Note: Uses raw websocket to test path pattern handling
 func TestWebSocketGlobKey(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
@@ -339,7 +347,7 @@ func TestWebSocketGlobKey(t *testing.T) {
 	server.Console.Err(err)
 	require.NotNil(t, c)
 	require.NoError(t, err)
-	c.Close()
+	defer c.Close()
 }
 
 func TestWebSocketInvalidKey(t *testing.T) {

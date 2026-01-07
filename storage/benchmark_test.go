@@ -35,7 +35,7 @@ func BenchmarkMemoryLayerGet(b *testing.B) {
 	defer layer.Close()
 
 	// Pre-populate
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		key := "test/" + strconv.Itoa(i)
 		obj := &meta.Object{
 			Created: int64(i),
@@ -60,7 +60,7 @@ func BenchmarkMemoryLayerGetList(b *testing.B) {
 	defer layer.Close()
 
 	// Pre-populate
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		key := "test/" + strconv.Itoa(i)
 		obj := &meta.Object{
 			Created: int64(i),

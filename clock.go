@@ -22,13 +22,18 @@ func (server *Server) sendTime() {
 func (server *Server) startClock() {
 	defer server.clockWg.Done()
 	ticker := time.NewTicker(server.Tick)
+	defer ticker.Stop()
 	for {
-		<-ticker.C
-		if server.Active() {
-			server.sendTime()
-			continue
+		select {
+		case <-server.clockStop:
+			return
+		case <-ticker.C:
+			if server.Active() {
+				server.sendTime()
+			} else {
+				return
+			}
 		}
-		return
 	}
 }
 

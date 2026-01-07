@@ -46,7 +46,7 @@ func BenchmarkInitCacheObjects(b *testing.B) {
 	}
 
 	objects := make([]meta.Object, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		objects[i] = meta.Object{
 			Created: int64(i * 1000),
 			Index:   strconv.Itoa(i),
@@ -158,7 +158,7 @@ func BenchmarkBroadcastListAdd(b *testing.B) {
 
 	// Create initial list
 	objects := make([]meta.Object, 10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		objects[i] = meta.Object{
 			Created: int64(i * 1000),
 			Index:   strconv.Itoa(i),
@@ -218,7 +218,7 @@ func BenchmarkBroadcastListUpdate(b *testing.B) {
 	}
 
 	objects := make([]meta.Object, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		objects[i] = meta.Object{
 			Created: int64(i * 1000),
 			Index:   strconv.Itoa(i),
@@ -279,7 +279,7 @@ func BenchmarkBroadcastListRemove(b *testing.B) {
 	}
 
 	objects := make([]meta.Object, 100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		objects[i] = meta.Object{
 			Created: int64(i * 1000),
 			Index:   strconv.Itoa(i),
@@ -359,7 +359,7 @@ func BenchmarkNewConnectionPreallocated(b *testing.B) {
 	}
 
 	paths := make([]string, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		paths[i] = "test/" + strconv.Itoa(i)
 	}
 	stream.PreallocatePools(paths)
@@ -409,7 +409,7 @@ func BenchmarkConcurrentBroadcast(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := "pool/" + strconv.Itoa(i)
 		obj := &meta.Object{
 			Created: int64(i * 1000),
@@ -474,7 +474,7 @@ func BenchmarkBuildMessage(b *testing.B) {
 func BenchmarkBuildMessageLarge(b *testing.B) {
 	data := make([]byte, 0, 10000)
 	data = append(data, '[')
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if i > 0 {
 			data = append(data, ',')
 		}

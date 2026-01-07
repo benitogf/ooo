@@ -138,7 +138,8 @@ type Server struct {
 	IdleTimeout       time.Duration
 	OnStorageEvent    storage.EventCallback
 	BeforeRead        func(key string)
-	startErr          chan error // channel for startup errors
+	startErr          chan error    // channel for startup errors
+	clockStop         chan struct{} // channel to signal clock goroutine to stop
 }
 
 // Validate checks the server configuration for common issues.
@@ -577,6 +578,7 @@ func (server *Server) StartWithError(address string) error {
 		return err
 	}
 	server.Console = coat.NewConsole(server.Address, server.Silence)
+	server.clockStop = make(chan struct{})
 	server.clockWg.Add(1)
 	go server.startClock()
 	return nil
@@ -597,7 +599,8 @@ func (server *Server) Close(sig os.Signal) {
 	if atomic.LoadInt64(&server.closing) != 1 {
 		atomic.StoreInt64(&server.closing, 1)
 		atomic.StoreInt64(&server.active, 0)
-		server.clockWg.Wait() // Wait for clock goroutine to exit before touching Stream
+		close(server.clockStop) // Signal clock goroutine to stop immediately
+		server.clockWg.Wait()   // Wait for clock goroutine to exit before touching Stream
 		// Force close all stream connections first
 		server.Stream.CloseAll()
 		// Shutdown HTTP server to stop accepting new connections
@@ -619,6 +622,7 @@ func (server *Server) Close(sig os.Signal) {
 		server.filters = filters.Filters{}
 		server.limitFilters = nil
 		server.startErr = nil
+		server.clockStop = nil
 	}
 }
 

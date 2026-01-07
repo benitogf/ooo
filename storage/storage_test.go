@@ -163,7 +163,7 @@ func TestMemoryStorageGetN(t *testing.T) {
 	defer storage.Close()
 
 	// Add entries with different created times
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := "test/" + string(rune('0'+i))
 		_, err := storage.SetWithMeta(key, testData, int64(i), 0)
 		require.NoError(t, err)

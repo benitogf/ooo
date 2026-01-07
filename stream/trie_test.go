@@ -172,7 +172,7 @@ func BenchmarkTrieFindMatching(b *testing.B) {
 	trie := newPoolTrie()
 
 	// Insert 100 pools with various paths
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		key := "users/" + string(rune('a'+i%26)) + string(rune('0'+i/26))
 		trie.insert(key, &Pool{Key: key})
 	}
@@ -190,7 +190,7 @@ func BenchmarkTrieFindMatchingWildcard(b *testing.B) {
 	trie := newPoolTrie()
 
 	// Insert 100 pools with various paths
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		key := "users/" + string(rune('a'+i%26)) + string(rune('0'+i/26))
 		trie.insert(key, &Pool{Key: key})
 	}
@@ -204,7 +204,7 @@ func BenchmarkTrieFindMatchingWildcard(b *testing.B) {
 // BenchmarkTrie_100Pools benchmarks trie with 100 pools
 func BenchmarkTrie_100Pools(b *testing.B) {
 	trie := newPoolTrie()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		key := "users/" + string(rune('a'+i%26)) + string(rune('0'+i/26))
 		trie.insert(key, &Pool{Key: key})
 	}
@@ -219,7 +219,7 @@ func BenchmarkTrie_100Pools(b *testing.B) {
 // BenchmarkTrie_1000Pools benchmarks trie with 1000 pools
 func BenchmarkTrie_1000Pools(b *testing.B) {
 	trie := newPoolTrie()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		key := "users/" + string(rune('a'+i%26)) + string(rune('0'+i/26%10)) + string(rune('0'+i/260))
 		trie.insert(key, &Pool{Key: key})
 	}

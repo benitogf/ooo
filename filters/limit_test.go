@@ -57,7 +57,7 @@ func TestLimitFilter_Check_UnderLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add 3 items (under limit of 5)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		data, _ := json.Marshal(map[string]int{"value": i})
 		_, err := server.Storage.Set(key.Build("items/*"), data)
 		require.NoError(t, err)
@@ -83,7 +83,7 @@ func TestLimitFilter_ViaHTTP(t *testing.T) {
 	server.OpenFilter("logs/*")
 
 	// Add 5 items via HTTP - ReadFilter limits view, AfterWrite cleans up
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		data, _ := json.Marshal(map[string]string{"log": "entry " + strconv.Itoa(i)})
 		resp, err := server.Client.Post("http://"+server.Address+"/logs/*", "application/json", bytes.NewBuffer(data))
 		require.NoError(t, err)
@@ -107,7 +107,7 @@ func TestLimitFilter_Check_AtLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add 3 items (at limit)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		data, _ := json.Marshal(map[string]int{"value": i})
 		newPath := key.Build("items/*")
 		_, err := server.Storage.Set(newPath, data)
@@ -147,7 +147,7 @@ func TestLimitFilter_Check_OverLimit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add 4 items (over limit of 3)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		data, _ := json.Marshal(map[string]int{"value": i})
 		newPath := key.Build("items/*")
 		_, err := server.Storage.Set(newPath, data)
@@ -177,7 +177,7 @@ func TestLimitFilter_ManualCheck(t *testing.T) {
 	server.OpenFilter("logs/*")
 
 	// Add 5 items with manual limit check after each
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		data, _ := json.Marshal(map[string]string{"log": "entry " + strconv.Itoa(i)})
 		_, err := server.Storage.Set(key.Build("logs/*"), data)
 		require.NoError(t, err)
@@ -202,7 +202,7 @@ func TestLimitFilter_SequentialAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	// Sequential writes with limit checks
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		data, _ := json.Marshal(map[string]int{"value": i})
 		server.Storage.Set(key.Build("concurrent/*"), data)
 		lf.Check()

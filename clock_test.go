@@ -79,6 +79,8 @@ func TestClockWebsocketUnauthorized(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestClockWebsocketAuthorized tests clock websocket connection
+// Note: Uses raw websocket because clock endpoint sends raw timestamp strings, not JSON objects
 func TestClockWebsocketAuthorized(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
@@ -93,6 +95,7 @@ func TestClockWebsocketAuthorized(t *testing.T) {
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	require.NoError(t, err)
 	require.NotNil(t, c)
+	defer c.Close()
 
 	// Read initial time message
 	_, message, err := c.ReadMessage()
@@ -102,8 +105,6 @@ func TestClockWebsocketAuthorized(t *testing.T) {
 	timestamp, err := strconv.ParseInt(string(message), 10, 64)
 	require.NoError(t, err)
 	require.Greater(t, timestamp, int64(0))
-
-	c.Close()
 }
 
 func TestClockHTTPRequest(t *testing.T) {

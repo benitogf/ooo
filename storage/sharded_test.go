@@ -129,7 +129,7 @@ func TestShardedChan_ConcurrentSend(t *testing.T) {
 
 	// Send events concurrently
 	wg.Add(eventCount)
-	for i := 0; i < eventCount; i++ {
+	for i := range eventCount {
 		go func(idx int) {
 			defer wg.Done()
 			s.Send(Event{

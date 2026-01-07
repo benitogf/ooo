@@ -12,7 +12,7 @@ func TestMonotonicNow(t *testing.T) {
 	Init()
 	// Test that Now() returns increasing values
 	prev := Now()
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		curr := Now()
 		require.Greater(t, curr, prev, "timestamp should always increase")
 		prev = curr
