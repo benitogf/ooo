@@ -30,10 +30,11 @@ func BenchmarkInitCacheObject(b *testing.B) {
 		Data:    json.RawMessage(`{"id":"1","name":"test"}`),
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i)
 		_ = stream.InitCacheObjectWithVersion(key, obj)
+		i++
 	}
 }
 
@@ -55,8 +56,7 @@ func BenchmarkInitCacheObjects(b *testing.B) {
 		}
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		key := "test/*"
 		_ = stream.InitCacheObjectsWithVersion(key, objects)
 	}
@@ -79,8 +79,7 @@ func BenchmarkGetCacheVersion(b *testing.B) {
 	}
 	stream.InitCacheObjectWithVersion(key, obj)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = stream.GetCacheVersion(key)
 	}
 }
@@ -128,8 +127,7 @@ func BenchmarkBroadcastSinglePool(b *testing.B) {
 		Data:    json.RawMessage(`{"id":"1","updated":true}`),
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		stream.Broadcast("test/single", BroadcastOpt{
 			Key:       "test/single",
 			Operation: "set",
@@ -185,8 +183,7 @@ func BenchmarkBroadcastListAdd(b *testing.B) {
 		Data:    json.RawMessage(`{"id":"new","name":"New User"}`),
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Reset cache
 		pool.cache.Objects = make([]meta.Object, len(objects))
 		copy(pool.cache.Objects, objects)
@@ -246,8 +243,7 @@ func BenchmarkBroadcastListUpdate(b *testing.B) {
 		Data:    json.RawMessage(`{"id":"50","status":"inactive"}`),
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Reset cache
 		pool.cache.Objects = make([]meta.Object, len(objects))
 		copy(pool.cache.Objects, objects)
@@ -303,8 +299,7 @@ func BenchmarkBroadcastListRemove(b *testing.B) {
 		Path: "users/50",
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Reset cache
 		pool.cache.Objects = make([]meta.Object, len(objects))
 		copy(pool.cache.Objects, objects)
@@ -339,10 +334,11 @@ func BenchmarkNewConnection(b *testing.B) {
 		OnUnsubscribe: func(key string) {},
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i%1000)
 		stream.newConn(key, nil)
+		i++
 	}
 }
 
@@ -364,10 +360,11 @@ func BenchmarkNewConnectionPreallocated(b *testing.B) {
 	}
 	stream.PreallocatePools(paths)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i%1000)
 		stream.newConn(key, nil)
+		i++
 	}
 }
 
@@ -386,8 +383,7 @@ func BenchmarkNewConnectionExistingPool(b *testing.B) {
 	key := "test/existing"
 	stream.newConn(key, nil)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		stream.newConn(key, nil)
 	}
 }
@@ -464,9 +460,10 @@ func BenchmarkConcurrentBroadcast(b *testing.B) {
 func BenchmarkBuildMessage(b *testing.B) {
 	data := []byte(`{"id":"1","name":"test","nested":{"key":"value"}}`)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		_ = buildMessage(data, true, int64(i))
+		i++
 	}
 }
 
@@ -486,9 +483,10 @@ func BenchmarkBuildMessageLarge(b *testing.B) {
 	}
 	data = append(data, ']')
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		_ = buildMessage(data, false, int64(i))
+		i++
 	}
 }
 
@@ -500,8 +498,7 @@ func BenchmarkRemoveConn(b *testing.B) {
 	}
 	target := conns[50] // Remove from middle
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		// Make a copy to avoid modifying the original
 		testConns := make([]*Conn, len(conns))
 		copy(testConns, conns)

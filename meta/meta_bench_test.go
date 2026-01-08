@@ -14,14 +14,14 @@ func BenchmarkEncode(b *testing.B) {
 		Path:    "test/path",
 		Data:    json.RawMessage(`{"key":"value","nested":{"a":1,"b":2}}`),
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Encode(obj)
 	}
 }
 
 func BenchmarkDecode(b *testing.B) {
 	data := []byte(`{"created":12345,"updated":67890,"index":"test-index","path":"test/path","data":{"key":"value"}}`)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Decode(data)
 	}
 }
@@ -34,14 +34,14 @@ func BenchmarkNew(b *testing.B) {
 		Path:    "test/path",
 		Data:    json.RawMessage(`{"key":"value"}`),
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		New(obj)
 	}
 }
 
 func BenchmarkDecodeList(b *testing.B) {
 	data := []byte(`[{"created":1,"updated":2,"index":"1","data":{}},{"created":2,"updated":3,"index":"2","data":{}},{"created":3,"updated":4,"index":"3","data":{}}]`)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DecodeList(data)
 	}
 }
@@ -54,14 +54,14 @@ func BenchmarkEncodeToBuffer(b *testing.B) {
 		Path:    "test/path",
 		Data:    json.RawMessage(`{"key":"value","nested":{"a":1,"b":2}}`),
 	}
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		EncodeToBuffer(obj)
 	}
 }
 
 func BenchmarkDecodePooled(b *testing.B) {
 	data := []byte(`{"created":12345,"updated":67890,"index":"test-index","path":"test/path","data":{"key":"value"}}`)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		obj, _ := DecodePooled(data)
 		if obj != nil {
 			PutObject(obj)
@@ -71,7 +71,7 @@ func BenchmarkDecodePooled(b *testing.B) {
 
 func BenchmarkDecodeListWithCap(b *testing.B) {
 	data := []byte(`[{"created":1,"updated":2,"index":"1","data":{}},{"created":2,"updated":3,"index":"2","data":{}},{"created":3,"updated":4,"index":"3","data":{}}]`)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		DecodeListWithCap(data, 3)
 	}
 }

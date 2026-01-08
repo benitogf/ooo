@@ -15,8 +15,8 @@ func BenchmarkMemoryLayerSet(b *testing.B) {
 	layer.Start(LayerOptions{})
 	defer layer.Close()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i)
 		obj := &meta.Object{
 			Created: int64(i),
@@ -26,6 +26,7 @@ func BenchmarkMemoryLayerSet(b *testing.B) {
 			Data:    benchData,
 		}
 		layer.Set(key, obj)
+		i++
 	}
 }
 
@@ -47,10 +48,11 @@ func BenchmarkMemoryLayerGet(b *testing.B) {
 		layer.Set(key, obj)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i%1000)
 		layer.Get(key)
+		i++
 	}
 }
 
@@ -72,8 +74,7 @@ func BenchmarkMemoryLayerGetList(b *testing.B) {
 		layer.Set(key, obj)
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		layer.GetList("test/*")
 	}
 }
@@ -103,12 +104,13 @@ func BenchmarkMemoryStorageSetGetDel(b *testing.B) {
 	}()
 	defer close(done)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i)
 		storage.Set(key, benchData)
 		storage.Get(key)
 		storage.Del(key)
+		i++
 	}
 }
 
@@ -137,11 +139,12 @@ func BenchmarkLayeredStorageMemoryOnly(b *testing.B) {
 	}()
 	defer close(done)
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	i := 0
+	for b.Loop() {
 		key := "test/" + strconv.Itoa(i)
 		storage.Set(key, benchData)
 		storage.Get(key)
 		storage.Del(key)
+		i++
 	}
 }

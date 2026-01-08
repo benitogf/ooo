@@ -198,11 +198,9 @@ func BenchmarkShardedChan_Send(b *testing.B) {
 		<-done
 	}()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		s.Send(event)
 	}
-	b.StopTimer()
 
 	s.Close()
 	close(done)
@@ -213,8 +211,7 @@ func BenchmarkShardedChan_ShardFor(b *testing.B) {
 	defer s.Close()
 
 	key := "benchmark/test/key/path"
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = s.ShardFor(key)
 	}
 }

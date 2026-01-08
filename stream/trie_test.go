@@ -180,8 +180,7 @@ func BenchmarkTrieFindMatching(b *testing.B) {
 	trie.insert("users/*", &Pool{Key: "users/*"})
 	trie.insert("posts/*", &Pool{Key: "posts/*"})
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = trie.findMatching("users/a0")
 	}
 }
@@ -195,8 +194,7 @@ func BenchmarkTrieFindMatchingWildcard(b *testing.B) {
 		trie.insert(key, &Pool{Key: key})
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = trie.findMatching("users/*")
 	}
 }
@@ -210,8 +208,7 @@ func BenchmarkTrie_100Pools(b *testing.B) {
 	}
 	trie.insert("users/*", &Pool{Key: "users/*"})
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = trie.findMatching("users/a0")
 	}
 }
@@ -225,8 +222,7 @@ func BenchmarkTrie_1000Pools(b *testing.B) {
 	}
 	trie.insert("users/*", &Pool{Key: "users/*"})
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = trie.findMatching("users/a00")
 	}
 }

@@ -454,3 +454,42 @@ func TestRemotePatchWithResponse(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, resp.Index)
 }
+
+func TestRemotePushWithResponse(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THINGS_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Push with response - should return the index
+	resp, err := ooio.RemotePushWithResponse(cfg, THINGS_PATH, Thing{
+		This: "test",
+		That: "data",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Index)
+
+	// Verify the item was created
+	thing, err := ooio.RemoteGet[Thing](cfg, THINGS_BASE_PATH+"/"+resp.Index)
+	require.NoError(t, err)
+	require.Equal(t, "test", thing.Data.This)
+}
+
+func TestRemotePushWithResponseGlobRequired(t *testing.T) {
+	cfg := ooio.RemoteConfig{
+		Client: &http.Client{},
+		Host:   "localhost:8080",
+	}
+
+	// RemotePushWithResponse with non-glob path should fail
+	_, err := ooio.RemotePushWithResponse(cfg, "thing1", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is required")
+}

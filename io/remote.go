@@ -296,7 +296,7 @@ func RemotePushWithResponseContext[T any](ctx context.Context, cfg RemoteConfig,
 	// Parse the index from the response
 	var idxResp IndexResponse
 	err = json.Unmarshal(result.body, &idxResp)
-	if err != nil || idxResp.Index == "" {
+	if err != nil {
 		log.Printf("RemotePushWithResponse[%s]: failed to decode index response: %v", path, err)
 		return IndexResponse{}, err
 	}

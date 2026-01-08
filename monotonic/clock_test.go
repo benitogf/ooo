@@ -83,7 +83,7 @@ func TestClockCorrection(t *testing.T) {
 
 func BenchmarkMonotonicNow(b *testing.B) {
 	Init()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		Now()
 	}
 }
