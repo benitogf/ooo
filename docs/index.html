@@ -3077,22 +3077,27 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         ctx.fillStyle = colors.bg;
         ctx.fillRect(0, 0, w, h);
 
+        // Responsive layout - scale based on canvas width
+        const isNarrow = w < 400;
+        const scale = isNarrow ? w / 400 : 1;
+
         // Layout
-        const serverX = w / 2 - 80;
+        const serverW = Math.min(160, w * 0.4);
+        const serverX = w / 2 - serverW / 2;
         const serverY = 30;
-        const serverW = 160;
         const serverH = 90;
 
-        const storageX = w / 2 - 100;
+        const storageW = Math.min(200, w * 0.55);
+        const storageX = w / 2 - storageW / 2;
         const storageY = 140;
-        const storageW = 200;
         const storageH = 130;
 
-        // Client positions
+        // Client positions - use proportional spacing
+        const clientMargin = Math.max(50, w * 0.15);
         const clients = [
-          { x: 100, y: 100, label: 'REST Client', connected: true },
-          { x: w - 100, y: 100, label: 'settings', connected: state.settingsSub },
-          { x: w - 100, y: 280, label: 'items/*', connected: state.itemsSub }
+          { x: clientMargin, y: 100, label: 'REST Client', connected: true },
+          { x: w - clientMargin, y: 100, label: 'settings', connected: state.settingsSub },
+          { x: w - clientMargin, y: 280, label: 'items/*', connected: state.itemsSub }
         ];
 
         // Draw connections
@@ -3171,6 +3176,7 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       // Layout constants (matching draw function)
       function getLayout() {
         const w = getCanvasWidth();
+        const clientMargin = Math.max(50, w * 0.15);
         return {
           w,
           serverCenterX: w / 2,
@@ -3178,9 +3184,9 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
           serverBottom: 120, // serverY(30) + serverH(90)
           storageTop: 140,
           storageCenterY: 205, // storageY(140) + storageH(130)/2
-          restClientX: 100,
+          restClientX: clientMargin,
           restClientY: 100,
-          wsClientX: w - 100,
+          wsClientX: w - clientMargin,
           wsClientY: 100,
           subscriberY: 280
         };
