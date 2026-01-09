@@ -7,6 +7,9 @@ cover.html
 debug.test
 .vscode
 ooo-fuzz.zip
-cpu.prof
-mem.prof
+*.prof
+*.prof
+*.test
 ooo.test.exe
+coverage.out
+test_compat

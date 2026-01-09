@@ -1,13 +1,12 @@
 package io_test
 
 import (
+	"net/http"
 	"os"
-	"runtime"
 	"testing"
-	"time"
 
 	"github.com/benitogf/ooo"
-	"github.com/benitogf/ooo/io"
+	ooio "github.com/benitogf/ooo/io"
 	"github.com/stretchr/testify/require"
 )
 
@@ -29,53 +28,49 @@ func TestIObasic(t *testing.T) {
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	err := io.Set(server, THING1_PATH, Thing{
+	err := ooo.Set(server, THING1_PATH, Thing{
 		This: "this",
 		That: "that",
 	})
 	require.NoError(t, err)
-	err = io.Set(server, THING2_PATH, Thing{
+	err = ooo.Set(server, THING2_PATH, Thing{
 		This: "here",
 		That: "there",
 	})
 	require.NoError(t, err)
 
-	thing1, err := io.Get[Thing](server, THING1_PATH)
+	thing1, err := ooo.Get[Thing](server, THING1_PATH)
 	require.NoError(t, err)
 
 	require.Equal(t, "this", thing1.Data.This)
 	require.Equal(t, "that", thing1.Data.That)
 
-	thing2, err := io.Get[Thing](server, THING2_PATH)
+	thing2, err := ooo.Get[Thing](server, THING2_PATH)
 	require.NoError(t, err)
 
 	require.Equal(t, "here", thing2.Data.This)
 	require.Equal(t, "there", thing2.Data.That)
 
-	err = io.Push(server, THINGS_PATH, thing1.Data)
+	index, err := ooo.Push(server, THINGS_PATH, thing1.Data)
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
-	err = io.Push(server, THINGS_PATH, thing2.Data)
+	require.NotEmpty(t, index)
+	index, err = ooo.Push(server, THINGS_PATH, thing2.Data)
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
+	require.NotEmpty(t, index)
 
-	things, err := io.GetList[Thing](server, THINGS_PATH)
+	things, err := ooo.GetList[Thing](server, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(things))
 	require.Equal(t, "this", things[0].Data.This)
 	require.Equal(t, "here", things[1].Data.This)
 
-	err = io.Set(server, string(THINGS_BASE_PATH)+"/what", Thing{
+	err = ooo.Set(server, string(THINGS_BASE_PATH)+"/what", Thing{
 		This: "what",
 		That: "how",
 	})
 	require.NoError(t, err)
 
-	things, err = io.GetList[Thing](server, THINGS_PATH)
+	things, err = ooo.GetList[Thing](server, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(things))
 	require.Equal(t, "what", things[2].Data.This)
@@ -91,68 +86,410 @@ func TestRemoteIO(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	err := io.RemoteSet(server.Client, false, server.Address, THING_INVALID_PATH, Thing{
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	err := ooio.RemoteSet(cfg, THING_INVALID_PATH, Thing{
 		This: "this",
 		That: "that",
 	})
 	require.Error(t, err)
 
-	_, err = io.RemoteGet[Thing](server.Client, false, server.Address, THING_INVALID_PATH)
+	_, err = ooio.RemoteGet[Thing](cfg, THING_INVALID_PATH)
 	require.Error(t, err)
 
-	_, err = io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_INVALID_PATH)
+	_, err = ooio.RemoteGetList[Thing](cfg, THINGS_INVALID_PATH)
 	require.Error(t, err)
 
-	err = io.RemoteSet(server.Client, false, server.Address, THING1_PATH, Thing{
+	err = ooio.RemoteSet(cfg, THING1_PATH, Thing{
 		This: "this",
 		That: "that",
 	})
 	require.NoError(t, err)
-	err = io.RemoteSet(server.Client, false, server.Address, THING2_PATH, Thing{
+	err = ooio.RemoteSet(cfg, THING2_PATH, Thing{
 		This: "here",
 		That: "there",
 	})
 	require.NoError(t, err)
 
-	thing1, err := io.RemoteGet[Thing](server.Client, false, server.Address, THING1_PATH)
+	thing1, err := ooio.RemoteGet[Thing](cfg, THING1_PATH)
 	require.NoError(t, err)
 
 	require.Equal(t, "this", thing1.Data.This)
 	require.Equal(t, "that", thing1.Data.That)
 
-	thing2, err := io.RemoteGet[Thing](server.Client, false, server.Address, THING2_PATH)
+	thing2, err := ooio.RemoteGet[Thing](cfg, THING2_PATH)
 	require.NoError(t, err)
 
 	require.Equal(t, "here", thing2.Data.This)
 	require.Equal(t, "there", thing2.Data.That)
 
-	err = io.RemotePush(server.Client, false, server.Address, THINGS_PATH, thing1.Data)
+	err = ooio.RemotePush(cfg, THINGS_PATH, thing1.Data)
 	require.NoError(t, err)
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
-	err = io.RemotePush(server.Client, false, server.Address, THINGS_PATH, thing2.Data)
+	err = ooio.RemotePush(cfg, THINGS_PATH, thing2.Data)
 	require.NoError(t, err)
 
-	err = io.RemotePush(server.Client, false, server.Address, THINGS_INVALID_PATH, thing1.Data)
+	err = ooio.RemotePush(cfg, THINGS_INVALID_PATH, thing1.Data)
 	require.Error(t, err)
 
-	things, err := io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_PATH)
+	things, err := ooio.RemoteGetList[Thing](cfg, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(things))
-	require.Equal(t, "this", things[0].Data.This)
-	require.Equal(t, "here", things[1].Data.This)
+	require.Equal(t, "here", things[0].Data.This) // newest first (descending order)
+	require.Equal(t, "this", things[1].Data.This)
 
-	err = io.RemoteSet(server.Client, false, server.Address, string(THINGS_BASE_PATH)+"/what", Thing{
+	err = ooio.RemoteSet(cfg, string(THINGS_BASE_PATH)+"/what", Thing{
 		This: "what",
 		That: "how",
 	})
 	require.NoError(t, err)
 
-	things, err = io.RemoteGetList[Thing](server.Client, false, server.Address, THINGS_PATH)
+	things, err = ooio.RemoteGetList[Thing](cfg, THINGS_PATH)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(things))
-	require.Equal(t, "this", things[0].Data.This)
+	require.Equal(t, "what", things[0].Data.This) // newest first (descending order)
 	require.Equal(t, "here", things[1].Data.This)
-	require.Equal(t, "what", things[2].Data.This)
+	require.Equal(t, "this", things[2].Data.This)
+}
+
+func TestRemoteDelete(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Set an item
+	err := ooio.RemoteSet(cfg, THING1_PATH, Thing{
+		This: "to-delete",
+		That: "soon",
+	})
+	require.NoError(t, err)
+
+	// Verify it exists
+	thing, err := ooio.RemoteGet[Thing](cfg, THING1_PATH)
+	require.NoError(t, err)
+	require.Equal(t, "to-delete", thing.Data.This)
+
+	// Delete it
+	err = ooio.RemoteDelete(cfg, THING1_PATH)
+	require.NoError(t, err)
+
+	// Verify it returns ErrEmptyKey after deletion
+	_, err = ooio.RemoteGet[Thing](cfg, THING1_PATH)
+	require.ErrorIs(t, err, ooio.ErrEmptyKey)
+}
+
+func TestRemoteEmptyKeyVsRouteNotDefined(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter("valid/*")
+	server.OpenFilter("validitem")
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Test 1: Route not defined (400 Bad Request) - path has no filter registered
+	_, err := ooio.RemoteGet[Thing](cfg, "undefined")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ooio.ErrRequestFailed)
+
+	// Test 2: Empty key (404 Not Found) - path has filter but no data
+	_, err = ooio.RemoteGet[Thing](cfg, "validitem")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ooio.ErrEmptyKey)
+
+	// Test 3: After setting data, should succeed
+	err = ooio.RemoteSet(cfg, "validitem", Thing{This: "test", That: "data"})
+	require.NoError(t, err)
+
+	thing, err := ooio.RemoteGet[Thing](cfg, "validitem")
+	require.NoError(t, err)
+	require.Equal(t, "test", thing.Data.This)
+
+	// Test 4: After deleting, should return ErrEmptyKey again
+	err = ooio.RemoteDelete(cfg, "validitem")
+	require.NoError(t, err)
+
+	_, err = ooio.RemoteGet[Thing](cfg, "validitem")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ooio.ErrEmptyKey)
+
+	// Test 5: List path - route not defined
+	_, err = ooio.RemoteGetList[Thing](cfg, "undefined/*")
+	require.Error(t, err)
+	require.ErrorIs(t, err, ooio.ErrRequestFailed)
+
+	// Test 6: List path - empty list (valid route, no data) returns empty slice
+	things, err := ooio.RemoteGetList[Thing](cfg, "valid/*")
+	require.NoError(t, err)
+	require.Empty(t, things)
+}
+
+func TestRemoteConfigValidation(t *testing.T) {
+	// Missing Client
+	cfg := ooio.RemoteConfig{
+		Host: "localhost:8080",
+	}
+	err := ooio.RemoteSet(cfg, "test", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Client is required")
+
+	// Missing Host
+	cfg = ooio.RemoteConfig{
+		Client: &http.Client{},
+	}
+	err = ooio.RemoteSet(cfg, "test", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Host is required")
+}
+
+func TestRemotePathValidation(t *testing.T) {
+	cfg := ooio.RemoteConfig{
+		Client: &http.Client{},
+		Host:   "localhost:8080",
+	}
+
+	// RemoteSet with list path should fail
+	err := ooio.RemoteSet(cfg, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is not allowed")
+
+	// RemotePush with non-list path should fail
+	err = ooio.RemotePush(cfg, "thing1", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is required")
+
+	// RemoteGet with list path should fail
+	_, err = ooio.RemoteGet[Thing](cfg, "things/*")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is not allowed")
+
+	// RemoteGetList with non-list path should fail
+	_, err = ooio.RemoteGetList[Thing](cfg, "thing1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is required")
+}
+
+func TestLocalPathValidation(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Set with list path should fail
+	err := ooo.Set(server, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob not allowed")
+
+	// Push with non-list path should fail
+	_, err = ooo.Push(server, "thing1", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob pattern required")
+
+	// Get with list path should fail
+	_, err = ooo.Get[Thing](server, "things/*")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob not allowed")
+
+	// GetList with non-list path should fail
+	_, err = ooo.GetList[Thing](server, "thing1")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob required")
+}
+
+func TestLocalPatch(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Set initial data
+	err := ooo.Set(server, THING1_PATH, Thing{
+		This: "original",
+		That: "value",
+	})
+	require.NoError(t, err)
+
+	// Patch with partial data - only update "this" field
+	err = ooo.Patch(server, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.NoError(t, err)
+
+	// Verify the patch was applied correctly
+	thing, err := ooo.Get[Thing](server, THING1_PATH)
+	require.NoError(t, err)
+	require.Equal(t, "patched", thing.Data.This)
+	require.Equal(t, "value", thing.Data.That) // Original value preserved
+}
+
+func TestLocalPatchNotFound(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Patch non-existent item should fail
+	err := ooo.Patch(server, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.Error(t, err)
+}
+
+func TestLocalPatchGlobNotAllowed(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Patch with glob path should fail
+	err := ooo.Patch(server, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob not allowed")
+}
+
+func TestRemotePatch(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Set initial data
+	err := ooio.RemoteSet(cfg, THING1_PATH, Thing{
+		This: "original",
+		That: "value",
+	})
+	require.NoError(t, err)
+
+	// Patch with partial data - only update "this" field
+	err = ooio.RemotePatch(cfg, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.NoError(t, err)
+
+	// Verify the patch was applied correctly
+	thing, err := ooio.RemoteGet[Thing](cfg, THING1_PATH)
+	require.NoError(t, err)
+	require.Equal(t, "patched", thing.Data.This)
+	require.Equal(t, "value", thing.Data.That) // Original value preserved
+}
+
+func TestRemotePatchNotFound(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Patch non-existent item should fail
+	err := ooio.RemotePatch(cfg, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.Error(t, err)
+}
+
+func TestRemotePatchGlobNotAllowed(t *testing.T) {
+	cfg := ooio.RemoteConfig{
+		Client: &http.Client{},
+		Host:   "localhost:8080",
+	}
+
+	// RemotePatch with glob path should fail
+	err := ooio.RemotePatch(cfg, "things/*", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is not allowed")
+}
+
+func TestRemotePatchWithResponse(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THING1_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Set initial data
+	err := ooio.RemoteSet(cfg, THING1_PATH, Thing{
+		This: "original",
+		That: "value",
+	})
+	require.NoError(t, err)
+
+	// Patch with response
+	resp, err := ooio.RemotePatchWithResponse(cfg, THING1_PATH, map[string]string{
+		"this": "patched",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Index)
+}
+
+func TestRemotePushWithResponse(t *testing.T) {
+	server := &ooo.Server{}
+	server.Silence = true
+	server.Static = true
+	server.OpenFilter(THINGS_PATH)
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	cfg := ooio.RemoteConfig{
+		Client: server.Client,
+		Host:   server.Address,
+	}
+
+	// Push with response - should return the index
+	resp, err := ooio.RemotePushWithResponse(cfg, THINGS_PATH, Thing{
+		This: "test",
+		That: "data",
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, resp.Index)
+
+	// Verify the item was created
+	thing, err := ooio.RemoteGet[Thing](cfg, THINGS_BASE_PATH+"/"+resp.Index)
+	require.NoError(t, err)
+	require.Equal(t, "test", thing.Data.This)
+}
+
+func TestRemotePushWithResponseGlobRequired(t *testing.T) {
+	cfg := ooio.RemoteConfig{
+		Client: &http.Client{},
+		Host:   "localhost:8080",
+	}
+
+	// RemotePushWithResponse with non-glob path should fail
+	_, err := ooio.RemotePushWithResponse(cfg, "thing1", Thing{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "glob is required")
 }

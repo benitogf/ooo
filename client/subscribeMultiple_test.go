@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -14,13 +13,6 @@ import (
 	"github.com/benitogf/ooo/key"
 	"github.com/stretchr/testify/require"
 )
-
-// sleepAfterWrite sleeps only on Windows to allow file system operations to complete
-func sleepAfterWrite() {
-	if runtime.GOOS == "windows" {
-		time.Sleep(10 * time.Millisecond)
-	}
-}
 
 // Test types
 type TestUser struct {
@@ -89,18 +81,23 @@ func TestSubscribeMultiple2_BasicFunctionality(t *testing.T) {
 	wg.Add(2)
 
 	go func() {
-		client.SubscribeMultiple2(
-			ctx,
-			client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-			client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-			func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
-				if users.Updated {
-					lastUsers = users.Data
-				}
-				if posts.Updated {
-					lastPosts = posts.Data
-				}
-				wg.Done()
+		client.SubscribeMultipleList2(
+			client.SubscribeConfig{
+				Ctx:     ctx,
+				Server:  client.Server{Protocol: "ws", Host: server.Address},
+				Silence: true,
+			},
+			[2]string{"users/*", "posts/*"},
+			client.SubscribeMultipleList2Events[TestUser, TestPost]{
+				OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
+					if users.Updated {
+						lastUsers = users.Data
+					}
+					if posts.Updated {
+						lastPosts = posts.Data
+					}
+					wg.Done()
+				},
 			},
 		)
 	}()
@@ -111,13 +108,11 @@ func TestSubscribeMultiple2_BasicFunctionality(t *testing.T) {
 	// Create user and wait for callback
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create post and wait for callback
 	wg.Add(1)
 	createPost(t, &server, 1, "Test Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Verify we received exactly 1 user
@@ -149,16 +144,21 @@ func TestSubscribeMultiple2_StateAggregation(t *testing.T) {
 	// Wait for 2 initial callbacks (one per subscription path)
 	wg.Add(2)
 
-	go client.SubscribeMultiple2(
-		ctx,
-		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-		func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
-			receivedStates = append(receivedStates, struct {
-				userCount int
-				postCount int
-			}{len(users.Data), len(posts.Data)})
-			wg.Done()
+	go client.SubscribeMultipleList2(
+		client.SubscribeConfig{
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
+		},
+		[2]string{"users/*", "posts/*"},
+		client.SubscribeMultipleList2Events[TestUser, TestPost]{
+			OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
+				receivedStates = append(receivedStates, struct {
+					userCount int
+					postCount int
+				}{len(users.Data), len(posts.Data)})
+				wg.Done()
+			},
 		},
 	)
 
@@ -169,13 +169,11 @@ func TestSubscribeMultiple2_StateAggregation(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		wg.Add(1)
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
 		wg.Wait()
 	}
 	for i := 1; i <= 2; i++ {
 		wg.Add(1)
 		createPost(t, &server, i, "Post")
-		sleepAfterWrite()
 		wg.Wait()
 	}
 
@@ -202,29 +200,42 @@ func TestSubscribeMultiple2_ContextCancellation(t *testing.T) {
 
 	var callbackCount int
 
-	wg := sync.WaitGroup{}
-	// Wait for 2 initial callbacks (one per subscription path)
-	wg.Add(2)
+	var connected sync.WaitGroup
+	connected.Add(2)
+	var disconnected sync.WaitGroup
+	disconnected.Add(2) // Both subscriptions will error
+	var exited sync.WaitGroup
+	exited.Add(1)
 
-	go client.SubscribeMultiple2(
-		ctx,
-		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-		func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
-			callbackCount++
-			wg.Done()
-		},
-	)
+	go func() {
+		defer exited.Done()
+		client.SubscribeMultipleList2(
+			client.SubscribeConfig{
+				Ctx:     ctx,
+				Server:  client.Server{Protocol: "ws", Host: server.Address},
+				Silence: true,
+			},
+			[2]string{"users/*", "posts/*"},
+			client.SubscribeMultipleList2Events[TestUser, TestPost]{
+				OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
+					callbackCount++
+					connected.Done()
+				},
+				OnError: func(err1, err2 error) {
+					disconnected.Done()
+				},
+			},
+		)
+	}()
 
 	// Wait for initial callbacks from both paths
-	wg.Wait()
+	connected.Wait()
 
 	// Create some data before cancellation, waiting after each write
 	for i := 1; i <= 3; i++ {
-		wg.Add(1)
+		connected.Add(1)
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
-		wg.Wait()
+		connected.Wait()
 	}
 
 	countBeforeCancel := callbackCount
@@ -232,17 +243,12 @@ func TestSubscribeMultiple2_ContextCancellation(t *testing.T) {
 	// Should have received: 2 initial + 3 writes = 5 callbacks
 	require.Equal(t, 5, countBeforeCancel, "Expected exactly 5 callbacks before cancellation")
 
-	// Cancel context
+	// Close server to trigger disconnection, then cancel
+	server.Close(os.Interrupt)
+	disconnected.Wait()
 	cancel()
-	time.Sleep(200 * time.Millisecond)
+	exited.Wait()
 
-	// Create more data (should NOT be received after cancellation)
-	for i := 4; i <= 6; i++ {
-		createUser(t, &server, i, "User")
-		sleepAfterWrite()
-	}
-
-	time.Sleep(200 * time.Millisecond)
 	countAfterCancel := callbackCount
 
 	// No new callbacks should be received after cancellation
@@ -266,16 +272,20 @@ func TestSubscribeMultiple3_BasicFunctionality(t *testing.T) {
 	// Wait for 3 initial callbacks (one per subscription path)
 	wg.Add(3)
 
-	go client.SubscribeMultiple3(
-		ctx,
-		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "comments/*"},
-		func(users client.MultiState[TestUser], posts client.MultiState[TestPost], comments client.MultiState[TestComment]) {
-			lastUsers = users.Data
-			lastPosts = posts.Data
-			lastComments = comments.Data
-			wg.Done()
+	go client.SubscribeMultipleList3(
+		client.SubscribeConfig{
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
+		},
+		[3]string{"users/*", "posts/*", "comments/*"},
+		client.SubscribeMultipleList3Events[TestUser, TestPost, TestComment]{
+			OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost], comments client.MultiState[TestComment]) {
+				lastUsers = users.Data
+				lastPosts = posts.Data
+				lastComments = comments.Data
+				wg.Done()
+			},
 		},
 	)
 
@@ -285,19 +295,16 @@ func TestSubscribeMultiple3_BasicFunctionality(t *testing.T) {
 	// Create user and wait for callback
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create post and wait for callback
 	wg.Add(1)
 	createPost(t, &server, 1, "Test Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create comment and wait for callback
 	wg.Add(1)
 	createComment(t, &server, 1, "Great post!")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Verify exactly 1 user
@@ -334,18 +341,21 @@ func TestSubscribeMultiple4_BasicFunctionality(t *testing.T) {
 	// Wait for 4 initial callbacks (one per subscription path)
 	wg.Add(4)
 
-	go client.SubscribeMultiple4(
-		ctx,
-		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "comments/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "likes/*"},
-		func(users client.MultiState[TestUser], posts client.MultiState[TestPost], comments client.MultiState[TestComment], likes client.MultiState[TestLike]) {
-			lastUsers = users.Data
-			lastPosts = posts.Data
-			lastComments = comments.Data
-			lastLikes = likes.Data
-			wg.Done()
+	go client.SubscribeMultipleList4(
+		client.SubscribeConfig{
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
+		},
+		[4]string{"users/*", "posts/*", "comments/*", "likes/*"},
+		client.SubscribeMultipleList4Events[TestUser, TestPost, TestComment, TestLike]{
+			OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost], comments client.MultiState[TestComment], likes client.MultiState[TestLike]) {
+				lastUsers = users.Data
+				lastPosts = posts.Data
+				lastComments = comments.Data
+				lastLikes = likes.Data
+				wg.Done()
+			},
 		},
 	)
 
@@ -355,25 +365,21 @@ func TestSubscribeMultiple4_BasicFunctionality(t *testing.T) {
 	// Create user and wait for callback
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create post and wait for callback
 	wg.Add(1)
 	createPost(t, &server, 1, "Test Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create comment and wait for callback
 	wg.Add(1)
 	createComment(t, &server, 1, "Great!")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Create like and wait for callback
 	wg.Add(1)
 	createLike(t, &server, 1, 1)
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Verify exactly 1 user
@@ -415,40 +421,43 @@ func TestSubscribeMultiple2_ConcurrentUpdates(t *testing.T) {
 	// Wait for 2 initial callbacks (one per subscription path)
 	wg.Add(2)
 
-	go client.SubscribeMultiple2(
-		ctx,
-		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-		func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
-			// Make copies to avoid race conditions
-			usersCopy := make([]client.Meta[TestUser], len(users.Data))
-			postsCopy := make([]client.Meta[TestPost], len(posts.Data))
-			copy(usersCopy, users.Data)
-			copy(postsCopy, posts.Data)
-			allStates = append(allStates, struct {
-				users []client.Meta[TestUser]
-				posts []client.Meta[TestPost]
-			}{usersCopy, postsCopy})
-			wg.Done()
+	go client.SubscribeMultipleList2(
+		client.SubscribeConfig{
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
+		},
+		[2]string{"users/*", "posts/*"},
+		client.SubscribeMultipleList2Events[TestUser, TestPost]{
+			OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
+				// Make copies to avoid race conditions
+				usersCopy := make([]client.Meta[TestUser], len(users.Data))
+				postsCopy := make([]client.Meta[TestPost], len(posts.Data))
+				copy(usersCopy, users.Data)
+				copy(postsCopy, posts.Data)
+				allStates = append(allStates, struct {
+					users []client.Meta[TestUser]
+					posts []client.Meta[TestPost]
+				}{usersCopy, postsCopy})
+				wg.Done()
+			},
 		},
 	)
 
 	// Wait for initial callbacks from both paths
 	wg.Wait()
 
-	// Create data rapidly, waiting after each write
+	// Create data sequentially, waiting for each broadcast
 	for i := range 5 {
 		wg.Add(1)
 		createUser(t, &server, i, "User")
-		sleepAfterWrite()
+		wg.Wait()
 	}
 	for i := range 5 {
 		wg.Add(1)
 		createPost(t, &server, i, "Post")
-		sleepAfterWrite()
+		wg.Wait()
 	}
-
-	wg.Wait()
 
 	// Should receive: 2 initial + 10 writes (5 users + 5 posts) = 12 total
 	require.Len(t, allStates, 12, "Expected exactly 12 state updates")
@@ -489,23 +498,28 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 	wg.Add(2)
 
 	// Subscription goroutine: maintains derived state
-	go client.SubscribeMultiple2(
-		ctx,
-		client.Path{Protocol: "ws", Host: server.Address, Path: "users/*"},
-		client.Path{Protocol: "ws", Host: server.Address, Path: "posts/*"},
-		func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
-			mu.Lock()
-			// Use Updated flag to selectively update only changed parts
-			if users.Updated {
-				currentSummary.TotalUsers = len(users.Data)
-				currentSummary.LastUpdate = time.Now()
-			}
-			if posts.Updated {
-				currentSummary.TotalPosts = len(posts.Data)
-				currentSummary.LastUpdate = time.Now()
-			}
-			mu.Unlock()
-			wg.Done()
+	go client.SubscribeMultipleList2(
+		client.SubscribeConfig{
+			Ctx:     ctx,
+			Server:  client.Server{Protocol: "ws", Host: server.Address},
+			Silence: true,
+		},
+		[2]string{"users/*", "posts/*"},
+		client.SubscribeMultipleList2Events[TestUser, TestPost]{
+			OnMessage: func(users client.MultiState[TestUser], posts client.MultiState[TestPost]) {
+				mu.Lock()
+				// Use Updated flag to selectively update only changed parts
+				if users.Updated {
+					currentSummary.TotalUsers = len(users.Data)
+					currentSummary.LastUpdate = time.Now()
+				}
+				if posts.Updated {
+					currentSummary.TotalPosts = len(posts.Data)
+					currentSummary.LastUpdate = time.Now()
+				}
+				mu.Unlock()
+				wg.Done()
+			},
 		},
 	)
 
@@ -531,7 +545,6 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 	// Create data and verify derived state updates
 	wg.Add(1)
 	createUser(t, &server, 1, "Alice")
-	sleepAfterWrite()
 	wg.Wait()
 
 	// Read current state from a separate context (simulating external read)
@@ -543,7 +556,6 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 
 	wg.Add(1)
 	createPost(t, &server, 1, "First Post")
-	sleepAfterWrite()
 	wg.Wait()
 
 	mu.RLock()
@@ -566,13 +578,11 @@ func TestSubscribeMultiple2_DerivedStateWithSeparateReader(t *testing.T) {
 
 func TestPath_Struct(t *testing.T) {
 	// Test that Path struct works correctly
-	path := client.Path{
+	path := client.Server{
 		Protocol: "ws",
 		Host:     "localhost:8080",
-		Path:     "/data/users/*",
 	}
 
 	require.Equal(t, "ws", path.Protocol)
 	require.Equal(t, "localhost:8080", path.Host)
-	require.Equal(t, "/data/users/*", path.Path)
 }

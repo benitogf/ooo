@@ -5,16 +5,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"runtime"
 	"strconv"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/goccy/go-json"
 
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
+	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -855,46 +856,39 @@ var TEST_DATA_UPDATE = json.RawMessage(`{
   }`)
 
 // StorageObjectTest testing storage function
-func StorageObjectTest(app *Server, t *testing.T) {
-	app.Storage.Clear()
-	index, err := app.Storage.Set("test", TEST_DATA)
+func StorageObjectTest(server *Server, t *testing.T) {
+	server.Storage.Clear()
+	index, err := server.Storage.Set("test", TEST_DATA)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
-	data, _ := app.Storage.Get("test")
-	testObject, err := meta.Decode(data)
+	testObject, err := server.Storage.Get("test")
 	require.NoError(t, err)
 	same, _ := jsondiff.Compare(testObject.Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 	require.Equal(t, int64(0), testObject.Updated)
-	index, err = app.Storage.Set("test", TEST_DATA_UPDATE)
+	index, err = server.Storage.Set("test", TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
-	data, err = app.Storage.Get("test")
-	require.NoError(t, err)
-	testObject, err = meta.Decode(data)
+	testObject, err = server.Storage.Get("test")
 	require.NoError(t, err)
 	same, _ = jsondiff.Compare(testObject.Data, TEST_DATA_UPDATE, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
-	err = app.Storage.Del("test")
+	err = server.Storage.Del("test")
 	require.NoError(t, err)
-	raw, _ := app.Storage.Get("test")
-	dataDel := string(raw)
-	require.Empty(t, dataDel)
+	_, err = server.Storage.Get("test")
+	require.Error(t, err)
 }
 
 // StorageListTest testing storage function
-func StorageListTest(app *Server, t *testing.T) {
-	app.Storage.Clear()
-	key, err := app.Storage.Set("test/123", TEST_DATA)
+func StorageListTest(server *Server, t *testing.T) {
+	server.Storage.Clear()
+	key, err := server.Storage.Set("test/123", TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "123", key)
-	key, err = app.Storage.Set("test/456", TEST_DATA_UPDATE)
+	key, err = server.Storage.Set("test/456", TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.Equal(t, "456", key)
-	data, err := app.Storage.Get("test/*")
-	require.NoError(t, err)
-	var testObjects []meta.Object
-	err = json.Unmarshal(data, &testObjects)
+	testObjects, err := server.Storage.GetList("test/*")
 	require.NoError(t, err)
 	require.Equal(t, 2, len(testObjects))
 	for i := range testObjects {
@@ -908,172 +902,147 @@ func StorageListTest(app *Server, t *testing.T) {
 			require.Equal(t, same, jsondiff.FullMatch)
 		}
 	}
-	data1, err := app.Storage.Get("test/123")
+	obj1, err := server.Storage.Get("test/123")
 	require.NoError(t, err)
-	data2, err := app.Storage.Get("test/456")
-	require.NoError(t, err)
-	obj1, err := meta.Decode(data1)
-	require.NoError(t, err)
-	obj2, err := meta.Decode(data2)
+	obj2, err := server.Storage.Get("test/456")
 	require.NoError(t, err)
 	same, _ := jsondiff.Compare(obj1.Data, TEST_DATA, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
 	same, _ = jsondiff.Compare(obj2.Data, TEST_DATA_UPDATE, &jsondiff.Options{})
 	require.Equal(t, same, jsondiff.FullMatch)
-	keys, err := app.Storage.Keys()
+	keys, err := server.Storage.Keys()
 	require.NoError(t, err)
-	require.Equal(t, "{\"keys\":[\"test/123\",\"test/456\"]}", string(keys))
+	require.Equal(t, []string{"test/123", "test/456"}, keys)
 
 	req := httptest.NewRequest(
 		"POST", "/test/*",
 		bytes.NewBuffer(TEST_DATA),
 	)
 	w := httptest.NewRecorder()
-	app.Router.ServeHTTP(w, req)
+	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	dat, err := meta.Decode(body)
 	require.NoError(t, err)
-	data, err = app.Storage.Get("test/*")
-	app.Console.Log(string(data))
-	require.NoError(t, err)
-	err = json.Unmarshal(data, &testObjects)
+	testObjects, err = server.Storage.GetList("test/*")
+	server.Console.Log(testObjects)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(testObjects))
-	err = app.Storage.Del("test/" + dat.Index)
+	err = server.Storage.Del("test/" + dat.Index)
 	require.NoError(t, err)
-	data, err = app.Storage.Get("test/*")
-	require.NoError(t, err)
-	err = json.Unmarshal(data, &testObjects)
+	testObjects, err = server.Storage.GetList("test/*")
 	require.NoError(t, err)
 	require.Equal(t, 2, len(testObjects))
-	key, err = app.Storage.Set("test/glob1/glob123", TEST_DATA)
+	key, err = server.Storage.Set("test/glob1/glob123", TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "glob123", key)
-	key, err = app.Storage.Set("test/glob2/glob456", TEST_DATA_UPDATE)
+	key, err = server.Storage.Set("test/glob2/glob456", TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.Equal(t, "glob456", key)
-	data, err = app.Storage.Get("test/*/*")
+	testObjects, err = server.Storage.GetList("test/*/*")
 	require.NoError(t, err)
-	err = json.Unmarshal(data, &testObjects)
-	app.Console.Log(testObjects)
-	require.NoError(t, err)
+	server.Console.Log(testObjects)
 	require.Equal(t, 2, len(testObjects))
-	key, err = app.Storage.Set("test/1/glob/g123", TEST_DATA)
+	key, err = server.Storage.Set("test/1/glob/g123", TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "g123", key)
-	key, err = app.Storage.Set("test/2/glob/g456", TEST_DATA_UPDATE)
+	key, err = server.Storage.Set("test/2/glob/g456", TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.Equal(t, "g456", key)
-	data, err = app.Storage.Get("test/*/glob/*")
+	testObjects, err = server.Storage.GetList("test/*/glob/*")
 	require.NoError(t, err)
-	err = json.Unmarshal(data, &testObjects)
-	app.Console.Log(testObjects)
-	require.NoError(t, err)
+	server.Console.Log(testObjects)
 	require.Equal(t, 2, len(testObjects))
-	key, err = app.Storage.Set("test1", TEST_DATA)
+	key, err = server.Storage.Set("test1", TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "test1", key)
-	key, err = app.Storage.Set("test2", TEST_DATA_UPDATE)
+	key, err = server.Storage.Set("test2", TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.Equal(t, "test2", key)
-	data, err = app.Storage.Get("*")
+	testObjects, err = server.Storage.GetList("*")
 	require.NoError(t, err)
-	err = json.Unmarshal(data, &testObjects)
-	app.Console.Log(testObjects)
-	require.NoError(t, err)
+	server.Console.Log(testObjects)
 	require.Equal(t, 2, len(testObjects))
-	err = app.Storage.Del("*")
+	err = server.Storage.Del("*")
 	require.NoError(t, err)
-	data, err = app.Storage.Get("*")
+	testObjects, err = server.Storage.GetList("*")
 	require.NoError(t, err)
-	err = json.Unmarshal(data, &testObjects)
-	app.Console.Log(testObjects)
-	require.NoError(t, err)
+	server.Console.Log(testObjects)
 	require.Equal(t, 0, len(testObjects))
 }
 
 // StorageSetGetDelTest testing storage function
-func StorageSetGetDelTest(db Database, b *testing.B) {
+func StorageSetGetDelTestBenchmark(db storage.Database, b *testing.B) {
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_key := key.Build("test/*")
 		_, err := db.Set("test/"+_key, TEST_DATA)
 		require.NoError(b, err)
 		fetched, err := db.Get("test/" + _key)
 		require.NoError(b, err)
-		decoded, err := meta.Decode(fetched)
-		require.NoError(b, err)
-		same, _ := jsondiff.Compare(decoded.Data, TEST_DATA, &jsondiff.Options{})
+		same, _ := jsondiff.Compare(fetched.Data, TEST_DATA, &jsondiff.Options{})
 		require.Equal(b, same, jsondiff.FullMatch)
 		err = db.Del("test/" + _key)
 		require.NoError(b, err)
-		result, err := db.Get("test/*")
+		result, err := db.GetList("test/*")
 		require.NoError(b, err)
-		require.Equal(b, "[]", string(result))
+		require.Equal(b, 0, len(result))
 	}
 }
 
 // StorageGetNTest testing storage GetN function
-func StorageGetNTest(app *Server, t *testing.T, n int) {
-	app.Storage.Clear()
-	for i := 0; i < n; i++ {
+func StorageGetNTest(server *Server, t *testing.T, n int) {
+	server.Storage.Clear()
+	for i := range n {
 		value := strconv.Itoa(i)
-		key, err := app.Storage.Set("test/"+value, TEST_DATA)
+		key, err := server.Storage.Set("test/"+value, TEST_DATA)
 		require.NoError(t, err)
 		require.Equal(t, value, key)
-		time.Sleep(time.Millisecond * 1)
 	}
 
 	limit := 1
-	testObjects, err := app.Storage.GetN("test/*", limit)
+	testObjects, err := server.Storage.GetN("test/*", limit)
 	require.NoError(t, err)
 	require.Equal(t, limit, len(testObjects))
 	require.Equal(t, strconv.Itoa(n-1), testObjects[len(testObjects)-1].Index)
 	require.Equal(t, "test/"+strconv.Itoa(n-1), testObjects[0].Path)
 
-	testObjects, err = app.Storage.GetNAscending("test/*", limit)
+	testObjects, err = server.Storage.GetNAscending("test/*", limit)
 	require.NoError(t, err)
 	require.Equal(t, limit, len(testObjects))
 	require.Equal(t, "0", testObjects[len(testObjects)-1].Index)
 	require.Equal(t, "test/0", testObjects[0].Path)
 
-	testObjectsRawDefaultSort, err := app.Storage.Get("test/*")
-	require.NoError(t, err)
-	testObjectsDefaultSort, err := meta.DecodeList(testObjectsRawDefaultSort)
+	testObjectsDefaultSort, err := server.Storage.GetList("test/*")
 	require.NoError(t, err)
 	require.Equal(t, "0", testObjectsDefaultSort[0].Index)
 
-	testObjectsRawSort, err := app.Storage.Get("test/*")
-	require.NoError(t, err)
-	testObjectsSort, err := meta.DecodeList(testObjectsRawSort)
+	testObjectsSort, err := server.Storage.GetList("test/*")
 	require.NoError(t, err)
 	require.Equal(t, "0", testObjectsSort[0].Index)
 
-	testObjectsRawSort, err = app.Storage.GetDescending("test/*")
-	require.NoError(t, err)
-	testObjectsSort, err = meta.DecodeList(testObjectsRawSort)
+	testObjectsSort, err = server.Storage.GetListDescending("test/*")
 	require.NoError(t, err)
 	require.Equal(t, strconv.Itoa(n-1), testObjectsSort[0].Index)
 }
 
 // StorageGetNRangeTest testing storage GetN function
-func StorageGetNRangeTest(app *Server, t *testing.T, n int) {
-	app.Storage.Clear()
+func StorageGetNRangeTest(server *Server, t *testing.T, n int) {
+	server.Storage.Clear()
 	for i := 1; i < n; i++ {
 		value := strconv.Itoa(i)
-		key, err := app.Storage.SetWithMeta("test/"+value, TEST_DATA, int64(i), 0)
+		key, err := server.Storage.SetWithMeta("test/"+value, TEST_DATA, int64(i), 0)
 		require.NoError(t, err)
 		require.Equal(t, value, key)
 	}
 
-	_, err := app.Storage.SetWithMeta("test/0", TEST_DATA, 0, 0)
+	_, err := server.Storage.SetWithMeta("test/0", TEST_DATA, 0, 0)
 	require.NoError(t, err)
 
 	limit := 1
-	testObjects, err := app.Storage.GetNRange("test/*", limit, 0, 1)
+	testObjects, err := server.Storage.GetNRange("test/*", limit, 0, 1)
 	require.NoError(t, err)
 	require.Equal(t, limit, len(testObjects))
 	require.Equal(t, int64(1), testObjects[0].Created)
@@ -1082,62 +1051,198 @@ func StorageGetNRangeTest(app *Server, t *testing.T, n int) {
 }
 
 // StorageKeysRangeTest testing storage KeysRange function
-func StorageKeysRangeTest(app *Server, t *testing.T, n int) {
-	app.Storage.Clear()
+func StorageKeysRangeTest(server *Server, t *testing.T, n int) {
+	server.Storage.Clear()
 	first := ""
 	firstNow := int64(0)
 	for range n {
 		path := key.Build("test/*")
-		key, err := app.Storage.Set(path, TEST_DATA)
+		key, err := server.Storage.Set(path, TEST_DATA)
 		if first == "" {
 			first = key
-			firstNow = time.Now().UnixNano()
+			firstNow = monotonic.Now()
 		}
 		require.NoError(t, err)
 		require.Equal(t, path, "test/"+key)
-		if runtime.GOOS == "windows" {
-			// time granularity in windows is not fast enough
-			time.Sleep(time.Millisecond * 1)
-		}
 	}
 
-	keys, err := app.Storage.KeysRange("test/*", 0, firstNow)
+	keys, err := server.Storage.KeysRange("test/*", 0, firstNow)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(keys))
 	require.Equal(t, "test/"+first, keys[0])
 }
 
-func StorageBatchSetTest(app *Server, t *testing.T, n int) {
-	app.Storage.Clear()
+// StorageBeforeReadTest tests that the BeforeRead callback is called on read operations
+func StorageBeforeReadTest(db storage.Database, t *testing.T) {
+	// Track which keys were read
+	readKeys := []string{}
+	var readMutex sync.Mutex
+
+	// Start storage with beforeRead callback
+	db.Close()
+	err := db.Start(storage.Options{
+		BeforeRead: func(key string) {
+			readMutex.Lock()
+			readKeys = append(readKeys, key)
+			readMutex.Unlock()
+		},
+	})
+	require.NoError(t, err)
+
+	// Drain watcher channels to prevent blocking
+	go storage.WatchStorageNoop(db)
+
+	db.Clear()
+
+	// Set some test data
+	_, err = db.Set("test/1", TEST_DATA)
+	require.NoError(t, err)
+	_, err = db.Set("test/2", TEST_DATA_UPDATE)
+	require.NoError(t, err)
+
+	// Clear tracked keys before testing reads
+	readMutex.Lock()
+	readKeys = []string{}
+	readMutex.Unlock()
+
+	// Test Get
+	_, err = db.Get("test/1")
+	require.NoError(t, err)
+	readMutex.Lock()
+	require.Contains(t, readKeys, "test/1")
+	readKeys = []string{}
+	readMutex.Unlock()
+
+	// Test GetList
+	_, err = db.GetList("test/*")
+	require.NoError(t, err)
+	readMutex.Lock()
+	require.Contains(t, readKeys, "test/*")
+	readKeys = []string{}
+	readMutex.Unlock()
+
+	// Test GetListDescending
+	_, err = db.GetListDescending("test/*")
+	require.NoError(t, err)
+	readMutex.Lock()
+	require.Contains(t, readKeys, "test/*")
+	readKeys = []string{}
+	readMutex.Unlock()
+
+	// Test GetN
+	_, err = db.GetN("test/*", 1)
+	require.NoError(t, err)
+	readMutex.Lock()
+	require.Contains(t, readKeys, "test/*")
+	readKeys = []string{}
+	readMutex.Unlock()
+
+	// Test GetNAscending
+	_, err = db.GetNAscending("test/*", 1)
+	require.NoError(t, err)
+	readMutex.Lock()
+	require.Contains(t, readKeys, "test/*")
+	readKeys = []string{}
+	readMutex.Unlock()
+
+	// Test GetAndLock/Unlock
+	_, err = db.GetAndLock("test/1")
+	require.NoError(t, err)
+	err = db.Unlock("test/1")
+	require.NoError(t, err)
+	readMutex.Lock()
+	require.Contains(t, readKeys, "test/1")
+	readMutex.Unlock()
+
+	db.Clear()
+}
+
+// StorageAfterWriteTest tests that the AfterWrite callback is called on write operations
+func StorageAfterWriteTest(db storage.Database, t *testing.T) {
+	// Track which keys were written
+	writeKeys := []string{}
+	var writeMutex sync.Mutex
+
+	// Start storage with afterWrite callback
+	db.Close()
+	err := db.Start(storage.Options{
+		AfterWrite: func(key string) {
+			writeMutex.Lock()
+			writeKeys = append(writeKeys, key)
+			writeMutex.Unlock()
+		},
+	})
+	require.NoError(t, err)
+
+	// Drain watcher channels to prevent blocking
+	go storage.WatchStorageNoop(db)
+
+	db.Clear()
+
+	// Clear tracked keys before testing writes
+	writeMutex.Lock()
+	writeKeys = []string{}
+	writeMutex.Unlock()
+
+	// Test Set (new key)
+	key, err := db.Set("test/1", TEST_DATA)
+	require.NoError(t, err)
+	writeMutex.Lock()
+	require.Len(t, writeKeys, 1)
+	require.Equal(t, "test/"+key, writeKeys[0])
+	writeKeys = []string{}
+	writeMutex.Unlock()
+
+	// Test Set (update existing key)
+	key, err = db.Set("test/1", TEST_DATA_UPDATE)
+	require.NoError(t, err)
+	writeMutex.Lock()
+	require.Len(t, writeKeys, 1)
+	require.Equal(t, "test/"+key, writeKeys[0])
+	writeKeys = []string{}
+	writeMutex.Unlock()
+
+	// Test Del
+	err = db.Del("test/1")
+	require.NoError(t, err)
+	writeMutex.Lock()
+	require.Len(t, writeKeys, 1)
+	require.Equal(t, "test/1", writeKeys[0])
+	writeMutex.Unlock()
+
+	db.Clear()
+}
+
+// WatchStorageNoopTest tests that WatchStorageNoop properly drains events from sharded channels
+func WatchStorageNoopTest(db storage.Database, t *testing.T) {
+	// Start a goroutine to drain the watcher
+	go storage.WatchStorageNoop(db)
+
+	// Set some data to generate events - they should be drained without blocking
+	_, err := db.Set("test/1", TEST_DATA)
+	require.NoError(t, err)
+	_, err = db.Set("test/2", TEST_DATA_UPDATE)
+	require.NoError(t, err)
+
+	// Clean up
+	db.Clear()
+}
+
+func StorageBatchSetTest(server *Server, t *testing.T, n int) {
+	server.Storage.Clear()
 	testData := json.RawMessage(`{"test":"123"}`)
 	for i := 1; i < n; i++ {
 		_key := strconv.Itoa(i)
-		key, err := app.Storage.SetWithMeta("test/"+_key, testData, int64(i), 0)
+		key, err := server.Storage.SetWithMeta("test/"+_key, testData, int64(i), 0)
 		require.NoError(t, err)
 		require.Equal(t, _key, key)
 	}
 
 	for i := 1; i < n; i++ {
 		_key := strconv.Itoa(i)
-		raw, err := app.Storage.Get("test/" + _key)
-		require.NoError(t, err)
-		obj, err := meta.Decode(raw)
+		obj, err := server.Storage.Get("test/" + _key)
 		require.NoError(t, err)
 		require.Equal(t, testData, json.RawMessage(string(obj.Data)))
 	}
 
-	// test data merge
-	testUpdateData := json.RawMessage(`{"another":"1234","newKey":"new"}`)
-	expectedNewData := json.RawMessage(`{"another":"1234","newKey":"new","test":"123"}`)
-	_, err := app.Storage.Patch("test/*", testUpdateData)
-	require.NoError(t, err)
-
-	for i := 1; i < n; i++ {
-		_key := strconv.Itoa(i)
-		raw, err := app.Storage.Get("test/" + _key)
-		require.NoError(t, err)
-		obj, err := meta.Decode(raw)
-		require.NoError(t, err)
-		require.Equal(t, expectedNewData, json.RawMessage(string(obj.Data)))
-	}
 }

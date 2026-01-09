@@ -1,195 +1,118 @@
 package ooo
 
 import (
-	"errors"
+	"fmt"
+	"strings"
 
-	"github.com/goccy/go-json"
-
+	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/key"
+	"github.com/benitogf/ooo/ui"
 )
 
-// Apply filter function
-// type for functions will serve as filters
-// key: the key to filter
-// data: the data received or about to be sent
-// returns
-// data: to be stored or sent to the client
-// error: will prevent data to pass the filter
-type Apply func(key string, data json.RawMessage) (json.RawMessage, error)
+// checkReservedPath panics if the path conflicts with reserved UI paths
+func checkReservedPath(path string) {
+	// Extract the first segment of the path
+	firstSegment := path
+	if idx := strings.Index(path, "/"); idx != -1 {
+		firstSegment = path[:idx]
+	}
 
-// ApplyDelete callback function
-type ApplyDelete func(key string) error
-
-// Notify after a write is done
-type Notify func(key string)
-
-type hook struct {
-	path  string
-	apply ApplyDelete
+	for _, reserved := range ui.ReservedPaths {
+		if firstSegment == reserved || path == reserved {
+			panic(fmt.Sprintf("%v: %q conflicts with reserved path %q", ErrReservedPath, path, reserved))
+		}
+	}
 }
 
-// Filter path -> match
-type filter struct {
-	path  string
-	apply Apply
+// Re-export filter types from filters package
+type (
+	Apply       = filters.Apply
+	ApplyObject = filters.ApplyObject
+	ApplyList   = filters.ApplyList
+	Block       = filters.Block
+	Notify      = filters.Notify
+)
+
+// Re-export filter functions from filters package
+var (
+	NoopHook         = filters.NoopHook
+	NoopNotify       = filters.NoopNotify
+	NoopFilter       = filters.NoopFilter
+	NoopObjectFilter = filters.NoopObjectFilter
+	NoopListFilter   = filters.NoopListFilter
+)
+
+// DeleteFilter add a filter that runs before delete
+func (server *Server) DeleteFilter(path string, apply Block) {
+	checkReservedPath(path)
+	server.filters.AddDelete(path, apply)
 }
-
-type watch struct {
-	path  string
-	apply Notify
-}
-
-// Router group of filters
-type router []filter
-
-type hooks []hook
-
-type watchers []watch
-
-// Filters read and write
-type filters struct {
-	Write      router
-	Read       router
-	Delete     hooks
-	AfterWrite watchers
-}
-
-// DeleteFilter add a filter that runs before sending a read result
-func (app *Server) DeleteFilter(path string, apply ApplyDelete) {
-	app.filters.Delete = append(app.filters.Delete, hook{
-		path:  path,
-		apply: apply,
-	})
-}
-
-// https://github.com/golang/go/issues/11862
 
 // WriteFilter add a filter that triggers on write
-func (app *Server) WriteFilter(path string, apply Apply) {
-	app.filters.Write = append(app.filters.Write, filter{
-		path:  path,
-		apply: apply,
-	})
+func (server *Server) WriteFilter(path string, apply Apply) {
+	checkReservedPath(path)
+	server.filters.AddWrite(path, apply)
 }
 
-// AfterWrite add a filter that triggers after a successful write
-func (app *Server) AfterWrite(path string, apply Notify) {
-	app.filters.AfterWrite = append(app.filters.AfterWrite, watch{
-		path:  path,
-		apply: apply,
-	})
+// AfterWriteFilter add a filter that triggers after a successful write
+func (server *Server) AfterWriteFilter(path string, apply Notify) {
+	checkReservedPath(path)
+	server.filters.AddAfterWrite(path, apply)
 }
 
-// ReadFilter add a filter that runs before sending a read result
-func (app *Server) ReadFilter(path string, apply Apply) {
-	app.filters.Read = append(app.filters.Read, filter{
-		path:  path,
-		apply: apply,
-	})
+// ReadObjectFilter add a filter for single meta.Object reads
+func (server *Server) ReadObjectFilter(path string, apply ApplyObject) {
+	checkReservedPath(path)
+	server.filters.AddReadObject(path, apply)
 }
 
-// NoopHook open noop hook
-func NoopHook(index string) error {
-	return nil
-}
-
-// NoopFilter open noop filter
-func NoopFilter(index string, data json.RawMessage) (json.RawMessage, error) {
-	return data, nil
+// ReadListFilter add a filter for []meta.Object reads
+func (server *Server) ReadListFilter(path string, apply ApplyList) {
+	checkReservedPath(path)
+	server.filters.AddReadList(path, apply)
 }
 
 // OpenFilter open noop read and write filters
-func (app *Server) OpenFilter(name string) {
-	app.WriteFilter(name, NoopFilter)
-	app.ReadFilter(name, NoopFilter)
-	app.DeleteFilter(name, NoopHook)
+// For glob paths like "things/*", this also enables reading individual items like "things/123"
+func (server *Server) OpenFilter(name string) {
+	checkReservedPath(name)
+	server.filters.AddWrite(name, NoopFilter)
+	server.filters.AddDelete(name, NoopHook)
+	if key.IsGlob(name) {
+		server.filters.AddReadList(name, NoopListFilter)
+		// Also allow reading individual items that match the glob pattern
+		server.filters.AddReadObject(name, NoopObjectFilter)
+	} else {
+		server.filters.AddReadObject(name, NoopObjectFilter)
+	}
 }
 
-func (r watchers) check(path string) {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
-
-	if match == -1 {
-		return
-	}
-
-	r[match].apply(path)
-}
-
-func (r hooks) check(path string, static bool) error {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
-
-	if match == -1 && !static {
-		return nil
-	}
-
-	if match == -1 && static {
-		return errors.New("route not defined, static mode, key:" + path)
-	}
-
-	return r[match].apply(path)
-}
-
-func (r router) checkStatic(path string, static bool) error {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
-
-	if match == -1 && !static {
-		return nil
-	}
-
-	if match == -1 && static {
-		return errors.New("route not defined, static mode, key:" + path)
-	}
-
-	return nil
-}
-
-func (r router) check(path string, data json.RawMessage, static bool) (json.RawMessage, error) {
-	match := -1
-	for i, filter := range r {
-		if filter.path == path || key.Match(filter.path, path) {
-			match = i
-			break
-		}
-	}
-
-	if match == -1 && !static {
-		return data, nil
-	}
-
-	if match == -1 && static {
-		return nil, errors.New("route not defined, static mode, key:" + path)
-	}
-
-	filtered, err := r[match].apply(path, data)
+// LimitFilter creates a limit filter for a glob pattern path that maintains
+// a maximum number of entries. Uses a ReadListFilter (meta-based) to limit the view
+// (so clients never see more than limit items) and AfterWrite to delete old entries.
+// Also adds write and delete filters to allow creating and deleting items.
+func (server *Server) LimitFilter(path string, limit int) {
+	checkReservedPath(path)
+	lf, err := filters.NewLimitFilter(path, limit, server.Storage)
 	if err != nil {
-		return nil, err
-	}
-	filteredDecoded, err := json.Marshal(filtered)
-	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
-	if len(filteredDecoded) == 0 {
-		return nil, errors.New("invalid filter result, key:" + path)
-	}
+	// Allow writes and deletes
+	server.filters.AddWrite(path, NoopFilter)
+	server.filters.AddDelete(path, NoopHook)
 
-	return filteredDecoded, nil
+	// ReadListFilter ensures clients never see more than limit items (meta-based, more efficient)
+	server.filters.AddReadList(path, lf.ReadListFilter)
+
+	// Also allow reading individual items that match the glob pattern
+	server.filters.AddReadObject(path, NoopObjectFilter)
+
+	// AfterWrite triggers cleanup of old entries
+	server.filters.AddAfterWrite(path, func(k string) {
+		lf.Check()
+	})
+
+	// Register for explorer display
+	server.RegisterLimitFilter(lf)
 }

@@ -3,17 +3,20 @@ package key
 import (
 	"testing"
 
+	"github.com/benitogf/ooo/monotonic"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRegex(t *testing.T) {
-	require.True(t, GlobRegex.MatchString("*"))
-	require.True(t, GlobRegex.MatchString("*/a"))
-	require.True(t, GlobRegex.MatchString("a/b/*"))
-	require.True(t, GlobRegex.MatchString("a/b/c"))
-	require.False(t, GlobRegex.MatchString("/a/b/c"))
-	require.False(t, GlobRegex.MatchString("a/b/c/"))
-	require.False(t, GlobRegex.MatchString("a:b/c"))
+func TestIsValidPatterns(t *testing.T) {
+	// Valid patterns (previously tested via GlobRegex)
+	require.True(t, IsValid("*"))
+	require.True(t, IsValid("a/b/*"))
+	require.True(t, IsValid("a/b/c"))
+	// Invalid patterns
+	require.False(t, IsValid("/a/b/c")) // starts with /
+	require.False(t, IsValid("a/b/c/")) // ends with /
+	require.False(t, IsValid("a:b/c"))  // contains invalid char :
+	require.False(t, IsValid(""))       // empty string
 }
 
 func TestKeyIsValid(t *testing.T) {
@@ -34,4 +37,54 @@ func TestKeyMatch(t *testing.T) {
 	require.False(t, Match("thing/123", "thing/12"))
 	require.False(t, Match("thing/1", "thing/123"))
 	require.False(t, Match("thing/123/*", "thing/123/123/123"))
+}
+
+func TestValidateGlob(t *testing.T) {
+	// Valid cases - no glob
+	require.NoError(t, ValidateGlob("test"))
+	require.NoError(t, ValidateGlob("test/path"))
+	require.NoError(t, ValidateGlob("test/path/deep"))
+
+	// Valid cases - glob at end
+	require.NoError(t, ValidateGlob("test/*"))
+	require.NoError(t, ValidateGlob("test/path/*"))
+	require.NoError(t, ValidateGlob("*"))
+
+	// Invalid - multiple globs
+	require.Error(t, ValidateGlob("test/*/*"))
+	require.Error(t, ValidateGlob("*/test/*"))
+	require.Error(t, ValidateGlob("*/*"))
+	require.ErrorIs(t, ValidateGlob("test/*/*"), ErrInvalidGlobCount)
+
+	// Invalid - glob not at end
+	require.Error(t, ValidateGlob("*/test"))
+	require.Error(t, ValidateGlob("test/*/path"))
+	require.Error(t, ValidateGlob("*test"))
+	require.ErrorIs(t, ValidateGlob("*/test"), ErrGlobNotAtEnd)
+}
+
+func BenchmarkIsValid(b *testing.B) {
+	for b.Loop() {
+		IsValid("test/path/to/resource")
+	}
+}
+
+func BenchmarkMatch(b *testing.B) {
+	for b.Loop() {
+		Match("test/path/*", "test/path/123")
+	}
+}
+
+func BenchmarkBuild(b *testing.B) {
+	monotonic.Init()
+	b.ResetTimer()
+	for b.Loop() {
+		Build("test/path/*")
+	}
+}
+
+func BenchmarkValidateGlob(b *testing.B) {
+	for b.Loop() {
+		ValidateGlob("test/path/*")
+	}
 }

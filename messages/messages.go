@@ -3,11 +3,15 @@ package messages
 import (
 	"errors"
 	"io"
-	"log"
+	"sync"
 
 	"github.com/benitogf/jsonpatch"
 	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
+)
+
+var (
+	ErrDecodeEmptyData = errors.New("messages: decode error, empty data")
 )
 
 // Message sent through websocket connections
@@ -17,18 +21,63 @@ type Message struct {
 	Snapshot bool            `json:"snapshot"`
 }
 
-// DecodeTest data (testing function)
+// messagePool reduces allocations for Message structs in hot paths.
+var messagePool = sync.Pool{
+	New: func() any {
+		return new(Message)
+	},
+}
+
+// getMessage gets a Message from the pool.
+func getMessage() *Message {
+	return messagePool.Get().(*Message)
+}
+
+// putMessage returns a Message to the pool after resetting it.
+func putMessage(m *Message) {
+	m.Data = nil
+	m.Version = ""
+	m.Snapshot = false
+	messagePool.Put(m)
+}
+
+// DecodeBuffer decodes a WebSocket message from a byte buffer.
+// Returns an error if the JSON is invalid or the data field is empty.
 func DecodeBuffer(data []byte) (Message, error) {
 	var wsEvent Message
 	err := json.Unmarshal(data, &wsEvent)
-	if len(wsEvent.Data) == 0 {
-		return wsEvent, errors.New("ooo: decode error, empty data")
-	}
 	if err != nil {
 		return wsEvent, err
 	}
+	if len(wsEvent.Data) == 0 {
+		return wsEvent, ErrDecodeEmptyData
+	}
 
 	return wsEvent, nil
+}
+
+// DecodeBufferPooled decodes a WebSocket message using a pooled Message struct.
+// The caller must call ReleaseMessage when done with the result.
+// Returns nil on error.
+func DecodeBufferPooled(data []byte) (*Message, error) {
+	msg := getMessage()
+	err := json.Unmarshal(data, msg)
+	if err != nil {
+		putMessage(msg)
+		return nil, err
+	}
+	if len(msg.Data) == 0 {
+		putMessage(msg)
+		return nil, ErrDecodeEmptyData
+	}
+	return msg, nil
+}
+
+// ReleaseMessage returns a Message to the pool. Call this when done with a pooled message.
+func ReleaseMessage(m *Message) {
+	if m != nil {
+		putMessage(m)
+	}
 }
 
 // Decode message
@@ -40,12 +89,15 @@ func DecodeReader(r io.Reader) (json.RawMessage, error) {
 		return httpEvent, err
 	}
 	if len(httpEvent) == 0 {
-		return httpEvent, errors.New("ooo: decode error, empty data")
+		return httpEvent, ErrDecodeEmptyData
 	}
 
 	return httpEvent, nil
 }
 
+// PatchCache applies a message to the cache. If the message is a snapshot,
+// it replaces the cache entirely. Otherwise, it applies the JSON patch.
+// Returns the updated cache.
 func PatchCache(data []byte, cache json.RawMessage) (json.RawMessage, error) {
 	message, err := DecodeBuffer(data)
 	if err != nil {
@@ -62,12 +114,10 @@ func PatchCache(data []byte, cache json.RawMessage) (json.RawMessage, error) {
 
 	patch, err := jsonpatch.DecodePatch([]byte(message.Data))
 	if err != nil || patch == nil {
-		log.Println("PatchCache: failed to decode patch", err)
 		return cache, err
 	}
 	modifiedBytes, err := patch.Apply([]byte(cache))
 	if err != nil || modifiedBytes == nil {
-		log.Println("PatchCache: failed to apply patch", err)
 		return cache, err
 	}
 

@@ -1,49 +1,58 @@
 package ooo
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/benitogf/ooo/monotonic"
 )
 
-// Time returns a string timestamp
+// Time returns a string timestamp using the monotonic clock
 func Time() string {
-	now := time.Now().UTC().UnixNano()
+	now := monotonic.Now()
 	return strconv.FormatInt(now, 10)
 }
 
-func (app *Server) sendTime() {
-	app.Stream.BroadcastClock(Time())
+func (server *Server) sendTime() {
+	server.Stream.BroadcastClock(Time())
 }
 
-func (app *Server) tick() {
-	ticker := time.NewTicker(app.Tick)
+func (server *Server) startClock() {
+	defer server.clockWg.Done()
+	ticker := time.NewTicker(server.Tick)
+	defer ticker.Stop()
 	for {
-		<-ticker.C
-		if app.Active() {
-			app.sendTime()
-			continue
+		select {
+		case <-server.clockStop:
+			return
+		case <-ticker.C:
+			if server.Active() {
+				server.sendTime()
+			} else {
+				return
+			}
 		}
-
-		return
 	}
 }
 
-func (app *Server) clock(w http.ResponseWriter, r *http.Request) {
-	if !app.Audit(r) {
+func (server *Server) clock(w http.ResponseWriter, r *http.Request) {
+	if !server.Audit(r) {
 		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", errors.New("ooo: this request is not authorized"))
-		app.Console.Err("socketConnectionUnauthorized time")
+		fmt.Fprintf(w, "%s", ErrNotAuthorized)
+		server.Console.Err("socketConnectionUnauthorized time")
 		return
 	}
 
-	client, err := app.Stream.New("", w, r)
+	server.handlerWg.Add(1)
+	defer server.handlerWg.Done()
+
+	client, err := server.Stream.New("", w, r)
 	if err != nil {
 		return
 	}
 
-	go app.Stream.WriteClock(client, Time())
-	app.Stream.Read("", client)
+	server.Stream.WriteClock(client, Time())
+	server.Stream.Read("", client)
 }
