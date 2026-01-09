@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec
 	github.com/benitogf/jsondiff v0.0.0-20220926080659-c3db9b84b559
-	github.com/benitogf/jsonpatch v0.0.0-20250219100646-458e71efe70d
+	github.com/benitogf/jsonpatch v0.0.0-20260109052650-eec54232a9a2
 	github.com/getlantern/httptest v0.0.0-20161025015934-4b40f4c7e590
 	github.com/goccy/go-json v0.10.5
 	github.com/gorilla/handlers v1.5.2
@@ -30,7 +30,3 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/benitogf/jsonpatch => ../jsonpatch
-
-replace github.com/benitogf/nopog => ../nopog
