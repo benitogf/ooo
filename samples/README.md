@@ -27,6 +27,7 @@ These samples demonstrate integration with other packages in the ecosystem. They
 | [12_limit_filter_with_validation](./12_limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
 | [13_custom_endpoints_nopog](./13_custom_endpoints_nopog) | Custom HTTP endpoints with PostgreSQL storage | `go get github.com/benitogf/nopog` |
 | [14_pivot_synchronization](./14_pivot_synchronization) | Multi-instance synchronization | `go get github.com/benitogf/pivot` |
+| [15_proxy](./15_proxy) | Proxy routes to remote ooo servers | (none) |
 
 ## Running Samples
 

@@ -409,6 +409,31 @@
       background: #1a2a3a;
     }
 
+    /* Sample Categories */
+    .sample-category {
+      margin-top: 32px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e3a4a;
+    }
+
+    .sample-category:first-of-type {
+      margin-top: 0;
+    }
+
+    .sample-category h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #00d4aa;
+      margin: 0;
+    }
+
+    .sample-category p {
+      font-size: 13px;
+      color: #8ba3b8;
+      margin: 4px 0 0 0;
+    }
+
     /* Samples */
     .sample-card {
       background: #141e2a;
@@ -1416,6 +1441,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <p class="section-subtitle">Complete examples demonstrating various features. Click to expand code.</p>
 
       <!-- SAMPLES_START -->
+      <div class="sample-category">
+        <h3>Getting Started</h3>
+        <p>Server setup, routing, storage, and typed I/O operations</p>
+      </div>
+
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
@@ -1759,6 +1789,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
+      <div class="sample-category">
+        <h3>WebSocket Subscriptions</h3>
+        <p>Real-time data streaming with typed callbacks and automatic reconnection</p>
+      </div>
+
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
@@ -2042,6 +2077,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
+      <div class="sample-category">
+        <h3>Remote Operations</h3>
+        <p>HTTP client operations for communicating with remote OOO servers</p>
+      </div>
+
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
@@ -2158,6 +2198,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 	fmt.<span class="function">Println</span>(<span class="string">&#34;Deleted config&#34;</span>)
 }</code></pre>
         </div>
+      </div>
+
+      <div class="sample-category">
+        <h3>Ecosystem Integration</h3>
+        <p>Persistent storage, authentication, distributed sync, and proxying with ecosystem packages</p>
       </div>
 
       <div class="sample-card">
@@ -2768,6 +2813,138 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 
 	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
 	log.<span class="function">Println</span>(<span class="string">&#34;Pivot server running on :8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sample-card multi-file">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>15 - Proxy Routes</h4>
+            <p>Proxy requests to remote OOO servers with WebSocket subscription fan-out</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/15_proxy" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code sample-files">
+          <div class="sample-file">
+            <div class="sample-file-header" onclick="this.parentElement.classList.toggle('file-open')">
+              <span class="sample-file-name">remote_server.go</span>
+              <span class="sample-file-toggle">▼</span>
+            </div>
+            <div class="sample-file-code">
+              <div class="code-header">
+                <span class="code-dot red"></span>
+                <span class="code-dot yellow"></span>
+                <span class="code-dot green"></span>
+                <span class="code-title">remote_server.go</span>
+                <button class="copy-btn" onclick="copyCode(this)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  Copy
+                </button>
+              </div>
+              <pre><code><span class="comment">// Remote server that holds the actual data.</span>
+<span class="comment">// This is the source of truth that the proxy will forward requests to.</span>
+<span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := &amp;ooo.<span class="type">Server</span>{}
+
+	<span class="comment">// Seed some initial data</span>
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+
+	<span class="comment">// Add initial settings</span>
+	ooo.<span class="function">Set</span>(server, <span class="string">&#34;settings&#34;</span>, <span class="keyword">map</span>[string]any{
+		<span class="string">&#34;theme&#34;</span>:    <span class="string">&#34;dark&#34;</span>,
+		<span class="string">&#34;language&#34;</span>: <span class="string">&#34;en&#34;</span>,
+	})
+
+	<span class="comment">// Add some items</span>
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;items/*&#34;</span>, <span class="keyword">map</span>[string]any{<span class="string">&#34;name&#34;</span>: <span class="string">&#34;Item 1&#34;</span>, <span class="string">&#34;value&#34;</span>: 100})
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;items/*&#34;</span>, <span class="keyword">map</span>[string]any{<span class="string">&#34;name&#34;</span>: <span class="string">&#34;Item 2&#34;</span>, <span class="string">&#34;value&#34;</span>: 200})
+
+	log.<span class="function">Println</span>(<span class="string">&#34;Remote server running on :8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+            </div>
+          </div>
+          <div class="sample-file">
+            <div class="sample-file-header" onclick="this.parentElement.classList.toggle('file-open')">
+              <span class="sample-file-name">proxy_server.go</span>
+              <span class="sample-file-toggle">▼</span>
+            </div>
+            <div class="sample-file-code">
+              <div class="code-header">
+                <span class="code-dot red"></span>
+                <span class="code-dot yellow"></span>
+                <span class="code-dot green"></span>
+                <span class="code-title">proxy_server.go</span>
+                <button class="copy-btn" onclick="copyCode(this)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  Copy
+                </button>
+              </div>
+              <pre><code><span class="comment">// Proxy server with path remapping.</span>
+<span class="comment">// Each route has its own resolver for clarity.</span>
+<span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;strings&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/proxy&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := &amp;ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+
+	<span class="comment">// Settings: /settings/{deviceID} → /settings</span>
+	settingsCfg := proxy.Config{
+		Resolve: <span class="keyword">func</span>(localPath string) (string, string, <span class="type">error</span>) {
+			<span class="keyword">return</span> <span class="string">&#34;localhost:8800&#34;</span>, <span class="string">&#34;settings&#34;</span>, <span class="keyword">nil</span>
+		},
+	}
+	proxy.<span class="function">Route</span>(server, <span class="string">&#34;settings/*&#34;</span>, settingsCfg)
+
+	<span class="comment">// Items: /items/{deviceID}/* → /items/*</span>
+	itemsCfg := proxy.Config{
+		Resolve: <span class="keyword">func</span>(localPath string) (string, string, <span class="type">error</span>) {
+			parts := strings.<span class="function">SplitN</span>(localPath, <span class="string">&#34;/&#34;</span>, 3)
+			<span class="keyword">if</span> <span class="function">len</span>(parts) == 3 {
+				<span class="keyword">return</span> <span class="string">&#34;localhost:8800&#34;</span>, <span class="string">&#34;items/&#34;</span> + parts[2], <span class="keyword">nil</span>
+			}
+			<span class="keyword">return</span> <span class="string">&#34;localhost:8800&#34;</span>, <span class="string">&#34;items/*&#34;</span>, <span class="keyword">nil</span>
+		},
+	}
+	proxy.<span class="function">RouteList</span>(server, <span class="string">&#34;items/*/*&#34;</span>, itemsCfg)
+
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8801&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;Proxy on :8801, remapping paths to remote :8800&#34;</span>)
 	server.<span class="function">WaitClose</span>()
 }</code></pre>
             </div>
