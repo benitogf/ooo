@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,8 +15,7 @@ import (
 	"github.com/benitogf/coat"
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
-	"github.com/benitogf/ooo/meta"
-	"github.com/goccy/go-json"
+	"github.com/benitogf/ooo/ui"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
@@ -31,10 +31,21 @@ var (
 // returns: address="192.168.1.100:8080", remotePath="settings"
 type Resolver func(localPath string) (address, remotePath string, err error)
 
+// Capabilities defines what operations are allowed on a proxy route.
+// When nil in Config, all capabilities default to true.
+type Capabilities struct {
+	Read   bool
+	Write  bool
+	Delete bool
+}
+
 // Config for a proxy route.
 type Config struct {
 	Resolve   Resolver
 	Subscribe *client.SubscribeConfig
+	// Optional capability overrides. If nil, all capabilities are true.
+	// Use &Capabilities{Read: true, Write: false, Delete: false} to restrict.
+	Capabilities *Capabilities
 }
 
 // Validate checks that required fields are set.
@@ -45,6 +56,30 @@ func (c *Config) Validate() error {
 	return nil
 }
 
+// canRead returns whether read is enabled (defaults to true)
+func (c *Config) canRead() bool {
+	if c.Capabilities == nil {
+		return true
+	}
+	return c.Capabilities.Read
+}
+
+// canWrite returns whether write is enabled (defaults to true)
+func (c *Config) canWrite() bool {
+	if c.Capabilities == nil {
+		return true
+	}
+	return c.Capabilities.Write
+}
+
+// canDelete returns whether delete is enabled (defaults to true)
+func (c *Config) canDelete() bool {
+	if c.Capabilities == nil {
+		return true
+	}
+	return c.Capabilities.Delete
+}
+
 // proxyManager manages shared remote subscriptions.
 type proxyManager struct {
 	mu      sync.RWMutex
@@ -53,16 +88,23 @@ type proxyManager struct {
 }
 
 // proxyState holds state for a shared remote subscription.
+type wsMessage struct {
+	msgType int
+	data    []byte
+}
+
 type proxyState struct {
-	mu         sync.RWMutex
-	address    string
-	remotePath string
-	cache      json.RawMessage
-	localSubs  map[*websocket.Conn]chan []byte // local subscribers with their message channels
-	cancel     context.CancelFunc
-	console    *coat.Console
-	cfg        *client.SubscribeConfig
-	isList     bool
+	mu              sync.Mutex
+	wg              sync.WaitGroup // tracks remote subscription goroutine
+	address         string
+	remotePath      string
+	localSubs       map[*websocket.Conn]chan wsMessage
+	cache           wsMessage
+	cancel          context.CancelFunc
+	console         *coat.Console
+	cfg             *client.SubscribeConfig
+	isList          bool
+	remoteConnected bool // true after remote subscription is established
 }
 
 func newProxyManager(silence bool) *proxyManager {
@@ -83,7 +125,7 @@ func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client
 		state = &proxyState{
 			address:    address,
 			remotePath: remotePath,
-			localSubs:  make(map[*websocket.Conn]chan []byte),
+			localSubs:  make(map[*websocket.Conn]chan wsMessage),
 			console:    pm.console,
 			cfg:        cfg,
 			isList:     isList,
@@ -100,30 +142,108 @@ func (pm *proxyManager) removeState(address, remotePath string) {
 	pm.mu.Unlock()
 }
 
+// CloseAll closes all proxy subscriptions managed by this proxy manager.
+func (pm *proxyManager) CloseAll() {
+	pm.mu.Lock()
+	states := make([]*proxyState, 0, len(pm.states))
+	for _, state := range pm.states {
+		states = append(states, state)
+	}
+	pm.states = make(map[string]*proxyState)
+	pm.mu.Unlock()
+
+	for _, state := range states {
+		state.stopRemoteSubscription()
+		state.closeAllSubscribers()
+	}
+}
+
 func (ps *proxyState) logPrefix() string {
 	return "proxy[" + ps.address + "/" + ps.remotePath + "]"
 }
 
-func (ps *proxyState) addSubscriber(conn *websocket.Conn) chan []byte {
-	msgChan := make(chan []byte, 10)
+func (ps *proxyState) addSubscriber(conn *websocket.Conn) chan wsMessage {
+	msgChan := make(chan wsMessage, 10)
 	ps.mu.Lock()
 	wasEmpty := len(ps.localSubs) == 0
+	remoteAlreadyConnected := ps.remoteConnected
 	ps.localSubs[conn] = msgChan
-
-	// Send cached data immediately if available
-	if len(ps.cache) > 0 {
-		select {
-		case msgChan <- ps.cache:
-		default:
-		}
-	}
 	ps.mu.Unlock()
 
 	if wasEmpty {
+		// First subscriber - start remote subscription
+		// The remote will send us the initial snapshot which we'll forward
 		ps.startRemoteSubscription()
+	} else if remoteAlreadyConnected {
+		// New subscriber joining an active connection
+		// Fetch fresh state via HTTP and send as snapshot
+		go ps.sendInitialState(msgChan)
 	}
 
 	return msgChan
+}
+
+// sendInitialState fetches current state via HTTP and sends it as a snapshot to the subscriber
+func (ps *proxyState) sendInitialState(msgChan chan wsMessage) {
+	var header http.Header
+	if ps.cfg != nil {
+		header = ps.cfg.Header
+	}
+
+	scheme := "http"
+	if ps.cfg != nil && ps.cfg.Server.Protocol == "wss" {
+		scheme = "https"
+	}
+
+	targetURL := scheme + "://" + ps.address + "/" + ps.remotePath
+	httpClient := &http.Client{Timeout: 10 * time.Second}
+
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		ps.console.Err(ps.logPrefix()+": failed to create initial state request", err)
+		return
+	}
+	for k, v := range header {
+		req.Header[k] = v
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		ps.console.Err(ps.logPrefix()+": failed to fetch initial state", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		ps.console.Err(ps.logPrefix()+": failed to fetch initial state", errors.New(resp.Status))
+		return
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		ps.console.Err(ps.logPrefix()+": failed to read initial state", err)
+		return
+	}
+
+	// Build a snapshot message in the ooo format: {"snapshot":true,"version":"0","data":...}
+	snapshotMsg := buildSnapshotMessage(body)
+
+	select {
+	case msgChan <- wsMessage{msgType: websocket.BinaryMessage, data: snapshotMsg}:
+	default:
+		// Channel full, skip
+	}
+}
+
+// buildSnapshotMessage wraps data in the ooo WebSocket message format with snapshot=true
+func buildSnapshotMessage(data []byte) []byte {
+	// Format: {"snapshot":true,"version":"0","data":DATA}
+	capacity := 40 + len(data)
+	buf := make([]byte, 0, capacity)
+	buf = append(buf, `{"snapshot":true,"version":"0","data":`...)
+	buf = append(buf, data...)
+	buf = append(buf, '}')
+	return buf
 }
 
 func (ps *proxyState) removeSubscriber(conn *websocket.Conn) bool {
@@ -139,25 +259,13 @@ func (ps *proxyState) removeSubscriber(conn *websocket.Conn) bool {
 	return len(ps.localSubs) == 0
 }
 
-func (ps *proxyState) broadcast(data []byte) {
+func (ps *proxyState) broadcastRaw(msgType int, data []byte) {
 	ps.mu.Lock()
-	ps.cache = data
+	msg := wsMessage{msgType: msgType, data: data}
+	ps.cache = msg // Update cache so new subscribers get initial data
 	for _, ch := range ps.localSubs {
 		select {
-		case ch <- data:
-		default:
-			// Channel full, skip this message
-		}
-	}
-	ps.mu.Unlock()
-}
-
-func (ps *proxyState) broadcastRaw(_ int, data []byte) {
-	ps.mu.Lock()
-	ps.cache = data // Update cache so new subscribers get initial data
-	for _, ch := range ps.localSubs {
-		select {
-		case ch <- data:
+		case ch <- msg:
 		default:
 			// Channel full, skip this message
 		}
@@ -179,7 +287,9 @@ func (ps *proxyState) startRemoteSubscription() {
 	ctx, cancel := context.WithCancel(context.Background())
 	ps.cancel = cancel
 
+	ps.wg.Add(1)
 	go func() {
+		defer ps.wg.Done()
 		wsScheme := "ws"
 		if ps.cfg != nil && ps.cfg.Server.Protocol == "wss" {
 			wsScheme = "wss"
@@ -221,12 +331,20 @@ func (ps *proxyState) startRemoteSubscription() {
 
 		ps.console.Log(ps.logPrefix() + ": connected to remote")
 
+		// Mark as connected so new subscribers know to fetch via HTTP
+		ps.mu.Lock()
+		ps.remoteConnected = true
+		ps.mu.Unlock()
+
 		// Read messages from remote and broadcast to local subscribers
 		// Forward raw messages as-is - the ooo client expects the same format
 		for {
 			messageType, message, err := conn.ReadMessage()
 			if err != nil {
 				ps.console.Err(ps.logPrefix()+": remote read error", err)
+				ps.mu.Lock()
+				ps.remoteConnected = false
+				ps.mu.Unlock()
 				ps.closeAllSubscribers()
 				conn.Close()
 				return
@@ -240,11 +358,34 @@ func (ps *proxyState) startRemoteSubscription() {
 
 func (ps *proxyState) stopRemoteSubscription() {
 	ps.mu.Lock()
-	defer ps.mu.Unlock()
-	if ps.cancel != nil {
-		ps.cancel()
-		ps.cancel = nil
+	cancel := ps.cancel
+	ps.cancel = nil
+	ps.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+		ps.wg.Wait() // Wait for remote subscription goroutine to finish
 	}
+}
+
+// GlobToMuxPattern converts ooo-style glob pattern to mux-compatible pattern.
+// "states/*" -> "states/{path:.*}"
+// "devices/*/things/*" -> "devices/{path1}/things/{path2:.*}"
+func GlobToMuxPattern(pattern string) string {
+	parts := strings.Split(pattern, "/")
+	varCount := 0
+	for i, part := range parts {
+		if part == "*" {
+			varCount++
+			// Last wildcard gets .* to match anything including slashes
+			if i == len(parts)-1 {
+				parts[i] = "{path" + string(rune('0'+varCount)) + ":.*}"
+			} else {
+				parts[i] = "{path" + string(rune('0'+varCount)) + "}"
+			}
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // Route registers a proxy for a single-key route pattern.
@@ -292,8 +433,23 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 		handleHTTPProxy(w, r, address, remotePath, cfg.Subscribe)
 	}
 
+	// Convert glob pattern to mux pattern
+	muxPattern := GlobToMuxPattern(localPath)
+
 	// Register the route
-	server.Router.HandleFunc("/"+localPath, handler)
+	server.Router.HandleFunc("/"+muxPattern, handler)
+
+	// Register for UI visibility
+	server.RegisterProxy(ui.ProxyInfo{
+		LocalPath: localPath,
+		Type:      "single",
+		CanRead:   cfg.canRead(),
+		CanWrite:  cfg.canWrite(),
+		CanDelete: cfg.canDelete(),
+	})
+
+	// Register cleanup function to be called when server closes
+	server.RegisterProxyCleanup(pm.CloseAll)
 
 	return nil
 }
@@ -362,9 +518,24 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 		handleHTTPProxy(w, r, address, remotePath, cfg.Subscribe)
 	}
 
+	// Convert glob pattern to mux pattern
+	muxPattern := GlobToMuxPattern(localPath)
+
 	// Register routes - specific path first, then base
-	server.Router.HandleFunc("/"+localPath, itemHandler)
+	server.Router.HandleFunc("/"+muxPattern, itemHandler)
 	server.Router.HandleFunc("/"+basePath, listHandler)
+
+	// Register for UI visibility
+	server.RegisterProxy(ui.ProxyInfo{
+		LocalPath: localPath,
+		Type:      "list",
+		CanRead:   cfg.canRead(),
+		CanWrite:  cfg.canWrite(),
+		CanDelete: cfg.canDelete(),
+	})
+
+	// Register cleanup function to be called when server closes
+	server.RegisterProxyCleanup(pm.CloseAll)
 
 	return nil
 }
@@ -390,7 +561,7 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, pm *proxyManag
 		}()
 
 		for msg := range msgChan {
-			if err := localConn.WriteMessage(websocket.TextMessage, msg); err != nil {
+			if err := localConn.WriteMessage(msg.msgType, msg.data); err != nil {
 				return
 			}
 		}
@@ -498,6 +669,36 @@ func handleHTTPProxy(w http.ResponseWriter, r *http.Request, address, remotePath
 		w.WriteHeader(resp.StatusCode)
 		io.Copy(w, resp.Body)
 
+	case http.MethodPatch:
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodPatch, targetURL, bytes.NewReader(body))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		for k, v := range header {
+			req.Header[k] = v
+		}
+
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		for k, v := range resp.Header {
+			w.Header()[k] = v
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -546,52 +747,186 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 
 	server.Router.HandleFunc("/"+localPath, handler)
 
+	// Register for UI visibility
+	server.RegisterProxy(ui.ProxyInfo{
+		LocalPath: localPath,
+		Type:      "vars",
+		CanRead:   cfg.canRead(),
+		CanWrite:  cfg.canWrite(),
+		CanDelete: cfg.canDelete(),
+	})
+
 	return nil
 }
 
-// getFullState retrieves the current full state from the remote server.
-// This is used to get initial data for new subscribers.
-func getFullState(address, remotePath string, header http.Header) (json.RawMessage, error) {
-	scheme := "http"
-	targetURL := scheme + "://" + address + "/" + remotePath
+// Node represents a network node with IP and Port for proxy routing.
+type Node struct {
+	IP   string `json:"ip"`
+	Port int    `json:"port"`
+}
 
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+// NodeFilterConfig configures RouteNodeFilter for routing requests to nodes.
+type NodeFilterConfig struct {
+	// NodesKey is the glob pattern to look up nodes (e.g., "devices/*")
+	NodesKey string
+	// LocalKey is the local path pattern to expose (e.g., "states/*")
+	LocalKey string
+	// RemoteKey is the path to access on the remote node (e.g., "state")
+	RemoteKey string
+	// Subscribe configures WebSocket subscription options
+	Subscribe *client.SubscribeConfig
+	// Capabilities overrides (if nil, all are true)
+	Capabilities *Capabilities
+}
 
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
-	if err != nil {
-		return nil, err
+// RouteNodeFilter sets up a proxy route that looks up nodes from storage and routes
+// requests to them. This is a convenience wrapper for the common pattern of
+// routing requests to nodes stored in a list.
+//
+// The node data must have "ip" and "port" JSON fields.
+//
+// Example:
+//
+//	proxy.RouteNodeFilter(server, proxy.NodeFilterConfig{
+//	    NodesKey:  "devices/*",
+//	    LocalKey:  "states/*",
+//	    RemoteKey: "state",
+//	})
+func RouteNodeFilter(server *ooo.Server, cfg NodeFilterConfig) error {
+	if cfg.NodesKey == "" || cfg.LocalKey == "" || cfg.RemoteKey == "" {
+		return errors.New("proxy: NodesKey, LocalKey, and RemoteKey are required")
 	}
-	for k, v := range header {
-		req.Header[k] = v
+
+	// Extract the base path from LocalKey (e.g., "states/*" -> "states/")
+	basePath := strings.TrimSuffix(cfg.LocalKey, "*")
+
+	proxyCfg := Config{
+		Resolve: func(localPath string) (string, string, error) {
+			// Extract the node ID from the local path
+			nodeID := strings.TrimPrefix(localPath, basePath)
+
+			// Look up nodes from storage
+			nodes, err := ooo.GetList[Node](server, cfg.NodesKey)
+			if err != nil {
+				return "", "", err
+			}
+
+			// Find the matching node
+			for _, node := range nodes {
+				if node.Index == nodeID {
+					return node.Data.IP + ":" + strconv.Itoa(node.Data.Port), cfg.RemoteKey, nil
+				}
+			}
+			return "", "", errors.New("proxy: node not found: " + nodeID)
+		},
+		Subscribe:    cfg.Subscribe,
+		Capabilities: cfg.Capabilities,
 	}
 
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
+	return Route(server, cfg.LocalKey, proxyCfg)
+}
 
-	if resp.StatusCode >= 400 {
-		return nil, errors.New("failed to get initial state: " + resp.Status)
+// NodeListFilterConfig configures RouteNodeListFilter for routing list requests to nodes.
+type NodeListFilterConfig struct {
+	// NodesKey is the glob pattern to look up nodes (e.g., "devices/*")
+	NodesKey string
+	// LocalKey is the local path pattern to expose (e.g., "device/logs/*/*")
+	// The second-to-last wildcard is the node ID, the last wildcard is for list items
+	LocalKey string
+	// RemoteKey is the list path to access on the remote node (e.g., "logs/*")
+	RemoteKey string
+	// Subscribe configures WebSocket subscription options
+	Subscribe *client.SubscribeConfig
+	// Capabilities overrides (if nil, all are true)
+	Capabilities *Capabilities
+}
+
+// RouteNodeListFilter sets up a proxy route that looks up nodes from storage and routes
+// list requests to them. This is for proxying list data from nodes.
+//
+// The local path pattern should have at least two wildcards:
+// - Second-to-last wildcard: node ID
+// - Last wildcard: list item ID
+//
+// Example:
+//
+//	proxy.RouteNodeListFilter(server, proxy.NodeListFilterConfig{
+//	    NodesKey:  "devices/*",
+//	    LocalKey:  "device/logs/*/*",
+//	    RemoteKey: "logs/*",
+//	})
+//
+// This routes requests like "device/logs/node123/item456" to "logs/item456" on node123.
+func RouteNodeListFilter(server *ooo.Server, cfg NodeListFilterConfig) error {
+	if cfg.NodesKey == "" || cfg.LocalKey == "" || cfg.RemoteKey == "" {
+		return errors.New("proxy: NodesKey, LocalKey, and RemoteKey are required")
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	// Decode as meta.Object to get just the data
-	obj, err := meta.Decode(body)
-	if err != nil {
-		// Try as list
-		objs, err := meta.DecodeList(body)
-		if err != nil {
-			return nil, err
+	// Parse the local key to find wildcard positions
+	localParts := strings.Split(cfg.LocalKey, "/")
+	wildcardPositions := []int{}
+	for i, part := range localParts {
+		if part == "*" {
+			wildcardPositions = append(wildcardPositions, i)
 		}
-		// Re-encode the list
-		return json.Marshal(objs)
 	}
 
-	// Return the full object JSON for caching
-	return json.Marshal(obj)
+	if len(wildcardPositions) < 2 {
+		return errors.New("proxy: LocalKey must have at least two wildcards for node list filter")
+	}
+
+	// The node ID is at the second-to-last wildcard position
+	nodeIDPos := wildcardPositions[len(wildcardPositions)-2]
+
+	// Build base path up to (but not including) the node ID wildcard
+	baseParts := localParts[:nodeIDPos]
+	basePath := strings.Join(baseParts, "/")
+	if basePath != "" {
+		basePath += "/"
+	}
+
+	// Remote base path (without trailing wildcard)
+	remoteBasePath := strings.TrimSuffix(cfg.RemoteKey, "*")
+
+	proxyCfg := Config{
+		Resolve: func(localPath string) (string, string, error) {
+			// Parse the path to extract node ID and item path
+			pathParts := strings.Split(localPath, "/")
+
+			if len(pathParts) <= nodeIDPos {
+				return "", "", errors.New("proxy: invalid path for node list filter")
+			}
+
+			nodeID := pathParts[nodeIDPos]
+
+			// Build the remote path: everything after the node ID becomes the item path
+			var remotePath string
+			if len(pathParts) > nodeIDPos+1 {
+				// Has item ID - route to specific item
+				itemParts := pathParts[nodeIDPos+1:]
+				remotePath = remoteBasePath + strings.Join(itemParts, "/")
+			} else {
+				// No item ID - route to list base (for subscriptions)
+				remotePath = cfg.RemoteKey
+			}
+
+			// Look up nodes from storage
+			nodes, err := ooo.GetList[Node](server, cfg.NodesKey)
+			if err != nil {
+				return "", "", err
+			}
+
+			// Find the matching node
+			for _, node := range nodes {
+				if node.Index == nodeID {
+					return node.Data.IP + ":" + strconv.Itoa(node.Data.Port), remotePath, nil
+				}
+			}
+			return "", "", errors.New("proxy: node not found: " + nodeID)
+		},
+		Subscribe:    cfg.Subscribe,
+		Capabilities: cfg.Capabilities,
+	}
+
+	return RouteList(server, cfg.LocalKey, proxyCfg)
 }

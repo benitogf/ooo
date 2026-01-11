@@ -134,3 +134,40 @@ func TestActive(t *testing.T) {
 	server.Close(os.Interrupt)
 	require.False(t, server.Active())
 }
+
+func TestOnStart(t *testing.T) {
+	started := false
+	server := Server{}
+	server.Silence = true
+	server.OnStart = func() {
+		started = true
+	}
+
+	require.False(t, started)
+	server.Start("localhost:0")
+	require.True(t, started)
+	defer server.Close(os.Interrupt)
+}
+
+func TestOnStartComposition(t *testing.T) {
+	var order []string
+	server := Server{}
+	server.Silence = true
+
+	// First callback
+	server.OnStart = func() {
+		order = append(order, "first")
+	}
+
+	// Compose second callback
+	existingOnStart := server.OnStart
+	server.OnStart = func() {
+		existingOnStart()
+		order = append(order, "second")
+	}
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	require.Equal(t, []string{"first", "second"}, order)
+}

@@ -215,15 +215,57 @@ server.Audit = func(r *http.Request) bool {
 }
 ```
 
-### Custom Routes
+### Custom Endpoints
+
+Register custom HTTP endpoints with typed schemas visible in the UI.
 
 ```go
-server.Router = mux.NewRouter()
-server.Router.HandleFunc("/custom", func(w http.ResponseWriter, r *http.Request) {
-    w.Header().Set("Content-Type", "application/json")
-    fmt.Fprintf(w, `{"status":"ok"}`)
+server.Endpoint(ooo.EndpointConfig{
+    Path:        "/policies/{id}",
+    Description: "Manage access control policies",
+    // Vars are route variables (mandatory) - auto-extracted from {id} in path
+    Vars: ooo.Vars{"id": "Policy ID"},
+    Methods: ooo.Methods{
+        "GET": ooo.MethodSpec{
+            Response: PolicyResponse{},
+            // Params are query parameters (optional) - per method
+            Params: ooo.Params{"filter": "Optional filter value"},
+        },
+        "PUT": ooo.MethodSpec{
+            Request:  Policy{},
+            Response: PolicyResponse{},
+        },
+    },
+    Handler: func(w http.ResponseWriter, r *http.Request) {
+        id := mux.Vars(r)["id"]           // Route variable (mandatory)
+        filter := r.URL.Query().Get("filter") // Query param (optional)
+        // ... handle request
+    },
 })
-server.Start("0.0.0.0:8800")
+```
+
+### Proxies
+
+Forward filters from remote ooo servers with path remapping.
+
+```go
+// Proxy /settings/{deviceID} → /settings on remote
+proxy.Route(server, "settings/*", proxy.Config{
+    Resolve: func(localPath string) (address, remotePath string, err error) {
+        return "localhost:8800", "settings", nil
+    },
+})
+
+// Proxy list routes: /items/{deviceID}/* → /items/* on remote
+proxy.RouteList(server, "items/*/*", proxy.Config{
+    Resolve: func(localPath string) (address, remotePath string, err error) {
+        parts := strings.SplitN(localPath, "/", 3)
+        if len(parts) == 3 {
+            return "localhost:8800", "items/" + parts[2], nil
+        }
+        return "localhost:8800", "items/*", nil
+    },
+})
 ```
 
 ## I/O Operations

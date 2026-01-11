@@ -1,4 +1,4 @@
-function KeyEditorLive({ keyPath, fromFilter }) {
+function KeyEditorLive({ keyPath, fromFilter, source }) {
   const { useState, useEffect, useRef } = React;
   const { IconChevronLeft, IconEdit, IconWifi, IconWifiOff } = window.Icons;
   const ReactJson = window.reactJsonView ? window.reactJsonView.default : null;
@@ -39,7 +39,9 @@ function KeyEditorLive({ keyPath, fromFilter }) {
   }, [data, version]);
 
   const goBack = () => {
-    if (fromFilter) {
+    if (source === 'proxies') {
+      window.location.hash = '/proxies';
+    } else if (fromFilter) {
       window.location.hash = '/storage/keys/live/' + encodeURIComponent(fromFilter);
     } else {
       window.location.hash = '/storage';

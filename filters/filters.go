@@ -286,6 +286,28 @@ func (r ObjectFilter) Check(path string, obj meta.Object, static bool) (meta.Obj
 	return r[match].apply(path, obj)
 }
 
+// CheckWithListFallback is like Check but also accepts if a matching ListFilter exists.
+// This allows ReadListFilter("logs/*") to also permit reading individual entries like "logs/123".
+func (r ObjectFilter) CheckWithListFallback(path string, obj meta.Object, static bool, listFilters ListFilter) (meta.Object, error) {
+	match := findMatch(r, path, func(f objectFilter) string { return f.path })
+
+	if match == -1 && !static {
+		return obj, nil
+	}
+
+	if match == -1 && static {
+		// Check if there's a matching list filter that would cover this path
+		listMatch := listFilters.HasMatch(path)
+		if listMatch != -1 {
+			// A list filter covers this path, allow the read with no transformation
+			return obj, nil
+		}
+		return meta.Object{}, fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
+	}
+
+	return r[match].apply(path, obj)
+}
+
 // HasMatch returns the index of a matching filter, or -1 if none exists.
 func (r ListFilter) HasMatch(path string) int {
 	return findMatch(r, path, func(f listFilter) string { return f.path })

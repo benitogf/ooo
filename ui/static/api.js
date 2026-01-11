@@ -37,6 +37,59 @@ const Api = (function() {
     return socket;
   }
 
+  // React hook for subscribing to the server clock
+  function useSubscribeClock() {
+    const { useState, useEffect, useRef } = React;
+    const [time, setTime] = useState(null);
+    const [connected, setConnected] = useState(false);
+    const [error, setError] = useState(null);
+    const socketRef = useRef(null);
+
+    useEffect(() => {
+      // Close existing socket
+      if (socketRef.current) {
+        socketRef.current.close();
+        socketRef.current = null;
+      }
+
+      // ooo-client detects clock mode when path has no slashes (just host)
+      const socket = ooo(getHost(), window.location.protocol === 'https:');
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        setConnected(true);
+        setError(null);
+      };
+
+      socket.onmessage = (timestamp) => {
+        // Clock mode returns integer timestamp in nanoseconds
+        if (typeof timestamp === 'number') {
+          setTime(new Date(timestamp / 1000000));
+        }
+      };
+
+      socket.onerror = (e) => {
+        console.warn('Clock WebSocket error:', e);
+        setError(e);
+        setConnected(false);
+      };
+
+      socket.onclose = () => {
+        setConnected(false);
+        setTime(null);
+      };
+
+      return () => {
+        if (socketRef.current) {
+          socketRef.current.close();
+          socketRef.current = null;
+        }
+      };
+    }, []);
+
+    return { time, connected, error };
+  }
+
   // React hook for subscribing to a path
   function useSubscribe(path) {
     const { useState, useEffect, useRef } = React;
@@ -222,12 +275,59 @@ const Api = (function() {
     return { items, connected, error, lastUpdate, clearLastUpdate, socket: socketRef.current };
   }
 
+  // Fetch endpoints metadata
+  async function fetchEndpoints() {
+    const response = await fetch('/?api=endpoints');
+    if (!response.ok) throw new Error('Failed to fetch endpoints');
+    return response.json();
+  }
+
+  // Fetch proxies metadata
+  async function fetchProxies() {
+    const response = await fetch('/?api=proxies');
+    if (!response.ok) throw new Error('Failed to fetch proxies');
+    return response.json();
+  }
+
+  // Fetch orphan keys (keys not matching any filter)
+  async function fetchOrphanKeys() {
+    const response = await fetch('/?api=orphan-keys');
+    if (!response.ok) throw new Error('Failed to fetch orphan keys');
+    return response.json();
+  }
+
+  // Call a custom endpoint
+  async function callEndpoint(path, method, body) {
+    const options = {
+      method: method,
+      headers: {}
+    };
+    if (body !== undefined && method !== 'GET' && method !== 'DELETE') {
+      options.headers['Content-Type'] = 'application/json';
+      options.body = JSON.stringify(body);
+    }
+    const response = await fetch(path, options);
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+    return { status: response.status, ok: response.ok, data };
+  }
+
   return {
     subscribe,
     useSubscribe,
+    useSubscribeClock,
     useSubscribeGlob,
     getHost,
-    getWsProtocol
+    getWsProtocol,
+    fetchEndpoints,
+    fetchProxies,
+    fetchOrphanKeys,
+    callEndpoint
   };
 })();
 

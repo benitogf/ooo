@@ -503,3 +503,59 @@ func TestFiltersLimitAllowsPostAndRead(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, string(body), "limited item")
 }
+
+func TestReadListFilterAllowsIndividualReads(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Static = true
+
+	// ReadListFilter for glob path should allow reading both list and individual items
+	// This is the fix for: logs/* should allow accessing logs/18895b6dc6b09a1b
+	server.WriteFilter("logs/*", NoopFilter)
+	server.DeleteFilter("logs/*", NoopHook)
+	server.ReadListFilter("logs/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+		return objs, nil
+	})
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Create an item via POST
+	data := json.RawMessage(`{"level":"info","message":"test log"}`)
+	req := httptest.NewRequest("POST", "/logs/*", bytes.NewBuffer(data))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, 200, resp.StatusCode, "POST to logs/* should succeed")
+
+	// Parse the response to get the created key
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	var createResp struct {
+		Index string `json:"index"`
+	}
+	err = json.Unmarshal(body, &createResp)
+	require.NoError(t, err)
+	require.NotEmpty(t, createResp.Index)
+
+	// Read the list - should work
+	req = httptest.NewRequest("GET", "/logs/*", nil)
+	w = httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp = w.Result()
+	require.Equal(t, 200, resp.StatusCode, "GET logs/* (list) should succeed")
+
+	// Read the individual item - should also work (this was the bug)
+	req = httptest.NewRequest("GET", "/logs/"+createResp.Index, nil)
+	w = httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp = w.Result()
+	require.Equal(t, 200, resp.StatusCode, "GET logs/123 (individual) should succeed - ReadListFilter must also allow individual reads")
+
+	body, err = io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), "test log")
+}

@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
@@ -23,6 +25,70 @@ type Settings struct {
 type Thing struct {
 	ID   string `json:"id"`
 	Data string `json:"data"`
+}
+
+func TestGlobToMuxPattern(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"simple glob", "states/*", "states/{path1:.*}"},
+		{"no glob", "settings", "settings"},
+		{"middle glob", "devices/*/things", "devices/{path1}/things"},
+		{"multiple globs", "devices/*/things/*", "devices/{path1}/things/{path2:.*}"},
+		{"nested path no glob", "api/v1/users", "api/v1/users"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := proxy.GlobToMuxPattern(tt.input)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestRouteWithGlobPattern(t *testing.T) {
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("state")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "states/*", proxy.Config{
+		Resolve: func(localPath string) (string, string, error) {
+			// localPath is "states/device123", extract device ID
+			deviceID := strings.TrimPrefix(localPath, "states/")
+			_ = deviceID // In real use, look up device address
+			return remote.Address, "state", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	// Set data on remote
+	data, _ := json.Marshal(Settings{Name: "test", Value: 42})
+	_, err = remote.Storage.Set("state", data)
+	require.NoError(t, err)
+
+	// GET through proxy with glob pattern
+	resp, err := http.Get("http://" + proxyServer.Address + "/states/device123")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var result struct {
+		Data Settings `json:"data"`
+	}
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
+	require.Equal(t, "test", result.Data.Name)
 }
 
 func TestConfig_Validate(t *testing.T) {
@@ -277,4 +343,200 @@ func TestProxyResolverError(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+// TestProxyLateSubscriberGetsSnapshot tests that a subscriber joining an already-active
+// proxy connection receives a proper snapshot instead of a patch message.
+func TestProxyLateSubscriberGetsSnapshot(t *testing.T) {
+	var wsWg sync.WaitGroup
+	var received1, received2 []client.Meta[Settings]
+	var mu sync.Mutex
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("settings")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	ctx := t.Context()
+
+	// Set initial data on remote
+	data, _ := json.Marshal(Settings{Name: "initial", Value: 1})
+	_, err = remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+
+	// First subscriber connects - should receive initial snapshot
+	wsWg.Add(1)
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "settings/device1", client.SubscribeEvents[Settings]{
+		OnMessage: func(m client.Meta[Settings]) {
+			mu.Lock()
+			received1 = append(received1, m)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify first subscriber got the initial data
+	mu.Lock()
+	require.Len(t, received1, 1, "first subscriber should receive initial snapshot")
+	require.Equal(t, "initial", received1[0].Data.Name)
+	require.Equal(t, 1, received1[0].Data.Value)
+	mu.Unlock()
+
+	// Update data on remote - first subscriber receives the update
+	wsWg.Add(1)
+	data, _ = json.Marshal(Settings{Name: "updated", Value: 42})
+	_, err = remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+	wsWg.Wait()
+
+	mu.Lock()
+	require.Len(t, received1, 2, "first subscriber should receive update")
+	require.Equal(t, "updated", received1[1].Data.Name)
+	mu.Unlock()
+
+	// Now a second subscriber joins AFTER the proxy connection is already active
+	// This subscriber should receive the current state as a snapshot, not a patch
+	wsWg.Add(1)
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "settings/device1", client.SubscribeEvents[Settings]{
+		OnMessage: func(m client.Meta[Settings]) {
+			mu.Lock()
+			received2 = append(received2, m)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify second subscriber got the current state as a snapshot
+	mu.Lock()
+	require.Len(t, received2, 1, "late subscriber should receive snapshot")
+	require.Equal(t, "updated", received2[0].Data.Name, "late subscriber should get current state")
+	require.Equal(t, 42, received2[0].Data.Value, "late subscriber should get current state")
+	mu.Unlock()
+
+	// Update data again - both subscribers should receive
+	wsWg.Add(2)
+	data, _ = json.Marshal(Settings{Name: "final", Value: 100})
+	_, err = remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+	wsWg.Wait()
+
+	// Verify both received the update
+	mu.Lock()
+	require.Len(t, received1, 3, "first subscriber should receive all updates")
+	require.Equal(t, "final", received1[2].Data.Name)
+	require.Len(t, received2, 2, "late subscriber should receive updates after joining")
+	require.Equal(t, "final", received2[1].Data.Name)
+	mu.Unlock()
+}
+
+// TestProxyServerCloseTearsDownSubscriptions verifies that when server.Close() returns,
+// all proxy subscriptions (including remote WebSocket connections) are properly torn down.
+func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
+	var clientWg sync.WaitGroup
+	var mu sync.Mutex
+	var received []client.Meta[Settings]
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("settings")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	// Set initial data on remote
+	data, _ := json.Marshal(Settings{Name: "initial", Value: 1})
+	_, err := remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err = proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+
+	// Subscribe to settings through proxy - use test context
+	ctx := t.Context()
+	clientWg.Add(1)
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "settings/device1", client.SubscribeEvents[Settings]{
+		OnMessage: func(m client.Meta[Settings]) {
+			mu.Lock()
+			received = append(received, m)
+			count := len(received)
+			mu.Unlock()
+			if count == 1 {
+				clientWg.Done()
+			}
+		},
+	})
+	clientWg.Wait()
+
+	// Verify we received initial data
+	mu.Lock()
+	require.Len(t, received, 1, "should receive initial snapshot")
+	require.Equal(t, "initial", received[0].Data.Name)
+	mu.Unlock()
+
+	// Get remote's subscriber count before close using GetState()
+	remoteStateBefore := remote.Stream.GetState()
+	totalConnsBefore := 0
+	for _, pool := range remoteStateBefore {
+		totalConnsBefore += pool.Connections
+	}
+	require.Equal(t, 1, totalConnsBefore, "remote should have 1 subscriber from proxy")
+
+	// Close the proxy server - this should tear down all subscriptions including remote
+	proxyServer.Close(os.Interrupt)
+
+	// Wait for remote subscription to be cleaned up (async on remote side)
+	// Poll with timeout instead of sleep
+	deadline := time.Now().Add(500 * time.Millisecond)
+	var totalConnsAfter int
+	for time.Now().Before(deadline) {
+		remoteStateAfter := remote.Stream.GetState()
+		totalConnsAfter = 0
+		for _, pool := range remoteStateAfter {
+			totalConnsAfter += pool.Connections
+		}
+		if totalConnsAfter == 0 {
+			break
+		}
+		// Yield to allow remote cleanup goroutine to run
+		runtime.Gosched()
+	}
+	require.Equal(t, 0, totalConnsAfter, "remote should have 0 subscribers after proxy server closes")
 }

@@ -2,30 +2,51 @@ function PivotStatus({ onClose }) {
     const { useState, useEffect } = React;
     const { IconX, IconServer, IconCloud, IconCloudOff, IconCheck, IconAlertCircle } = window.Icons;
 
+    // Use ooo-client subscription for real-time updates
+    const { data: wsData, connected, error: wsError } = Api.useSubscribe('pivot/status');
+    
     const [pivotInfo, setPivotInfo] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
+    // Initial fetch
     useEffect(() => {
-        const fetchPivotInfo = () => {
-            fetch('/?api=pivot')
-                .then(res => res.json())
-                .then(data => {
-                    setPivotInfo(data);
-                    setLoading(false);
-                    setError(null);
-                })
-                .catch(err => {
-                    setError(err.message);
-                    setLoading(false);
-                });
-        };
-
-        fetchPivotInfo();
-        // Refresh every 5 seconds
-        const interval = setInterval(fetchPivotInfo, 5000);
-        return () => clearInterval(interval);
+        fetch('/?api=pivot')
+            .then(res => res.json())
+            .then(data => {
+                setPivotInfo(data);
+                setLoading(false);
+                setError(null);
+            })
+            .catch(err => {
+                setError(err.message);
+                setLoading(false);
+            });
     }, []);
+
+    // Update from WebSocket data
+    useEffect(() => {
+        if (wsData && wsData.data) {
+            setPivotInfo(wsData.data);
+            setLoading(false);
+            setError(null);
+        }
+    }, [wsData]);
+
+    // Show error when connection is lost (only after we've had data)
+    useEffect(() => {
+        // Only show connection errors after initial data has been loaded
+        if (pivotInfo === null) return;
+        
+        if (wsError) {
+            setError('Connection error');
+        } else if (connected === false) {
+            setError('Connection lost');
+        } else {
+            // Clear error when connected
+            setError(null);
+        }
+    }, [connected, wsError, pivotInfo]);
 
     const getRoleIcon = () => {
         if (!pivotInfo) return null;
@@ -73,7 +94,8 @@ function PivotStatus({ onClose }) {
         return pivotInfo.nodes.filter(n => !n.healthy).length;
     };
 
-    if (loading) {
+    // Show loading state for both initial load and connection issues
+    if (loading || error) {
         return (
             <div className="pivot-status">
                 <div className="pivot-status-header">
@@ -81,21 +103,14 @@ function PivotStatus({ onClose }) {
                     <button className="close-btn" onClick={onClose}><IconX /></button>
                 </div>
                 <div className="pivot-status-content">
-                    <div className="loading">Loading...</div>
-                </div>
-            </div>
-        );
-    }
-
-    if (error) {
-        return (
-            <div className="pivot-status">
-                <div className="pivot-status-header">
-                    <h3>Pivot Status</h3>
-                    <button className="close-btn" onClick={onClose}><IconX /></button>
-                </div>
-                <div className="pivot-status-content">
-                    <div className="error">Error: {error}</div>
+                    <div className="pivot-loading">
+                        <div className="pivot-loading-text">
+                            {error ? 'Reconnecting...' : 'Loading...'}
+                        </div>
+                        <div className="pivot-loading-bar">
+                            <div className="pivot-loading-bar-fill"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         );
@@ -163,9 +178,16 @@ function PivotStatus({ onClose }) {
                 {pivotInfo.role === 'node' && (
                     <div className="pivot-section">
                         <h4>Pivot Connection</h4>
-                        <div className="pivot-connection">
-                            <IconServer />
-                            <span>{pivotInfo.pivotIP}</span>
+                        <div className={`node-item ${pivotInfo.pivotHealthy ? 'healthy' : 'unhealthy'}`}>
+                            <div className="node-status-icon">
+                                {pivotInfo.pivotHealthy ? <IconCheck /> : <IconAlertCircle />}
+                            </div>
+                            <div className="node-info">
+                                <div className="node-address">{pivotInfo.pivotIP}</div>
+                                <div className="node-last-check">
+                                    Last check: {pivotInfo.pivotLastCheck || 'Never'}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 )}

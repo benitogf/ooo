@@ -66,7 +66,9 @@ func (server *Server) ReadObjectFilter(path string, apply ApplyObject) {
 	server.filters.AddReadObject(path, apply)
 }
 
-// ReadListFilter add a filter for []meta.Object reads
+// ReadListFilter add a filter for []meta.Object reads.
+// For glob paths like "things/*", individual item reads (e.g., "things/123") will also
+// be allowed if no explicit ReadObjectFilter is registered for that path.
 func (server *Server) ReadListFilter(path string, apply ApplyList) {
 	checkReservedPath(path)
 	server.filters.AddReadList(path, apply)

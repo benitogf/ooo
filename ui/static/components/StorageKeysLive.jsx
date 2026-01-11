@@ -1,4 +1,4 @@
-function StorageKeysLive({ filterPath, fromFilter }) {
+function StorageKeysLive({ filterPath, fromFilter, source }) {
   const { useState, useEffect, useCallback, useMemo, useRef } = React;
   const { IconBox, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconEdit, IconEye, IconSend, IconWifi, IconWifiOff, IconFilter } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
@@ -389,7 +389,9 @@ function StorageKeysLive({ filterPath, fromFilter }) {
   const paginatedItems = sortedItems.slice(start, start + limit);
 
   const goBack = () => {
-    if (fromFilter) {
+    if (source === 'proxies') {
+      window.location.hash = '/proxies';
+    } else if (fromFilter) {
       window.location.hash = '/storage/keys/live/' + encodeURIComponent(fromFilter);
     } else {
       window.location.hash = '/storage';
@@ -399,7 +401,9 @@ function StorageKeysLive({ filterPath, fromFilter }) {
 
   const viewKeyLive = (e, item) => {
     e.stopPropagation();
-    window.location.hash = '/storage/key/live/' + encodeURIComponent(item.path) + '?from=' + encodeURIComponent(filterPath);
+    let hash = '/storage/key/live/' + encodeURIComponent(item.path) + '?from=' + encodeURIComponent(filterPath);
+    if (source) hash += '&source=' + source;
+    window.location.hash = hash;
   };
 
   const pushData = () => {
@@ -793,6 +797,7 @@ function StorageKeysLive({ filterPath, fromFilter }) {
         keyPath={keyToEdit}
         filterPath={filterPath}
         onClose={closeEditModal}
+        readOnly={filterInfo && !filterInfo.canWrite}
       />
 
       <PathNavigatorModal

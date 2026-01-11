@@ -1,12 +1,14 @@
 function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChange, onStateClick, stateModalOpen, onPivotClick, pivotModalOpen }) {
   const { useState, useEffect, useRef } = React;
-  const { IconBox, IconDatabase, IconActivity, IconServer, IconCloud, IconCloudOff } = window.Icons;
+  const { IconBox, IconDatabase, IconActivity, IconServer, IconCloud, IconCloudOff, IconCode, IconLink, IconWarning } = window.Icons;
   const StateModal = window.StateModal;
-
-  const [serverTime, setServerTime] = useState(null);
-  const [clockConnected, setClockConnected] = useState(false);
+  const [endpointCount, setEndpointCount] = useState(0);
+  const [proxyCount, setProxyCount] = useState(0);
   const [pivotRole, setPivotRole] = useState(null);
   const prevConnected = useRef(false);
+
+  // Use ooo-client for clock subscription
+  const { time: serverTime, connected: clockConnected } = Api.useSubscribeClock();
 
   useEffect(() => {
     // Notify parent of connection state changes
@@ -16,13 +18,20 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
     }
   }, [clockConnected, onConnectionChange]);
 
+  // Reload all config data when clock reconnects (configs only change after server restart)
   useEffect(() => {
-    // Fetch pivot role on mount
+    if (!clockConnected) return;
+    
+    // Fetch pivot role
     fetch('/?api=pivot')
       .then(res => res.json())
       .then(data => setPivotRole(data.role || 'none'))
       .catch(() => setPivotRole('none'));
-  }, []);
+    
+    // Fetch counts for navigation badges (endpoints/proxies only change on restart)
+    Api.fetchEndpoints().then(data => setEndpointCount((data || []).length)).catch(() => {});
+    Api.fetchProxies().then(data => setProxyCount((data || []).length)).catch(() => {});
+  }, [clockConnected]);
 
   const getPivotIcon = () => {
     switch (pivotRole) {
@@ -31,59 +40,6 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
       default: return <IconCloudOff />;
     }
   };
-
-  useEffect(() => {
-    // Subscribe to server clock using native WebSocket
-    // ooo-client has issues with clock mode, so we use raw WebSocket
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${wsProtocol}//${window.location.host}`;
-    let ws = null;
-    let reconnectTimeout = null;
-
-    const connect = () => {
-      ws = new WebSocket(wsUrl);
-      ws.binaryType = 'arraybuffer';
-
-      ws.onopen = () => {
-        setClockConnected(true);
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const decoder = new TextDecoder('utf8');
-          const text = decoder.decode(event.data);
-          const timestamp = parseInt(text, 10);
-          if (!isNaN(timestamp)) {
-            setServerTime(new Date(timestamp / 1000000));
-          }
-        } catch (e) {
-          console.warn('Clock parse error:', e);
-        }
-      };
-
-      ws.onclose = () => {
-        setClockConnected(false);
-        setServerTime(null); // Clear stale time when disconnected
-        // Reconnect after 3 seconds
-        reconnectTimeout = setTimeout(connect, 3000);
-      };
-
-      ws.onerror = () => {
-        setClockConnected(false);
-        setServerTime(null); // Clear stale time on error
-      };
-    };
-
-    connect();
-
-    return () => {
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (ws) {
-        ws.close();
-        ws = null;
-      }
-    };
-  }, []);
 
   const formatTime = (date) => {
     if (!date) return '--:--:--';
@@ -102,8 +58,35 @@ function AppNav({ appName, activeTab, filterCount, onNavigate, onConnectionChang
           onClick={() => onNavigate('/storage')}
         >
           <IconDatabase />
-          Storage
+          Filters
           <span className="badge">{filterCount}</span>
+        </button>
+        {endpointCount > 0 && (
+          <button
+            className={`nav-tab ${activeTab === 'endpoints' ? 'active' : ''}`}
+            onClick={() => onNavigate('/endpoints')}
+          >
+            <IconCode />
+            Endpoints
+            <span className="badge">{endpointCount}</span>
+          </button>
+        )}
+        {proxyCount > 0 && (
+          <button
+            className={`nav-tab ${activeTab === 'proxies' ? 'active' : ''}`}
+            onClick={() => onNavigate('/proxies')}
+          >
+            <IconLink />
+            Proxies
+            <span className="badge">{proxyCount}</span>
+          </button>
+        )}
+        <button
+          className={`nav-tab ${activeTab === 'orphans' ? 'active' : ''}`}
+          onClick={() => onNavigate('/orphans')}
+        >
+          <IconWarning />
+          Orphans
         </button>
       </div>
       <div className="nav-right">
