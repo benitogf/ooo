@@ -409,6 +409,31 @@
       background: #1a2a3a;
     }
 
+    /* Sample Categories */
+    .sample-category {
+      margin-top: 32px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1e3a4a;
+    }
+
+    .sample-category:first-of-type {
+      margin-top: 0;
+    }
+
+    .sample-category h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #00d4aa;
+      margin: 0;
+    }
+
+    .sample-category p {
+      font-size: 13px;
+      color: #8ba3b8;
+      margin: 4px 0 0 0;
+    }
+
     /* Samples */
     .sample-card {
       background: #141e2a;
@@ -672,6 +697,8 @@
         <a href="#quickstart">Quickstart</a>
         <a href="#api">API</a>
         <a href="#filters">Filters</a>
+        <a href="#endpoints">Endpoints</a>
+        <a href="#proxies">Proxies</a>
         <a href="#samples">Samples</a>
         <a href="#ecosystem">Ecosystem</a>
         <a href="https://github.com/benitogf/ooo" target="_blank">GitHub</a>
@@ -1072,6 +1099,147 @@ server.<span class="function">LimitFilter</span>(<span class="string">"logs/*"</
     </div>
   </section>
 
+  <section id="endpoints" class="section">
+    <div class="container">
+      <h2 class="section-title">Custom Endpoints</h2>
+      <p class="section-subtitle">Register custom HTTP endpoints with typed schemas visible in the storage explorer UI.</p>
+
+      <table class="api-table" style="margin-bottom: 32px;">
+        <thead>
+          <tr>
+            <th>Field</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Path</code></td>
+            <td>URL path with optional route variables like <code>/policies/{id}</code></td>
+          </tr>
+          <tr>
+            <td><code>Vars</code></td>
+            <td>Route variables (mandatory) - auto-extracted from path if not specified</td>
+          </tr>
+          <tr>
+            <td><code>Methods</code></td>
+            <td>Map of HTTP methods to their specifications</td>
+          </tr>
+          <tr>
+            <td><code>MethodSpec.Params</code></td>
+            <td>Query parameters (optional) - per method</td>
+          </tr>
+          <tr>
+            <td><code>MethodSpec.Request</code></td>
+            <td>Go type for request body schema</td>
+          </tr>
+          <tr>
+            <td><code>MethodSpec.Response</code></td>
+            <td>Go type for response body schema</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="code-example">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          <span class="code-title">Custom Endpoint Example</span>
+          <button class="copy-btn" onclick="copyCode(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            Copy
+          </button>
+        </div>
+        <pre><code>server.<span class="function">Endpoint</span>(ooo.<span class="type">EndpointConfig</span>{
+    <span class="type">Path</span>:        <span class="string">"/policies/{id}"</span>,
+    <span class="type">Description</span>: <span class="string">"Manage access control policies"</span>,
+    <span class="comment">// Vars are route variables (mandatory) - auto-extracted from {id} in path</span>
+    <span class="type">Vars</span>: ooo.<span class="type">Vars</span>{<span class="string">"id"</span>: <span class="string">"Policy ID"</span>},
+    <span class="type">Methods</span>: ooo.<span class="type">Methods</span>{
+        <span class="string">"GET"</span>: ooo.<span class="type">MethodSpec</span>{
+            <span class="type">Response</span>: <span class="type">PolicyResponse</span>{},
+            <span class="comment">// Params are query parameters (optional) - per method</span>
+            <span class="type">Params</span>: ooo.<span class="type">Params</span>{<span class="string">"filter"</span>: <span class="string">"Optional filter value"</span>},
+        },
+        <span class="string">"PUT"</span>: ooo.<span class="type">MethodSpec</span>{
+            <span class="type">Request</span>:  <span class="type">Policy</span>{},
+            <span class="type">Response</span>: <span class="type">PolicyResponse</span>{},
+        },
+    },
+    <span class="type">Handler</span>: <span class="keyword">func</span>(w http.<span class="type">ResponseWriter</span>, r *http.<span class="type">Request</span>) {
+        id := mux.<span class="function">Vars</span>(r)[<span class="string">"id"</span>]           <span class="comment">// Route variable (mandatory)</span>
+        filter := r.URL.<span class="function">Query</span>().<span class="function">Get</span>(<span class="string">"filter"</span>) <span class="comment">// Query param (optional)</span>
+        <span class="comment">// ... handle request</span>
+    },
+})</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <section id="proxies" class="section" style="background: #0f1923;">
+    <div class="container">
+      <h2 class="section-title">Proxies</h2>
+      <p class="section-subtitle">Forward filters from remote ooo servers with path remapping.</p>
+
+      <table class="api-table" style="margin-bottom: 32px;">
+        <thead>
+          <tr>
+            <th>Function</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>proxy.Route</code></td>
+            <td>Proxy single object paths (e.g., <code>settings/*</code>)</td>
+          </tr>
+          <tr>
+            <td><code>proxy.RouteList</code></td>
+            <td>Proxy list paths with nested items (e.g., <code>items/*/*</code>)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="code-example">
+        <div class="code-header">
+          <span class="code-dot red"></span>
+          <span class="code-dot yellow"></span>
+          <span class="code-dot green"></span>
+          <span class="code-title">Proxy Route Example</span>
+          <button class="copy-btn" onclick="copyCode(this)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+            </svg>
+            Copy
+          </button>
+        </div>
+        <pre><code><span class="keyword">import</span> <span class="string">"github.com/benitogf/ooo/proxy"</span>
+
+<span class="comment">// Proxy /settings/{deviceID} → /settings on remote</span>
+proxy.<span class="function">Route</span>(server, <span class="string">"settings/*"</span>, proxy.<span class="type">Config</span>{
+    <span class="type">Resolve</span>: <span class="keyword">func</span>(localPath <span class="type">string</span>) (address, remotePath <span class="type">string</span>, err <span class="type">error</span>) {
+        <span class="keyword">return</span> <span class="string">"localhost:8800"</span>, <span class="string">"settings"</span>, <span class="keyword">nil</span>
+    },
+})
+
+<span class="comment">// Proxy list: /items/{deviceID}/* → /items/* on remote</span>
+proxy.<span class="function">RouteList</span>(server, <span class="string">"items/*/*"</span>, proxy.<span class="type">Config</span>{
+    <span class="type">Resolve</span>: <span class="keyword">func</span>(localPath <span class="type">string</span>) (address, remotePath <span class="type">string</span>, err <span class="type">error</span>) {
+        parts := strings.<span class="function">SplitN</span>(localPath, <span class="string">"/"</span>, 3)
+        <span class="keyword">if</span> len(parts) == 3 {
+            <span class="keyword">return</span> <span class="string">"localhost:8800"</span>, <span class="string">"items/"</span> + parts[2], <span class="keyword">nil</span>
+        }
+        <span class="keyword">return</span> <span class="string">"localhost:8800"</span>, <span class="string">"items/*"</span>, <span class="keyword">nil</span>
+    },
+})</code></pre>
+      </div>
+    </div>
+  </section>
+
   <section id="io" class="section">
     <div class="container">
       <h2 class="section-title">I/O Operations</h2>
@@ -1416,6 +1584,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <p class="section-subtitle">Complete examples demonstrating various features. Click to expand code.</p>
 
       <!-- SAMPLES_START -->
+      <div class="sample-category">
+        <h3>Getting Started</h3>
+        <p>Server setup, routing, storage, and typed I/O operations</p>
+      </div>
+
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
@@ -1759,6 +1932,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
+      <div class="sample-category">
+        <h3>WebSocket Subscriptions</h3>
+        <p>Real-time data streaming with typed callbacks and automatic reconnection</p>
+      </div>
+
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
@@ -2042,6 +2220,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
+      <div class="sample-category">
+        <h3>Remote Operations</h3>
+        <p>HTTP client operations for communicating with remote OOO servers</p>
+      </div>
+
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
@@ -2163,11 +2346,69 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>09 - Persistent Storage with Ko</h4>
+            <h4>09 - Custom Endpoints</h4>
+            <p>Register custom HTTP endpoints with typed schemas visible in the storage explorer UI</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/09_custom_endpoints" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code">
+          <div class="code-header">
+            <span class="code-dot red"></span>
+            <span class="code-dot yellow"></span>
+            <span class="code-dot green"></span>
+            <span class="code-title">main.go</span>
+            <button class="copy-btn" onclick="copyCode(this)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              Copy
+            </button>
+          </div>
+          <pre><code>server.<span class="function">Endpoint</span>(ooo.<span class="type">EndpointConfig</span>{
+    <span class="type">Path</span>:        <span class="string">"/policies/{id}"</span>,
+    <span class="type">Description</span>: <span class="string">"Manage access control policies"</span>,
+    <span class="type">Methods</span>: ooo.<span class="type">Methods</span>{
+        <span class="string">"GET"</span>: ooo.<span class="type">MethodSpec</span>{
+            <span class="type">Response</span>: <span class="type">PolicyResponse</span>{},
+        },
+        <span class="string">"PUT"</span>: ooo.<span class="type">MethodSpec</span>{
+            <span class="type">Request</span>:  <span class="type">Policy</span>{},
+            <span class="type">Response</span>: <span class="type">PolicyResponse</span>{},
+        },
+        <span class="string">"DELETE"</span>: ooo.<span class="type">MethodSpec</span>{},
+    },
+    <span class="type">Handler</span>: <span class="keyword">func</span>(w http.<span class="type">ResponseWriter</span>, r *http.<span class="type">Request</span>) {
+        id := mux.<span class="function">Vars</span>(r)[<span class="string">"id"</span>]
+        <span class="comment">// Handle request based on method</span>
+    },
+})</code></pre>
+        </div>
+      </div>
+
+      <div class="sample-category">
+        <h3>Ecosystem Integration</h3>
+        <p>Persistent storage, authentication, distributed sync, and proxying with ecosystem packages</p>
+      </div>
+
+      <div class="sample-card">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>10 - Persistent Storage with Ko</h4>
             <p>LevelDB-backed persistent storage using the ko package</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/09_persistent_storage_ko" target="_blank"
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/10_persistent_storage_ko" target="_blank"
               onclick="event.stopPropagation()">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -2232,11 +2473,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>10 - JWT Authentication</h4>
+            <h4>11 - JWT Authentication</h4>
             <p>JWT-based authentication using the auth package</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/10_jwt_auth" target="_blank"
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/11_jwt_auth" target="_blank"
               onclick="event.stopPropagation()">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -2327,11 +2568,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>11 - Limit Filter</h4>
+            <h4>12 - Limit Filter</h4>
             <p>Capped collections with automatic cleanup of oldest entries</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/11_limit_filter" target="_blank"
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/12_limit_filter" target="_blank"
               onclick="event.stopPropagation()">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -2386,11 +2627,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>12 - Limit Filter with Validation</h4>
+            <h4>13 - Limit Filter with Validation</h4>
             <p>Capped collections with strict schema validation on writes</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/12_limit_filter_with_validation"
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/13_limit_filter_with_validation"
               target="_blank" onclick="event.stopPropagation()">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -2484,11 +2725,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>13 - Custom Endpoints with nopog</h4>
+            <h4>14 - Custom Endpoints with nopog</h4>
             <p>PostgreSQL storage with custom HTTP endpoints, JSONB field queries, and range queries by timestamp.</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/13_custom_endpoints_nopog" target="_blank"
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/14_custom_endpoints_nopog" target="_blank"
               onclick="event.stopPropagation()">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -2640,11 +2881,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card multi-file">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>14 - Pivot Synchronization</h4>
+            <h4>15 - Pivot Synchronization</h4>
             <p>Multi-instance synchronization using the pivot package for distributed ooo servers</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/14_pivot_synchronization" target="_blank"
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/15_pivot_synchronization" target="_blank"
               onclick="event.stopPropagation()">
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path
@@ -2768,6 +3009,138 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 
 	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
 	log.<span class="function">Println</span>(<span class="string">&#34;Pivot server running on :8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sample-card multi-file">
+        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
+          <div class="sample-info">
+            <h4>16 - Proxy Routes</h4>
+            <p>Proxy requests to remote OOO servers with WebSocket subscription fan-out</p>
+          </div>
+          <div class="sample-links">
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/16_proxy" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
+              GitHub
+            </a>
+          </div>
+          <span class="sample-toggle">▼</span>
+        </div>
+        <div class="sample-code sample-files">
+          <div class="sample-file">
+            <div class="sample-file-header" onclick="this.parentElement.classList.toggle('file-open')">
+              <span class="sample-file-name">remote_server.go</span>
+              <span class="sample-file-toggle">▼</span>
+            </div>
+            <div class="sample-file-code">
+              <div class="code-header">
+                <span class="code-dot red"></span>
+                <span class="code-dot yellow"></span>
+                <span class="code-dot green"></span>
+                <span class="code-title">remote_server.go</span>
+                <button class="copy-btn" onclick="copyCode(this)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  Copy
+                </button>
+              </div>
+              <pre><code><span class="comment">// Remote server that holds the actual data.</span>
+<span class="comment">// This is the source of truth that the proxy will forward requests to.</span>
+<span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := &amp;ooo.<span class="type">Server</span>{}
+
+	<span class="comment">// Seed some initial data</span>
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
+
+	<span class="comment">// Add initial settings</span>
+	ooo.<span class="function">Set</span>(server, <span class="string">&#34;settings&#34;</span>, <span class="keyword">map</span>[string]any{
+		<span class="string">&#34;theme&#34;</span>:    <span class="string">&#34;dark&#34;</span>,
+		<span class="string">&#34;language&#34;</span>: <span class="string">&#34;en&#34;</span>,
+	})
+
+	<span class="comment">// Add some items</span>
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;items/*&#34;</span>, <span class="keyword">map</span>[string]any{<span class="string">&#34;name&#34;</span>: <span class="string">&#34;Item 1&#34;</span>, <span class="string">&#34;value&#34;</span>: 100})
+	ooo.<span class="function">Push</span>(server, <span class="string">&#34;items/*&#34;</span>, <span class="keyword">map</span>[string]any{<span class="string">&#34;name&#34;</span>: <span class="string">&#34;Item 2&#34;</span>, <span class="string">&#34;value&#34;</span>: 200})
+
+	log.<span class="function">Println</span>(<span class="string">&#34;Remote server running on :8800&#34;</span>)
+	server.<span class="function">WaitClose</span>()
+}</code></pre>
+            </div>
+          </div>
+          <div class="sample-file">
+            <div class="sample-file-header" onclick="this.parentElement.classList.toggle('file-open')">
+              <span class="sample-file-name">proxy_server.go</span>
+              <span class="sample-file-toggle">▼</span>
+            </div>
+            <div class="sample-file-code">
+              <div class="code-header">
+                <span class="code-dot red"></span>
+                <span class="code-dot yellow"></span>
+                <span class="code-dot green"></span>
+                <span class="code-title">proxy_server.go</span>
+                <button class="copy-btn" onclick="copyCode(this)">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  Copy
+                </button>
+              </div>
+              <pre><code><span class="comment">// Proxy server with path remapping.</span>
+<span class="comment">// Each route has its own resolver for clarity.</span>
+<span class="keyword">package</span> main
+
+<span class="keyword">import</span> (
+	<span class="string">&#34;log&#34;</span>
+	<span class="string">&#34;strings&#34;</span>
+
+	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
+	<span class="string">&#34;github.com/benitogf/ooo/proxy&#34;</span>
+)
+
+<span class="keyword">func</span> <span class="function">main</span>() {
+	server := &amp;ooo.<span class="type">Server</span>{Static: <span class="keyword">true</span>}
+
+	<span class="comment">// Settings: /settings/{deviceID} → /settings</span>
+	settingsCfg := proxy.Config{
+		Resolve: <span class="keyword">func</span>(localPath string) (string, string, <span class="type">error</span>) {
+			<span class="keyword">return</span> <span class="string">&#34;localhost:8800&#34;</span>, <span class="string">&#34;settings&#34;</span>, <span class="keyword">nil</span>
+		},
+	}
+	proxy.<span class="function">Route</span>(server, <span class="string">&#34;settings/*&#34;</span>, settingsCfg)
+
+	<span class="comment">// Items: /items/{deviceID}/* → /items/*</span>
+	itemsCfg := proxy.Config{
+		Resolve: <span class="keyword">func</span>(localPath string) (string, string, <span class="type">error</span>) {
+			parts := strings.<span class="function">SplitN</span>(localPath, <span class="string">&#34;/&#34;</span>, 3)
+			<span class="keyword">if</span> <span class="function">len</span>(parts) == 3 {
+				<span class="keyword">return</span> <span class="string">&#34;localhost:8800&#34;</span>, <span class="string">&#34;items/&#34;</span> + parts[2], <span class="keyword">nil</span>
+			}
+			<span class="keyword">return</span> <span class="string">&#34;localhost:8800&#34;</span>, <span class="string">&#34;items/*&#34;</span>, <span class="keyword">nil</span>
+		},
+	}
+	proxy.<span class="function">RouteList</span>(server, <span class="string">&#34;items/*/*&#34;</span>, itemsCfg)
+
+	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8801&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;Proxy on :8801, remapping paths to remote :8800&#34;</span>)
 	server.<span class="function">WaitClose</span>()
 }</code></pre>
             </div>

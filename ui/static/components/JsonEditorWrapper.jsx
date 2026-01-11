@@ -78,7 +78,7 @@ function JsonEditorWrapper({ content, editorRef, readOnly }) {
     instanceRef.current.updateProps({ readOnly: readOnly || false, mainMenuBar: !readOnly });
   }, [readOnly]);
 
-  return <div ref={containerRef} className="jse-theme-dark editor-container"></div>;
+  return <div ref={containerRef} className="jse-theme-dark"></div>;
 }
 
 window.JsonEditorWrapper = JsonEditorWrapper;

@@ -14,19 +14,26 @@ This directory contains example code demonstrating various features of the ooo l
 | [06_websocket_subscribe_single](./06_websocket_subscribe_single) | Real-time subscription to single items |
 | [07_websocket_subscribe_multiple](./07_websocket_subscribe_multiple) | Subscribe to multiple paths with different types |
 | [08_remote_io_operations](./08_remote_io_operations) | Remote HTTP operations with retry support |
+| [09_custom_endpoints](./09_custom_endpoints) | Custom HTTP endpoints with typed schemas for UI |
 
-## Ecosystem Integration Samples
-
-These samples demonstrate integration with other packages in the ecosystem. They require additional dependencies.
+## Advanced Features
 
 | Sample | Description | Requires |
 |--------|-------------|----------|
-| [09_persistent_storage_ko](./09_persistent_storage_ko) | Persistent storage with LevelDB | `go get github.com/benitogf/ko` |
-| [10_jwt_auth](./10_jwt_auth) | JWT authentication | `go get github.com/benitogf/auth github.com/benitogf/ko` |
-| [11_limit_filter](./11_limit_filter) | Capped collections with auto-cleanup | (none) |
-| [12_limit_filter_with_validation](./12_limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
-| [13_custom_endpoints_nopog](./13_custom_endpoints_nopog) | Custom HTTP endpoints with PostgreSQL storage | `go get github.com/benitogf/nopog` |
-| [14_pivot_synchronization](./14_pivot_synchronization) | Multi-instance synchronization | `go get github.com/benitogf/pivot` |
+| [10_persistent_storage_ko](./10_persistent_storage_ko) | Persistent storage with LevelDB | `go get github.com/benitogf/ko` |
+| [11_jwt_auth](./11_jwt_auth) | JWT authentication | `go get github.com/benitogf/auth github.com/benitogf/ko` |
+| [12_limit_filter](./12_limit_filter) | Capped collections with auto-cleanup | (none) |
+| [13_limit_filter_with_validation](./13_limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
+
+## Ecosystem Integration Samples
+
+These samples demonstrate integration with other packages in the ecosystem.
+
+| Sample | Description | Requires |
+|--------|-------------|----------|
+| [14_custom_endpoints_nopog](./14_custom_endpoints_nopog) | Custom endpoints with PostgreSQL storage | `go get github.com/benitogf/nopog` |
+| [15_pivot_synchronization](./15_pivot_synchronization) | Multi-instance synchronization | `go get github.com/benitogf/pivot` |
+| [16_proxy](./16_proxy) | Proxy routes to remote ooo servers | (none) |
 
 ## Running Samples
 

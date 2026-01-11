@@ -58,6 +58,8 @@ type audit func(r *http.Request) bool
 //
 // OnUnsubscribe: function to monitor unsubscribe events
 //
+// OnStart: function that triggers after the server has started successfully
+//
 // OnClose: function that triggers before closing the application
 //
 // Deadline: time duration of a request before timing out
@@ -108,7 +110,11 @@ type Server struct {
 	Router            *mux.Router
 	Stream            stream.Stream
 	filters           filters.Filters
-	limitFilters      map[string]int // tracks limit filter paths and their limits
+	limitFilters      map[string]int    // tracks limit filter paths and their limits
+	endpoints         []ui.EndpointInfo // registered custom endpoints
+	proxies           []ui.ProxyInfo    // registered proxy routes
+	proxyCleanups     []func()          // cleanup functions for proxy subscriptions
+	proxyCleanupMu    sync.Mutex        // protects proxyCleanups
 	NoBroadcastKeys   []string
 	Audit             audit
 	Workers           int
@@ -116,6 +122,7 @@ type Server struct {
 	NoPatch           bool
 	OnSubscribe       stream.Subscribe
 	OnUnsubscribe     stream.Unsubscribe
+	OnStart           func()
 	OnClose           func()
 	Deadline          time.Duration
 	AllowedOrigins    []string
@@ -138,8 +145,9 @@ type Server struct {
 	IdleTimeout       time.Duration
 	OnStorageEvent    storage.EventCallback
 	BeforeRead        func(key string)
-	startErr          chan error    // channel for startup errors
-	clockStop         chan struct{} // channel to signal clock goroutine to stop
+	GetPivotInfo      func() *ui.PivotInfo // Optional: returns pivot status for UI
+	startErr          chan error           // channel for startup errors
+	clockStop         chan struct{}        // channel to signal clock goroutine to stop
 }
 
 // Validate checks the server configuration for common issues.
@@ -176,12 +184,25 @@ func (server *Server) getServerInfo() ui.ServerInfo {
 	}
 }
 
+// pivotPrefix is the prefix used for internal pivot synchronization keys
+const pivotPrefix = "pivot"
+
+// isPivotPath checks if a path is a pivot internal path
+func isPivotPath(path string) bool {
+	return len(path) >= len(pivotPrefix) && path[:len(pivotPrefix)] == pivotPrefix
+}
+
 // getFiltersInfo returns detailed filter information for the explorer
+// Filters out pivot-prefixed paths as they are internal use only
 func (server *Server) getFiltersInfo() []ui.FilterInfo {
 	filtersInfo := server.filters.PathsInfo(server.limitFilters)
-	result := make([]ui.FilterInfo, len(filtersInfo))
-	for i, f := range filtersInfo {
-		result[i] = ui.FilterInfo{
+	result := make([]ui.FilterInfo, 0, len(filtersInfo))
+	for _, f := range filtersInfo {
+		// Skip pivot-prefixed paths (internal use only)
+		if isPivotPath(f.Path) {
+			continue
+		}
+		result = append(result, ui.FilterInfo{
 			Path:      f.Path,
 			Type:      f.Type,
 			CanRead:   f.CanRead,
@@ -189,7 +210,7 @@ func (server *Server) getFiltersInfo() []ui.FilterInfo {
 			CanDelete: f.CanDelete,
 			IsGlob:    f.IsGlob,
 			Limit:     f.Limit,
-		}
+		})
 	}
 	return result
 }
@@ -342,7 +363,7 @@ func (server *Server) fetch(path string) (FetchResult, error) {
 		// Object not found - return empty object
 		obj = meta.Object{}
 	}
-	filtered, err := server.filters.ReadObject.Check(path, obj, server.Static)
+	filtered, err := server.filters.ReadObject.CheckWithListFallback(path, obj, server.Static, server.filters.ReadList)
 	if err != nil {
 		return FetchResult{}, err
 	}
@@ -376,7 +397,7 @@ func (server *Server) watch(sc storage.StorageChan) {
 				Operation: ev.Operation,
 				Object:    ev.Object,
 				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
-					return server.filters.ReadObject.Check(key, obj, server.Static)
+					return server.filters.ReadObject.CheckWithListFallback(key, obj, server.Static, server.filters.ReadList)
 				},
 				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
 					return server.filters.ReadList.Check(key, objs, server.Static)
@@ -436,6 +457,9 @@ func (server *Server) defaultTimeouts() {
 
 // defaultCallbacks sets default callback functions.
 func (server *Server) defaultCallbacks() {
+	if server.OnStart == nil {
+		server.OnStart = func() {}
+	}
 	if server.OnClose == nil {
 		server.OnClose = func() {}
 	}
@@ -526,23 +550,22 @@ func (server *Server) setupRoutes() {
 		GetFilters:     server.filters.Paths,
 		GetFiltersInfo: server.getFiltersInfo,
 		GetState:       server.getStreamState,
+		GetPivotInfo:   server.GetPivotInfo,
+		GetEndpoints:   server.getEndpoints,
+		GetProxies:     server.getProxies,
+		GetOrphanKeys:  server.getOrphanKeys,
 		AuditFunc:      server.Audit,
 		ClockFunc:      server.clock,
 	}
 	server.Router.Handle("/", explorerHandler).Methods("GET")
-	server.Router.Handle("/vanilla-jsoneditor.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/react.min.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/react-dom.min.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/babel.min.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/styles.css", explorerHandler).Methods("GET")
-	server.Router.Handle("/ooo-client.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/react-json-view.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/api.js", explorerHandler).Methods("GET")
-	server.Router.Handle("/favicon.ico", explorerHandler).Methods("GET")
-	server.Router.Handle("/favicon.png", explorerHandler).Methods("GET")
-	server.Router.Handle("/logo.jpg", explorerHandler).Methods("GET")
-	server.Router.Handle("/logo.png", explorerHandler).Methods("GET")
-	server.Router.PathPrefix("/components/").Handler(explorerHandler).Methods("GET")
+	// Register routes for reserved UI paths
+	for _, path := range ui.ReservedPaths {
+		if path == "components" {
+			server.Router.PathPrefix("/components/").Handler(explorerHandler).Methods("GET")
+		} else {
+			server.Router.Handle("/"+path, explorerHandler).Methods("GET")
+		}
+	}
 	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
 	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
 		http.HandlerFunc(server.unpublish), server.Deadline, deadlineMsg)).Methods("DELETE")
@@ -581,6 +604,7 @@ func (server *Server) StartWithError(address string) error {
 	server.clockStop = make(chan struct{})
 	server.clockWg.Add(1)
 	go server.startClock()
+	server.OnStart()
 	return nil
 }
 
@@ -601,6 +625,13 @@ func (server *Server) Close(sig os.Signal) {
 		atomic.StoreInt64(&server.active, 0)
 		close(server.clockStop) // Signal clock goroutine to stop immediately
 		server.clockWg.Wait()   // Wait for clock goroutine to exit before touching Stream
+		// Close proxy subscriptions first (before closing stream connections)
+		server.proxyCleanupMu.Lock()
+		for _, cleanup := range server.proxyCleanups {
+			cleanup()
+		}
+		server.proxyCleanups = nil
+		server.proxyCleanupMu.Unlock()
 		// Force close all stream connections first
 		server.Stream.CloseAll()
 		// Shutdown HTTP server to stop accepting new connections
@@ -621,6 +652,8 @@ func (server *Server) Close(sig os.Signal) {
 		server.Console = nil
 		server.filters = filters.Filters{}
 		server.limitFilters = nil
+		server.endpoints = nil
+		server.proxies = nil
 		server.startErr = nil
 		server.clockStop = nil
 	}

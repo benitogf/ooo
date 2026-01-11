@@ -1,5 +1,5 @@
-function StorageList() {
-  const { useState, useEffect, useCallback } = React;
+function StorageList({ clockConnected }) {
+  const { useState, useEffect, useCallback, useRef } = React;
   const { IconFilter, IconTrash, IconRefresh } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
   
@@ -10,6 +10,7 @@ function StorageList() {
   const [filterToClear, setFilterToClear] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
+  const prevConnected = useRef(clockConnected);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -41,6 +42,14 @@ function StorageList() {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  // Reload when clock reconnects
+  useEffect(() => {
+    if (clockConnected && !prevConnected.current) {
+      loadData();
+    }
+    prevConnected.current = clockConnected;
+  }, [clockConnected, loadData]);
 
   const filteredFilters = searchTerm
     ? filtersInfo.filter(f => f.path.toLowerCase().includes(searchTerm.toLowerCase()))

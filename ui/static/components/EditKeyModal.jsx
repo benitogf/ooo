@@ -1,4 +1,4 @@
-function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete }) {
+function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnly }) {
   const { useState, useRef, useEffect } = React;
   const JsonEditorWrapper = window.JsonEditorWrapper;
   const { IconTrash, IconX, IconSend } = window.Icons;
@@ -121,7 +121,7 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete }) {
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal edit-key-modal" onClick={(e) => e.stopPropagation()}>
         <div className="edit-key-modal-header">
-          <div className="modal-title">Edit: {displayName}</div>
+          <div className="modal-title">{readOnly ? 'View' : 'Edit'}: {displayName}</div>
           <button 
             className="modal-close-btn" 
             onClick={onClose}
@@ -142,34 +142,44 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete }) {
           <div className="edit-key-modal-editor">
             <JsonEditorWrapper 
               content={initialContent} 
-              editorRef={editorRef} 
+              editorRef={editorRef}
+              readOnly={readOnly}
             />
           </div>
         )}
         
         {error && <div className="modal-error">{error}</div>}
         
-        <div className="modal-actions">
-          <button 
-            className="btn danger" 
-            onClick={openDeleteConfirm}
-            disabled={saving || loading}
-          >
-            <IconTrash color="#fff" /> Delete
-          </button>
-          <div className="modal-actions-right">
-            <button className="btn-cancel" onClick={onClose} disabled={saving}>
-              Cancel
-            </button>
-            <button 
-              className="btn-confirm" 
-              onClick={save}
-              disabled={saving || loading}
-            >
-              <IconSend /> {saving ? 'Saving...' : 'Save Changes'}
+        {readOnly ? (
+          <div className="modal-actions">
+            <div></div>
+            <button className="btn-cancel" onClick={onClose}>
+              Close
             </button>
           </div>
-        </div>
+        ) : (
+          <div className="modal-actions">
+            <button 
+              className="btn danger" 
+              onClick={openDeleteConfirm}
+              disabled={saving || loading}
+            >
+              <IconTrash color="#fff" /> Delete
+            </button>
+            <div className="modal-actions-right">
+              <button className="btn-cancel" onClick={onClose} disabled={saving}>
+                Cancel
+              </button>
+              <button 
+                className="btn-confirm" 
+                onClick={save}
+                disabled={saving || loading}
+              >
+                <IconSend /> {saving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <ConfirmModal

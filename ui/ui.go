@@ -86,10 +86,37 @@ type PivotNodeStatus struct {
 
 // PivotInfo contains pivot synchronization status
 type PivotInfo struct {
-	Role       string            `json:"role"`       // "pivot", "node", or "none"
-	PivotIP    string            `json:"pivotIP"`    // Empty for pivot server, pivot address for nodes
-	Nodes      []PivotNodeStatus `json:"nodes"`      // Node health status (only for pivot servers)
-	SyncedKeys []string          `json:"syncedKeys"` // Keys being synchronized
+	Role           string            `json:"role"`           // "pivot", "node", or "none"
+	PivotIP        string            `json:"pivotIP"`        // Empty for pivot server, pivot address for nodes
+	Nodes          []PivotNodeStatus `json:"nodes"`          // Node health status (only for pivot servers)
+	SyncedKeys     []string          `json:"syncedKeys"`     // Keys being synchronized
+	PivotHealthy   bool              `json:"pivotHealthy"`   // Connection status to pivot (only for node servers)
+	PivotLastCheck string            `json:"pivotLastCheck"` // Last check time for pivot connection (only for node servers)
+}
+
+// EndpointInfo contains endpoint metadata for UI display
+type EndpointInfo struct {
+	Path        string            `json:"path"`
+	Methods     []MethodInfo      `json:"methods"`
+	Description string            `json:"description"`
+	Vars        map[string]string `json:"vars,omitempty"` // Route variables like {id} - mandatory
+}
+
+// MethodInfo contains method-specific information
+type MethodInfo struct {
+	Method   string            `json:"method"`
+	Request  map[string]any    `json:"request,omitempty"`
+	Response map[string]any    `json:"response,omitempty"`
+	Params   map[string]string `json:"params,omitempty"` // Query parameters - optional
+}
+
+// ProxyInfo contains proxy route metadata for UI display
+type ProxyInfo struct {
+	LocalPath string `json:"localPath"`
+	Type      string `json:"type"`
+	CanRead   bool   `json:"canRead"`
+	CanWrite  bool   `json:"canWrite"`
+	CanDelete bool   `json:"canDelete"`
 }
 
 // Handler serves the storage explorer SPA
@@ -100,13 +127,16 @@ type Handler struct {
 	GetFiltersInfo func() []FilterInfo
 	GetState       func() []PoolInfo
 	GetPivotInfo   func() *PivotInfo // Optional: returns nil if pivot not configured
+	GetEndpoints   func() []EndpointInfo
+	GetProxies     func() []ProxyInfo
+	GetOrphanKeys  func() []string
 	AuditFunc      func(r *http.Request) bool
 	ClockFunc      func(w http.ResponseWriter, r *http.Request)
 }
 
 // ServeHTTP handles requests to the explorer
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Handle WebSocket upgrade for clock
+	// Handle WebSocket upgrade for clock subscription
 	if r.Header.Get("Upgrade") == "websocket" {
 		if h.ClockFunc != nil {
 			h.ClockFunc(w, r)
@@ -138,63 +168,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "pivot":
 		h.handlePivot(w, r)
 		return
+	case "endpoints":
+		h.handleEndpoints(w, r)
+		return
+	case "proxies":
+		h.handleProxies(w, r)
+		return
+	case "orphan-keys":
+		h.handleOrphanKeys(w, r)
+		return
 	}
 
-	// Serve static files (use HasSuffix to handle sub-path mounting)
+	// Serve static files using ReservedPaths (use HasSuffix to handle sub-path mounting)
 	path := r.URL.Path
-	if strings.HasSuffix(path, "/vanilla-jsoneditor.js") {
-		h.serveStatic(w, r, "vanilla-jsoneditor.js")
-		return
-	}
-	if strings.HasSuffix(path, "/react.min.js") {
-		h.serveStatic(w, r, "react.min.js")
-		return
-	}
-	if strings.HasSuffix(path, "/react-dom.min.js") {
-		h.serveStatic(w, r, "react-dom.min.js")
-		return
-	}
-	if strings.HasSuffix(path, "/babel.min.js") {
-		h.serveStatic(w, r, "babel.min.js")
-		return
-	}
-	if strings.HasSuffix(path, "/styles.css") {
-		h.serveStatic(w, r, "styles.css")
-		return
-	}
-	if strings.HasSuffix(path, "/ooo-client.js") {
-		h.serveStatic(w, r, "ooo-client.js")
-		return
-	}
-	if strings.HasSuffix(path, "/react-json-view.js") {
-		h.serveStatic(w, r, "react-json-view.js")
-		return
-	}
-	if strings.HasSuffix(path, "/api.js") {
-		h.serveStatic(w, r, "api.js")
-		return
-	}
-	if strings.HasSuffix(path, "/favicon.ico") {
-		h.serveStatic(w, r, "favicon.ico")
-		return
-	}
-	if strings.HasSuffix(path, "/favicon.png") {
-		h.serveStatic(w, r, "favicon.png")
-		return
-	}
-	if strings.HasSuffix(path, "/logo.jpg") {
-		h.serveStatic(w, r, "logo.jpg")
-		return
-	}
-	if strings.HasSuffix(path, "/logo.png") {
-		h.serveStatic(w, r, "logo.png")
-		return
-	}
-	// Serve React JSX component files
-	if idx := strings.Index(path, "/components/"); idx != -1 {
-		componentPath := path[idx+1:] // Get "components/..."
-		h.serveStatic(w, r, componentPath)
-		return
+	for _, reservedPath := range ReservedPaths {
+		if reservedPath == "components" {
+			// Handle components directory
+			if idx := strings.Index(path, "/components/"); idx != -1 {
+				componentPath := path[idx+1:] // Get "components/..."
+				h.serveStatic(w, r, componentPath)
+				return
+			}
+		} else if strings.HasSuffix(path, "/"+reservedPath) {
+			h.serveStatic(w, r, reservedPath)
+			return
+		}
 	}
 
 	// Serve the SPA
@@ -324,7 +322,50 @@ func (h *Handler) handlePivot(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(PivotInfo{Role: "none"})
 		return
 	}
+	// Ensure nodes array is never nil for consistent JSON output
+	if info.Nodes == nil {
+		info.Nodes = []PivotNodeStatus{}
+	}
 	json.NewEncoder(w).Encode(info)
+}
+
+func (h *Handler) handleEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if h.GetEndpoints == nil {
+		json.NewEncoder(w).Encode([]EndpointInfo{})
+		return
+	}
+	endpoints := h.GetEndpoints()
+	if endpoints == nil {
+		endpoints = []EndpointInfo{}
+	}
+	json.NewEncoder(w).Encode(endpoints)
+}
+
+func (h *Handler) handleProxies(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if h.GetProxies == nil {
+		json.NewEncoder(w).Encode([]ProxyInfo{})
+		return
+	}
+	proxies := h.GetProxies()
+	if proxies == nil {
+		proxies = []ProxyInfo{}
+	}
+	json.NewEncoder(w).Encode(proxies)
+}
+
+func (h *Handler) handleOrphanKeys(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if h.GetOrphanKeys == nil {
+		json.NewEncoder(w).Encode([]string{})
+		return
+	}
+	keys := h.GetOrphanKeys()
+	if keys == nil {
+		keys = []string{}
+	}
+	json.NewEncoder(w).Encode(keys)
 }
 
 func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) {
