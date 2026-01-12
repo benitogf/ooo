@@ -1,4 +1,4 @@
-function StorageKeysLive({ filterPath, fromFilter, source }) {
+function FilterListView({ filterPath, fromFilter, source }) {
   const { useState, useEffect, useCallback, useMemo, useRef } = React;
   const { IconBox, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconEdit, IconEye, IconSend, IconWifi, IconWifiOff, IconFilter } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
@@ -111,37 +111,41 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
     return date.toLocaleString();
   };
 
-  const flattenData = (data, prefix = '') => {
+  const flattenData = (data) => {
     if (!data || typeof data !== 'object') return {};
     const result = {};
+    // Only extract top-level keys - nested objects and arrays are treated as leaf values
     for (const [key, value] of Object.entries(data)) {
-      const fullKey = prefix ? `${prefix}.${key}` : key;
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        Object.assign(result, flattenData(value, fullKey));
-      } else if (Array.isArray(value)) {
-        value.forEach((item, idx) => {
-          if (item !== null && typeof item === 'object') {
-            Object.assign(result, flattenData(item, `${fullKey}.${idx}`));
-          } else {
-            result[`${fullKey}.${idx}`] = item;
-          }
-        });
-      } else {
-        result[fullKey] = value;
-      }
+      result[key] = value;
     }
     return result;
   };
 
   const allDataColumns = useMemo(() => {
     const columns = new Set();
+    const columnTypes = {}; // Track if column contains complex types
     items.forEach(item => {
       if (item.data && typeof item.data === 'object') {
         const flatData = flattenData(item.data);
-        Object.keys(flatData).forEach(key => columns.add(key));
+        Object.entries(flatData).forEach(([key, value]) => {
+          columns.add(key);
+          // Mark as complex if it's an array or object
+          if (Array.isArray(value) || (value !== null && typeof value === 'object')) {
+            columnTypes[key] = 'complex';
+          } else if (!columnTypes[key]) {
+            columnTypes[key] = 'basic';
+          }
+        });
       }
     });
-    return Array.from(columns).sort();
+    // Sort: basic types first, then complex types, alphabetically within each group
+    return Array.from(columns).sort((a, b) => {
+      const aIsComplex = columnTypes[a] === 'complex';
+      const bIsComplex = columnTypes[b] === 'complex';
+      if (aIsComplex && !bIsComplex) return 1;
+      if (!aIsComplex && bIsComplex) return -1;
+      return a.localeCompare(b);
+    });
   }, [items]);
 
   const collapsiblePaths = useMemo(() => {
@@ -189,55 +193,26 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
     }
   }, [collapsedFields]);
 
-  const visibleColumns = useMemo(() => {
-    const result = [];
-    const addedCollapsedPaths = new Set();
-    
-    allDataColumns.forEach(col => {
-      const parts = col.split('.');
-      let collapsed = false;
-      
-      for (let i = 1; i < parts.length; i++) {
-        const parentPath = parts.slice(0, i).join('.');
-        if (collapsedFields[parentPath]) {
-          if (!addedCollapsedPaths.has(parentPath)) {
-            result.push(parentPath);
-            addedCollapsedPaths.add(parentPath);
+  // Determine which columns contain complex types (arrays/objects)
+  const complexColumns = useMemo(() => {
+    const complex = new Set();
+    items.forEach(item => {
+      if (item.data && typeof item.data === 'object') {
+        Object.entries(item.data).forEach(([key, value]) => {
+          if (Array.isArray(value) || (value !== null && typeof value === 'object')) {
+            complex.add(key);
           }
-          collapsed = true;
-          break;
-        }
-      }
-      
-      if (!collapsed) {
-        result.push(col);
+        });
       }
     });
-    
-    // Sort: basic types first, then collapsible/nested fields
-    const uniqueResult = [...new Set(result)];
-    
-    // Helper to check if a column is or belongs to a collapsible path
-    const isNestedOrCollapsible = (col) => {
-      // Check if it's a collapsible path itself
-      if (collapsiblePaths.includes(col)) return true;
-      // Check if it's a child of any collapsible path
-      for (const path of collapsiblePaths) {
-        if (col.startsWith(path + '.')) return true;
-      }
-      return false;
-    };
-    
-    return uniqueResult.sort((a, b) => {
-      const aIsNested = isNestedOrCollapsible(a);
-      const bIsNested = isNestedOrCollapsible(b);
-      // Basic types come before nested/collapsible
-      if (!aIsNested && bIsNested) return -1;
-      if (aIsNested && !bIsNested) return 1;
-      // Within same category, sort alphabetically
-      return a.localeCompare(b);
-    });
-  }, [allDataColumns, collapsedFields, collapsiblePaths]);
+    return complex;
+  }, [items]);
+
+  const visibleColumns = useMemo(() => {
+    // allDataColumns is already sorted with basic types first
+    // Just return it directly since we no longer have nested paths to collapse
+    return allDataColumns;
+  }, [allDataColumns]);
 
   const getCollapsibleAncestors = (col) => {
     const parts = col.split('.');
@@ -292,6 +267,17 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
 
   const isCollapsible = (col) => collapsiblePaths.includes(col);
 
+  const searchInValue = useCallback((value, searchLower) => {
+    if (value === null || value === undefined) return false;
+    if (Array.isArray(value)) {
+      return value.some(item => searchInValue(item, searchLower));
+    }
+    if (typeof value === 'object') {
+      return Object.values(value).some(v => searchInValue(v, searchLower));
+    }
+    return String(value).toLowerCase().includes(searchLower);
+  }, []);
+
   const filteredItems = useMemo(() => {
     return searchTerm
       ? items.filter(item => {
@@ -303,17 +289,14 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
           // Search in extracted glob values
           const globValues = extractGlobValues(item.path);
           if (globValues && globValues.toLowerCase().includes(searchLower)) return true;
-          // Search in data
+          // Search in data (recursively handles arrays and nested objects)
           if (item.data) {
-            const flatData = flattenData(item.data);
-            return Object.values(flatData).some(v => 
-              String(v).toLowerCase().includes(searchLower)
-            );
+            return searchInValue(item.data, searchLower);
           }
           return false;
         })
       : items;
-  }, [items, searchTerm, flattenData]);
+  }, [items, searchTerm, searchInValue]);
 
   // Clear selected items that are no longer visible after search filter
   useEffect(() => {
@@ -415,6 +398,13 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
   };
 
   const openEditModal = (item) => {
+    // For read-only filters, navigate to live view instead of edit modal
+    if (filterInfo && !filterInfo.canWrite) {
+      let hash = '/storage/key/live/' + encodeURIComponent(item.path) + '?from=' + encodeURIComponent(filterPath);
+      if (source) hash += '&source=' + source;
+      window.location.hash = hash;
+      return;
+    }
     setKeyToEdit(item.path);
     setEditModalVisible(true);
   };
@@ -539,6 +529,9 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
     if (typeof value === 'string') {
       if (value.length > 50) return <span className="text-string" title={value}>{value.substring(0, 50)}...</span>;
       return <span className="text-string">{value}</span>;
+    }
+    if (Array.isArray(value) || typeof value === 'object') {
+      return <JsonTreeCell data={value} maxDepth={2} />;
     }
     return String(value);
   };
@@ -731,7 +724,7 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
                         </td>
                       );
                     })}
-                    <td className="actions-col">
+                    <td className="actions-col" onClick={(e) => e.stopPropagation()}>
                       <div className="actions">
                         <button className="btn ghost" title="View Live" onClick={(e) => viewKeyLive(e, item)}>
                           <IconEye />
@@ -846,4 +839,4 @@ function StorageKeysLive({ filterPath, fromFilter, source }) {
   );
 }
 
-window.StorageKeysLive = StorageKeysLive;
+window.FilterListView = FilterListView;

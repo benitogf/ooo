@@ -1,9 +1,10 @@
 function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
   const { useState, useEffect, useCallback, useMemo, useRef } = React;
-  const { IconBox, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconEdit, IconEye, IconWifi, IconWifiOff } = window.Icons;
+  const { IconBox, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconEdit, IconEye, IconWifi, IconWifiOff, IconSend } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
   const EditKeyModal = window.EditKeyModal;
   const JsonTreeCell = window.JsonTreeCell;
+  const PushDialog = window.PushDialog;
   
   const [searchTerm, setSearchTerm] = useState('');
   const [page, setPage] = useState(1);
@@ -33,6 +34,7 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
   const [batchDeleteLoading, setBatchDeleteLoading] = useState(false);
   const [batchDeleteError, setBatchDeleteError] = useState('');
   const [batchDeleteProgress, setBatchDeleteProgress] = useState({ done: 0, total: 0 });
+  const [pushDialogVisible, setPushDialogVisible] = useState(false);
   const prevItemsLengthRef = useRef(0);
   const tableContainerRef = useRef(null);
   const limit = 50;
@@ -100,37 +102,40 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
     return date.toLocaleString();
   };
 
-  const flattenData = (data, prefix = '') => {
+  const flattenData = (data) => {
     if (!data || typeof data !== 'object') return {};
     const result = {};
+    // Only extract top-level keys - nested objects and arrays are treated as leaf values
     for (const [key, value] of Object.entries(data)) {
-      const fullKey = prefix ? `${prefix}.${key}` : key;
-      if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-        Object.assign(result, flattenData(value, fullKey));
-      } else if (Array.isArray(value)) {
-        value.forEach((item, idx) => {
-          if (item !== null && typeof item === 'object') {
-            Object.assign(result, flattenData(item, `${fullKey}.${idx}`));
-          } else {
-            result[`${fullKey}.${idx}`] = item;
-          }
-        });
-      } else {
-        result[fullKey] = value;
-      }
+      result[key] = value;
     }
     return result;
   };
 
   const allDataColumns = useMemo(() => {
     const columns = new Set();
+    const columnTypes = {};
     items.forEach(item => {
       if (item.data && typeof item.data === 'object') {
         const flatData = flattenData(item.data);
-        Object.keys(flatData).forEach(key => columns.add(key));
+        Object.entries(flatData).forEach(([key, value]) => {
+          columns.add(key);
+          if (Array.isArray(value) || (value !== null && typeof value === 'object')) {
+            columnTypes[key] = 'complex';
+          } else if (!columnTypes[key]) {
+            columnTypes[key] = 'basic';
+          }
+        });
       }
     });
-    return Array.from(columns).sort();
+    // Sort: basic types first, then complex types
+    return Array.from(columns).sort((a, b) => {
+      const aIsComplex = columnTypes[a] === 'complex';
+      const bIsComplex = columnTypes[b] === 'complex';
+      if (aIsComplex && !bIsComplex) return 1;
+      if (!aIsComplex && bIsComplex) return -1;
+      return a.localeCompare(b);
+    });
   }, [items]);
 
   const collapsiblePaths = useMemo(() => {
@@ -176,48 +181,8 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
   }, [collapsedFields]);
 
   const visibleColumns = useMemo(() => {
-    const result = [];
-    const addedCollapsedPaths = new Set();
-    
-    allDataColumns.forEach(col => {
-      const parts = col.split('.');
-      let collapsed = false;
-      
-      for (let i = 1; i < parts.length; i++) {
-        const parentPath = parts.slice(0, i).join('.');
-        if (collapsedFields[parentPath]) {
-          if (!addedCollapsedPaths.has(parentPath)) {
-            result.push(parentPath);
-            addedCollapsedPaths.add(parentPath);
-          }
-          collapsed = true;
-          break;
-        }
-      }
-      
-      if (!collapsed) {
-        result.push(col);
-      }
-    });
-    
-    const uniqueResult = [...new Set(result)];
-    
-    const isNestedOrCollapsible = (col) => {
-      if (collapsiblePaths.includes(col)) return true;
-      for (const path of collapsiblePaths) {
-        if (col.startsWith(path + '.')) return true;
-      }
-      return false;
-    };
-    
-    return uniqueResult.sort((a, b) => {
-      const aIsNested = isNestedOrCollapsible(a);
-      const bIsNested = isNestedOrCollapsible(b);
-      if (!aIsNested && bIsNested) return -1;
-      if (aIsNested && !bIsNested) return 1;
-      return a.localeCompare(b);
-    });
-  }, [allDataColumns, collapsedFields, collapsiblePaths]);
+    return allDataColumns;
+  }, [allDataColumns]);
 
   const getCollapsibleAncestors = (col) => {
     const parts = col.split('.');
@@ -268,6 +233,17 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
 
   const isCollapsible = (col) => collapsiblePaths.includes(col);
 
+  const searchInValue = useCallback((value, searchLower) => {
+    if (value === null || value === undefined) return false;
+    if (Array.isArray(value)) {
+      return value.some(item => searchInValue(item, searchLower));
+    }
+    if (typeof value === 'object') {
+      return Object.values(value).some(v => searchInValue(v, searchLower));
+    }
+    return String(value).toLowerCase().includes(searchLower);
+  }, []);
+
   const filteredItems = useMemo(() => {
     return searchTerm
       ? items.filter(item => {
@@ -277,15 +253,12 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
           const globValues = extractGlobValues(item.path);
           if (globValues && globValues.toLowerCase().includes(searchLower)) return true;
           if (item.data) {
-            const flatData = flattenData(item.data);
-            return Object.values(flatData).some(v => 
-              String(v).toLowerCase().includes(searchLower)
-            );
+            return searchInValue(item.data, searchLower);
           }
           return false;
         })
       : items;
-  }, [items, searchTerm, flattenData]);
+  }, [items, searchTerm, searchInValue]);
 
   useEffect(() => {
     const visibleIndices = new Set(filteredItems.map(item => item.index));
@@ -497,6 +470,9 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
       if (value.length > 50) return <span className="text-string" title={value}>{value.substring(0, 50)}...</span>;
       return <span className="text-string">{value}</span>;
     }
+    if (Array.isArray(value) || typeof value === 'object') {
+      return <JsonTreeCell data={value} maxDepth={2} />;
+    }
     return String(value);
   };
 
@@ -535,6 +511,12 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
             onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
             style={{ width: '200px' }}
           />
+          {canWrite && (
+            <button className="btn primary" onClick={() => setPushDialogVisible(true)}>
+              <IconSend />
+              Push
+            </button>
+          )}
         </div>
       </div>
 
@@ -776,6 +758,17 @@ function ProxyListView({ proxyPath, canRead, canWrite, canDelete }) {
           </div>
         </div>
       )}
+
+      <PushDialog
+        visible={pushDialogVisible}
+        filterPath={proxyPath}
+        existingKeys={items.map(i => i.path)}
+        onClose={() => setPushDialogVisible(false)}
+        onEditKey={(keyPath) => {
+          setKeyToEdit(keyPath);
+          setEditModalVisible(true);
+        }}
+      />
     </div>
   );
 }

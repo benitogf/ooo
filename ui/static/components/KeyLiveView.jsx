@@ -1,4 +1,4 @@
-function KeyEditorLive({ keyPath, fromFilter, source }) {
+function KeyLiveView({ keyPath, fromFilter, source }) {
   const { useState, useEffect, useRef } = React;
   const { IconChevronLeft, IconEdit, IconWifi, IconWifiOff } = window.Icons;
   const ReactJson = window.reactJsonView ? window.reactJsonView.default : null;
@@ -122,4 +122,4 @@ function KeyEditorLive({ keyPath, fromFilter, source }) {
   );
 }
 
-window.KeyEditorLive = KeyEditorLive;
+window.KeyLiveView = KeyLiveView;

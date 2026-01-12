@@ -1,4 +1,4 @@
-function StoragePush({ filterPath }) {
+function FilterPushView({ filterPath }) {
   const { useState, useRef } = React;
   const { IconChevronLeft } = window.Icons;
   const JsonEditorWrapper = window.JsonEditorWrapper;
@@ -79,4 +79,4 @@ function StoragePush({ filterPath }) {
   );
 }
 
-window.StoragePush = StoragePush;
+window.FilterPushView = FilterPushView;

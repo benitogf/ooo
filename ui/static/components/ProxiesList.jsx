@@ -59,20 +59,9 @@ function ProxiesList({ clockConnected }) {
     return localPath.includes('*');
   };
 
-  // Check if a param value is valid for URL
-  const isValidUrlParam = (value) => {
-    if (!value || value.trim() === '') return false;
-    // Disallow characters that would break URLs or cause issues
-    // Allow alphanumeric, dash, underscore, dot, tilde (RFC 3986 unreserved)
-    const validPattern = /^[a-zA-Z0-9\-._~]+$/;
-    return validPattern.test(value.trim());
-  };
-
-  const getParamError = () => {
-    if (!paramValue || paramValue.trim() === '') return null;
-    if (!isValidUrlParam(paramValue)) return 'Invalid characters (use only letters, numbers, -, _, ., ~)';
-    return null;
-  };
+  // Use shared validation from Api
+  const isValidUrlParam = Api.isValidKeySegment;
+  const getParamError = () => Api.getKeySegmentError(paramValue);
 
   const buildProxyUrl = (path, proxy, isList = false) => {
     const params = new URLSearchParams();

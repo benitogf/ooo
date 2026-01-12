@@ -1,4 +1,4 @@
-function StorageList({ clockConnected }) {
+function FiltersList({ clockConnected }) {
   const { useState, useEffect, useCallback, useRef } = React;
   const { IconFilter, IconTrash, IconRefresh } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
@@ -219,4 +219,4 @@ function StorageList({ clockConnected }) {
   );
 }
 
-window.StorageList = StorageList;
+window.FiltersList = FiltersList;

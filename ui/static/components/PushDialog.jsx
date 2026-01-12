@@ -9,6 +9,10 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
   const [customIndex, setCustomIndex] = useState('');
   const editorRef = useRef(null);
 
+  // Use shared validation from Api
+  const isValidKeySegment = Api.isValidKeySegmentOrEmpty;
+  const getSegmentError = Api.getKeySegmentError;
+
   // Parse filter path to find glob positions
   const globInfo = useMemo(() => {
     const parts = filterPath.split('/');
@@ -79,19 +83,24 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
   };
 
   const validatePath = () => {
-    // Check all required segments (all except last glob) are filled
+    // Check all required segments (all except last glob) are filled and valid
     for (let i = 0; i < globInfo.globs.length - 1; i++) {
       const glob = globInfo.globs[i];
-      if (!pathSegments[glob.index] || !pathSegments[glob.index].trim()) {
+      const value = pathSegments[glob.index];
+      if (!value || !value.trim() || !isValidKeySegment(value)) {
         return false;
       }
+    }
+    // Check custom index is valid if provided
+    if (customIndex && !isValidKeySegment(customIndex)) {
+      return false;
     }
     return true;
   };
 
   const push = async () => {
-    if (globInfo.hasMultipleGlobs && !validatePath()) {
-      setError('Please fill in all required path segments');
+    if (!validatePath()) {
+      setError('Invalid path segment (use only letters and numbers)');
       return;
     }
     
@@ -151,6 +160,8 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
             {globInfo.globs.map((glob, idx) => {
               const isLast = idx === globInfo.globs.length - 1;
               const prefix = globInfo.parts.slice(0, glob.index).join('/');
+              const value = isLast ? customIndex : (pathSegments[glob.index] || '');
+              const segmentError = getSegmentError(value);
               return (
                 <div key={glob.index} className="path-input-row">
                   <label>
@@ -161,7 +172,7 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
                         placeholder="(auto-generate)"
                         value={customIndex}
                         onChange={(e) => setCustomIndex(e.target.value)}
-                        className="path-input optional"
+                        className={`path-input optional ${segmentError ? 'input-error' : ''}`}
                       />
                     ) : (
                       <input
@@ -169,10 +180,11 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
                         placeholder="required"
                         value={pathSegments[glob.index] || ''}
                         onChange={(e) => updateSegment(glob.index, e.target.value)}
-                        className="path-input required"
+                        className={`path-input required ${segmentError ? 'input-error' : ''}`}
                       />
                     )}
-                    {isLast && <span className="path-hint">(optional)</span>}
+                    {isLast && !segmentError && <span className="path-hint">(optional)</span>}
+                    {segmentError && <span className="path-error">{segmentError}</span>}
                   </label>
                 </div>
               );
