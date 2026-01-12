@@ -1,6 +1,7 @@
 package ooo
 
 import (
+	"context"
 	"errors"
 	"net/url"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
@@ -373,4 +375,83 @@ func TestWebSocketInvalidKey(t *testing.T) {
 	require.Nil(t, c)
 	server.Console.Err(err)
 	require.Error(t, err)
+}
+
+func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Static = true
+
+	// ReadListFilter for glob path should allow subscribing to both list and individual items
+	// This is the fix for: logs/* should allow subscribing to logs/123
+	server.ReadListFilter("logs/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+		return objs, nil
+	})
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	type LogEntry struct {
+		Level   string `json:"level"`
+		Message string `json:"message"`
+	}
+
+	// Create an item directly in storage
+	index, err := server.Storage.Set("logs/testitem", json.RawMessage(`{"level":"info","message":"test log"}`))
+	require.NoError(t, err)
+	require.NotEmpty(t, index)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: server.Address},
+		Silence: true,
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Subscribe to the list - should work
+	var listReceived bool
+	go client.SubscribeList(cfg, "logs/*", client.SubscribeListEvents[LogEntry]{
+		OnMessage: func(items []client.Meta[LogEntry]) {
+			if len(items) > 0 && items[0].Data.Message == "test log" {
+				listReceived = true
+				wg.Done()
+			}
+		},
+		OnError: func(err error) {
+			if !listReceived {
+				t.Errorf("list subscription error: %v", err)
+				wg.Done()
+			}
+		},
+	})
+
+	// Subscribe to the individual item - this was the bug, should now work
+	var itemReceived bool
+	go client.Subscribe(cfg, "logs/testitem", client.SubscribeEvents[LogEntry]{
+		OnMessage: func(item client.Meta[LogEntry]) {
+			if item.Data.Message == "test log" {
+				itemReceived = true
+				wg.Done()
+			}
+		},
+		OnError: func(err error) {
+			if !itemReceived {
+				t.Errorf("individual subscription error (ReadListFilter must allow individual subscriptions): %v", err)
+				wg.Done()
+			}
+		},
+	})
+
+	wg.Wait()
+
+	require.True(t, listReceived, "list subscription should receive the item")
+	require.True(t, itemReceived, "individual subscription should receive the item - ReadListFilter must also allow individual subscriptions")
 }

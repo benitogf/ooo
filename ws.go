@@ -19,7 +19,10 @@ func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 		if key.IsGlob(_key) {
 			hasFilter = server.filters.ReadList.HasMatch(_key) != -1
 		} else {
-			hasFilter = server.filters.ReadObject.HasMatch(_key) != -1
+			// For individual items, check both ObjectFilter and ListFilter
+			// This allows ReadListFilter("logs/*") to also permit subscribing to "logs/123"
+			hasFilter = server.filters.ReadObject.HasMatch(_key) != -1 ||
+				server.filters.ReadList.HasMatch(_key) != -1
 		}
 		if !hasFilter {
 			return filters.ErrRouteNotDefined
