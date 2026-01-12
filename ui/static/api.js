@@ -317,6 +317,24 @@ const Api = (function() {
     return { status: response.status, ok: response.ok, data };
   }
 
+  // Shared validation for ooo key path segments
+  // Only allow alphanumeric (matches ooo key validation: a-z, A-Z, 0-9)
+  function isValidKeySegment(value) {
+    if (!value || value.trim() === '') return false;
+    return /^[a-zA-Z0-9]+$/.test(value);
+  }
+
+  function isValidKeySegmentOrEmpty(value) {
+    if (!value || value.trim() === '') return true; // Empty is valid (will be auto-generated)
+    return /^[a-zA-Z0-9]+$/.test(value);
+  }
+
+  function getKeySegmentError(value) {
+    if (!value || value.trim() === '') return null;
+    if (!isValidKeySegment(value)) return 'Invalid characters (use only letters and numbers)';
+    return null;
+  }
+
   return {
     subscribe,
     useSubscribe,
@@ -327,7 +345,10 @@ const Api = (function() {
     fetchEndpoints,
     fetchProxies,
     fetchOrphanKeys,
-    callEndpoint
+    callEndpoint,
+    isValidKeySegment,
+    isValidKeySegmentOrEmpty,
+    getKeySegmentError
   };
 })();
 

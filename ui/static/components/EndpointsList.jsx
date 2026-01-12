@@ -81,13 +81,9 @@ function EndpointsList({ clockConnected }) {
     return url;
   };
 
-  // Check if a param value is valid for URL
-  const isValidUrlParam = (value) => {
-    if (!value || value.trim() === '') return false;
-    // Disallow characters that would break URLs or cause issues
-    // Allow alphanumeric, dash, underscore, dot, tilde (RFC 3986 unreserved)
-    return /^[a-zA-Z0-9\-._~]+$/.test(value);
-  };
+  // Use shared validation from Api
+  const isValidUrlParam = Api.isValidKeySegment;
+  const getVarError = (name) => Api.getKeySegmentError(varValues[name]);
 
   // Check if all required route variables are provided and valid
   const areVarsValid = () => {
@@ -99,14 +95,6 @@ function EndpointsList({ clockConnected }) {
       const value = varValues[name];
       return value && isValidUrlParam(value);
     });
-  };
-
-  // Get validation error for a specific route variable
-  const getVarError = (name) => {
-    const value = varValues[name];
-    if (!value || value.trim() === '') return null; // Don't show error for empty (just disable button)
-    if (!isValidUrlParam(value)) return 'Invalid characters (use only letters, numbers, -, _, ., ~)';
-    return null;
   };
 
   const callEndpoint = async () => {

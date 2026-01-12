@@ -2,11 +2,11 @@ function ExplorerApp() {
   const { useState, useEffect, useCallback } = React;
   const AppNav = window.AppNav;
   const Breadcrumb = window.Breadcrumb;
-  const StorageList = window.StorageList;
-  const StorageKeysLive = window.StorageKeysLive;
+  const FiltersList = window.FiltersList;
+  const FilterListView = window.FilterListView;
   const KeyEditor = window.KeyEditor;
-  const KeyEditorLive = window.KeyEditorLive;
-  const StoragePush = window.StoragePush;
+  const KeyLiveView = window.KeyLiveView;
+  const FilterPushView = window.FilterPushView;
   const StateModal = window.StateModal;
   const PivotStatus = window.PivotStatus;
   const EndpointsList = window.EndpointsList;
@@ -166,11 +166,11 @@ function ExplorerApp() {
       />
       <Breadcrumb current={getBreadcrumb()} />
       <div className="app-content">
-        {route.page === 'storage' && <StorageList clockConnected={isConnected} />}
-        {route.page === 'keys' && <StorageKeysLive filterPath={route.filterPath} fromFilter={route.fromFilter} source={route.source} />}
+        {route.page === 'storage' && <FiltersList clockConnected={isConnected} />}
+        {route.page === 'keys' && <FilterListView filterPath={route.filterPath} fromFilter={route.fromFilter} source={route.source} />}
         {route.page === 'editor' && !route.liveMode && <KeyEditor keyPath={route.keyPath} filterPath={route.filterPath} isCreate={false} />}
-        {route.page === 'editor' && route.liveMode && <KeyEditorLive keyPath={route.keyPath} fromFilter={route.fromFilter} source={route.source} />}
-        {route.page === 'push' && <StoragePush filterPath={route.filterPath} />}
+        {route.page === 'editor' && route.liveMode && <KeyLiveView keyPath={route.keyPath} fromFilter={route.fromFilter} source={route.source} />}
+        {route.page === 'push' && <FilterPushView filterPath={route.filterPath} />}
         {route.page === 'endpoints' && <EndpointsList clockConnected={isConnected} />}
         {route.page === 'proxies' && <ProxiesList clockConnected={isConnected} />}
         {route.page === 'proxyView' && <ProxyView keyPath={route.keyPath} canRead={route.canRead} canWrite={route.canWrite} canDelete={route.canDelete} liveMode={route.liveMode} fromFilter={route.fromFilter} />}

@@ -1305,6 +1305,14 @@ thead .actions-col svg {
   font-size: 11px;
   margin-left: 8px;
 }
+.path-input.input-error {
+  border-color: #f85149;
+}
+.path-error {
+  color: #f85149;
+  font-size: 11px;
+  margin-left: 8px;
+}
 
 /* Edit Key Modal */
 .edit-key-modal {
