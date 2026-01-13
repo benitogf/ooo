@@ -53,6 +53,8 @@ function PivotStatus({ onClose }) {
         switch (pivotInfo.role) {
             case 'pivot':
                 return <IconServer />;
+            case 'mixed':
+                return <IconServer />;
             case 'node':
                 return <IconCloud />;
             default:
@@ -65,6 +67,8 @@ function PivotStatus({ onClose }) {
         switch (pivotInfo.role) {
             case 'pivot':
                 return 'Pivot Server';
+            case 'mixed':
+                return 'Mixed Role Server';
             case 'node':
                 return 'Node Server';
             default:
@@ -77,6 +81,8 @@ function PivotStatus({ onClose }) {
         switch (pivotInfo.role) {
             case 'pivot':
                 return 'This server is the central pivot that nodes synchronize with.';
+            case 'mixed':
+                return `This server is both a pivot for some keys and a node syncing from ${pivotInfo.pivotIP || 'other pivots'}.`;
             case 'node':
                 return `This server synchronizes with pivot at ${pivotInfo.pivotIP}`;
             default:
@@ -142,7 +148,7 @@ function PivotStatus({ onClose }) {
                     </div>
                 )}
 
-                {pivotInfo.role === 'pivot' && pivotInfo.nodes && (
+                {(pivotInfo.role === 'pivot' || pivotInfo.role === 'mixed') && pivotInfo.nodes && (
                     <div className="pivot-section">
                         <h4>
                             Node Health
@@ -175,7 +181,7 @@ function PivotStatus({ onClose }) {
                     </div>
                 )}
 
-                {pivotInfo.role === 'node' && (
+                {(pivotInfo.role === 'node' || pivotInfo.role === 'mixed') && pivotInfo.pivotIP && (
                     <div className="pivot-section">
                         <h4>Pivot Connection</h4>
                         <div className={`node-item ${pivotInfo.pivotHealthy ? 'healthy' : 'unhealthy'}`}>

@@ -454,8 +454,294 @@ func TestProxyLateSubscriberGetsSnapshot(t *testing.T) {
 	mu.Unlock()
 }
 
-// TestProxyServerCloseTearsDownSubscriptions verifies that when server.Close() returns,
-// all proxy subscriptions (including remote WebSocket connections) are properly torn down.
+// TestProxyEmptyObjectSubscription tests that when subscribing to a non-existent object key,
+// the proxy returns an empty meta object (created=0, updated=0) matching ooo server behavior.
+func TestProxyEmptyObjectSubscription(t *testing.T) {
+	var wsWg sync.WaitGroup
+	var received []client.Meta[Settings]
+	var mu sync.Mutex
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("settings")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	ctx := t.Context()
+
+	// Subscribe to non-existent key - should receive empty object with created=0
+	wsWg.Add(1)
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "settings/device1", client.SubscribeEvents[Settings]{
+		OnMessage: func(m client.Meta[Settings]) {
+			mu.Lock()
+			received = append(received, m)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify we received empty object (created=0, updated=0)
+	mu.Lock()
+	require.Len(t, received, 1, "should receive initial empty object")
+	require.Equal(t, int64(0), received[0].Created, "empty object should have created=0")
+	require.Equal(t, int64(0), received[0].Updated, "empty object should have updated=0")
+	mu.Unlock()
+
+	// Now set data - subscriber should receive the update
+	wsWg.Add(1)
+	data, _ := json.Marshal(Settings{Name: "test", Value: 42})
+	_, err = remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+	wsWg.Wait()
+
+	mu.Lock()
+	require.Len(t, received, 2, "should receive update after data is set")
+	require.Equal(t, "test", received[1].Data.Name)
+	require.NotZero(t, received[1].Created, "object with data should have created > 0")
+	mu.Unlock()
+}
+
+// TestProxyEmptyListSubscription tests that when subscribing to a non-existent list key,
+// the proxy returns an empty array [] matching ooo server behavior.
+func TestProxyEmptyListSubscription(t *testing.T) {
+	var wsWg sync.WaitGroup
+	var received [][]client.Meta[Thing]
+	var mu sync.Mutex
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("things/*")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.RouteList(proxyServer, "devices/{deviceID}/things/{itemID}", proxy.Config{
+		Resolve: func(localPath string) (string, string, error) {
+			parts := strings.Split(localPath, "/")
+			if len(parts) >= 4 {
+				return remote.Address, "things/" + parts[3], nil
+			}
+			return remote.Address, "things/*", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	ctx := t.Context()
+
+	// Subscribe to non-existent list - should receive empty array
+	wsWg.Add(1)
+	go client.SubscribeList(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "devices/dev1/things/*", client.SubscribeListEvents[Thing]{
+		OnMessage: func(items []client.Meta[Thing]) {
+			mu.Lock()
+			received = append(received, items)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify we received empty list
+	mu.Lock()
+	require.Len(t, received, 1, "should receive initial empty list")
+	require.Empty(t, received[0], "empty list should have no items")
+	mu.Unlock()
+
+	// Now add an item - subscriber should receive the update
+	wsWg.Add(1)
+	data, _ := json.Marshal(Thing{ID: "1", Data: "first"})
+	_, err = remote.Storage.Set("things/item1", data)
+	require.NoError(t, err)
+	wsWg.Wait()
+
+	mu.Lock()
+	require.Len(t, received, 2, "should receive update after item is added")
+	require.Len(t, received[1], 1, "list should have 1 item")
+	require.Equal(t, "1", received[1][0].Data.ID)
+	mu.Unlock()
+}
+
+// TestProxyLateSubscriberEmptyObject tests that a late subscriber to an empty object key
+// receives the correct empty meta object format.
+func TestProxyLateSubscriberEmptyObject(t *testing.T) {
+	var wsWg sync.WaitGroup
+	var received1, received2 []client.Meta[Settings]
+	var mu sync.Mutex
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("settings")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	ctx := t.Context()
+
+	// First subscriber connects to empty key
+	wsWg.Add(1)
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "settings/device1", client.SubscribeEvents[Settings]{
+		OnMessage: func(m client.Meta[Settings]) {
+			mu.Lock()
+			received1 = append(received1, m)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify first subscriber got empty object
+	mu.Lock()
+	require.Len(t, received1, 1)
+	require.Equal(t, int64(0), received1[0].Created, "first subscriber should get empty object")
+	mu.Unlock()
+
+	// Second subscriber joins while key is still empty (late subscriber via HTTP fetch returning 404)
+	wsWg.Add(1)
+	go client.Subscribe(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "settings/device1", client.SubscribeEvents[Settings]{
+		OnMessage: func(m client.Meta[Settings]) {
+			mu.Lock()
+			received2 = append(received2, m)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify second subscriber also got empty object (not null or error)
+	mu.Lock()
+	require.Len(t, received2, 1, "late subscriber should receive empty object")
+	require.Equal(t, int64(0), received2[0].Created, "late subscriber should get empty object with created=0")
+	require.Equal(t, int64(0), received2[0].Updated, "late subscriber should get empty object with updated=0")
+	mu.Unlock()
+}
+
+// TestProxyLateSubscriberEmptyList tests that a late subscriber to an empty list key
+// receives the correct empty array format.
+func TestProxyLateSubscriberEmptyList(t *testing.T) {
+	var wsWg sync.WaitGroup
+	var received1, received2 [][]client.Meta[Thing]
+	var mu sync.Mutex
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("things/*")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.RouteList(proxyServer, "devices/{deviceID}/things/{itemID}", proxy.Config{
+		Resolve: func(localPath string) (string, string, error) {
+			parts := strings.Split(localPath, "/")
+			if len(parts) >= 4 {
+				return remote.Address, "things/" + parts[3], nil
+			}
+			return remote.Address, "things/*", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	ctx := t.Context()
+
+	// First subscriber connects to empty list
+	wsWg.Add(1)
+	go client.SubscribeList(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "devices/dev1/things/*", client.SubscribeListEvents[Thing]{
+		OnMessage: func(items []client.Meta[Thing]) {
+			mu.Lock()
+			received1 = append(received1, items)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify first subscriber got empty list
+	mu.Lock()
+	require.Len(t, received1, 1)
+	require.Empty(t, received1[0], "first subscriber should get empty list")
+	mu.Unlock()
+
+	// Second subscriber joins while list is still empty (late subscriber via HTTP fetch returning 404)
+	wsWg.Add(1)
+	go client.SubscribeList(client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: proxyServer.Address},
+		Silence: true,
+	}, "devices/dev1/things/*", client.SubscribeListEvents[Thing]{
+		OnMessage: func(items []client.Meta[Thing]) {
+			mu.Lock()
+			received2 = append(received2, items)
+			mu.Unlock()
+			wsWg.Done()
+		},
+	})
+	wsWg.Wait()
+
+	// Verify second subscriber also got empty list (not null or error)
+	mu.Lock()
+	require.Len(t, received2, 1, "late subscriber should receive empty list")
+	require.Empty(t, received2[0], "late subscriber should get empty list []")
+	mu.Unlock()
+}
+
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
 	var clientWg sync.WaitGroup
 	var mu sync.Mutex

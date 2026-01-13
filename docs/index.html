@@ -2942,15 +2942,15 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 			{<span class="type">Path</span>: <span class="string">&#34;settings&#34;</span>}, <span class="comment">// Single item sync</span>
 			{<span class="type">Path</span>: <span class="string">&#34;items/*&#34;</span>},  <span class="comment">// List sync</span>
 		},
-		NodesKey: <span class="string">&#34;nodes/*&#34;</span>,        <span class="comment">// Node discovery path</span>
-		PivotIP:  <span class="string">&#34;localhost:8800&#34;</span>, <span class="comment">// Address of the pivot server</span>
+		NodesKey:   <span class="string">&#34;nodes/*&#34;</span>,        <span class="comment">// Node discovery path</span>
+		ClusterURL: <span class="string">&#34;localhost:8800&#34;</span>, <span class="comment">// Address of the cluster leader</span>
 	}
 
 	<span class="comment">// Setup pivot - modifies server routes and storage hooks</span>
 	pivot.<span class="function">Setup</span>(server, config)
 
 	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8801&#34;</span>)
-	log.<span class="function">Println</span>(<span class="string">&#34;Node server running on :8801, syncing with pivot at localhost:8800&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;Node server running on :8801, syncing with cluster leader at localhost:8800&#34;</span>)
 	server.<span class="function">WaitClose</span>()
 }</code></pre>
             </div>
@@ -3000,15 +3000,15 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 			{<span class="type">Path</span>: <span class="string">&#34;settings&#34;</span>}, <span class="comment">// Single item sync</span>
 			{<span class="type">Path</span>: <span class="string">&#34;items/*&#34;</span>},  <span class="comment">// List sync</span>
 		},
-		NodesKey: <span class="string">&#34;nodes/*&#34;</span>, <span class="comment">// Node discovery path</span>
-		PivotIP:  <span class="string">&#34;&#34;</span>,        <span class="comment">// Empty = this is the pivot server</span>
+		NodesKey:   <span class="string">&#34;nodes/*&#34;</span>, <span class="comment">// Node discovery path</span>
+		ClusterURL: <span class="string">&#34;&#34;</span>,        <span class="comment">// Empty = this server IS the cluster leader</span>
 	}
 
 	<span class="comment">// Setup pivot - modifies server routes and storage hooks</span>
 	pivot.<span class="function">Setup</span>(server, config)
 
 	server.<span class="function">Start</span>(<span class="string">&#34;0.0.0.0:8800&#34;</span>)
-	log.<span class="function">Println</span>(<span class="string">&#34;Pivot server running on :8800&#34;</span>)
+	log.<span class="function">Println</span>(<span class="string">&#34;Cluster leader running on :8800&#34;</span>)
 	server.<span class="function">WaitClose</span>()
 }</code></pre>
             </div>

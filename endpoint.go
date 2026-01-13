@@ -214,6 +214,16 @@ func (server *Server) RegisterProxyCleanup(cleanup func()) {
 	server.proxyCleanupMu.Unlock()
 }
 
+// RegisterPreClose registers a cleanup function to be called at the very start of Close(),
+// before stream and storage cleanup. This is useful for stopping background goroutines
+// that depend on the stream being active. Multiple functions can be registered and will
+// be called in registration order.
+func (server *Server) RegisterPreClose(cleanup func()) {
+	server.preCloseCleanupsMu.Lock()
+	server.preCloseCleanups = append(server.preCloseCleanups, cleanup)
+	server.preCloseCleanupsMu.Unlock()
+}
+
 // getEndpoints returns registered endpoints for UI
 func (server *Server) getEndpoints() []ui.EndpointInfo {
 	if server.endpoints == nil {

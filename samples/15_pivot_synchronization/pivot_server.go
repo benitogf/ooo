@@ -4,8 +4,8 @@
 // This file requires external dependencies not included in ooo.
 // To use: go get github.com/benitogf/pivot
 
-// Package main demonstrates a pivot server (central coordinator).
-// The pivot server is the source of truth that nodes sync with.
+// Package main demonstrates a cluster leader server (central coordinator).
+// The leader server is the source of truth that nodes sync with.
 // Run this first, then start node servers pointing to this address.
 //
 // Requires: go get github.com/benitogf/pivot
@@ -27,14 +27,14 @@ func main() {
 			{Path: "settings"}, // Single item sync
 			{Path: "items/*"},  // List sync
 		},
-		NodesKey: "nodes/*", // Node discovery path
-		PivotIP:  "",        // Empty = this is the pivot server
+		NodesKey:   "nodes/*", // Node discovery path
+		ClusterURL: "",        // Empty = this server IS the cluster leader
 	}
 
 	// Setup pivot - modifies server routes and storage hooks
 	pivot.Setup(server, config)
 
 	server.Start("0.0.0.0:8800")
-	log.Println("Pivot server running on :8800")
+	log.Println("Cluster leader running on :8800")
 	server.WaitClose()
 }
