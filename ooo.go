@@ -60,7 +60,7 @@ type audit func(r *http.Request) bool
 //
 // OnStart: function that triggers after the server has started successfully
 //
-// OnClose: function that triggers before closing the application
+// OnClose: function that triggers after closing the application
 //
 // Deadline: time duration of a request before timing out
 //
@@ -100,54 +100,56 @@ type audit func(r *http.Request) bool
 //
 // BeforeRead: callback function triggered before read operations
 type Server struct {
-	wg                sync.WaitGroup
-	watchWg           sync.WaitGroup
-	listenWg          sync.WaitGroup
-	handlerWg         sync.WaitGroup
-	clockWg           sync.WaitGroup
-	server            *http.Server
-	Name              string
-	Router            *mux.Router
-	Stream            stream.Stream
-	filters           filters.Filters
-	limitFilters      map[string]int    // tracks limit filter paths and their limits
-	endpoints         []ui.EndpointInfo // registered custom endpoints
-	proxies           []ui.ProxyInfo    // registered proxy routes
-	proxyCleanups     []func()          // cleanup functions for proxy subscriptions
-	proxyCleanupMu    sync.Mutex        // protects proxyCleanups
-	NoBroadcastKeys   []string
-	Audit             audit
-	Workers           int
-	ForcePatch        bool
-	NoPatch           bool
-	OnSubscribe       stream.Subscribe
-	OnUnsubscribe     stream.Unsubscribe
-	OnStart           func()
-	OnClose           func()
-	Deadline          time.Duration
-	AllowedOrigins    []string
-	AllowedMethods    []string
-	AllowedHeaders    []string
-	ExposedHeaders    []string
-	Storage           storage.Database
-	Address           string
-	closing           int64
-	active            int64
-	Silence           bool
-	Static            bool
-	Tick              time.Duration
-	Console           *coat.Console
-	Signal            chan os.Signal
-	Client            *http.Client
-	ReadTimeout       time.Duration
-	WriteTimeout      time.Duration
-	ReadHeaderTimeout time.Duration
-	IdleTimeout       time.Duration
-	OnStorageEvent    storage.EventCallback
-	BeforeRead        func(key string)
-	GetPivotInfo      func() *ui.PivotInfo // Optional: returns pivot status for UI
-	startErr          chan error           // channel for startup errors
-	clockStop         chan struct{}        // channel to signal clock goroutine to stop
+	wg                 sync.WaitGroup
+	watchWg            sync.WaitGroup
+	listenWg           sync.WaitGroup
+	handlerWg          sync.WaitGroup
+	clockWg            sync.WaitGroup
+	server             *http.Server
+	Name               string
+	Router             *mux.Router
+	Stream             stream.Stream
+	filters            filters.Filters
+	limitFilters       map[string]int    // tracks limit filter paths and their limits
+	endpoints          []ui.EndpointInfo // registered custom endpoints
+	proxies            []ui.ProxyInfo    // registered proxy routes
+	proxyCleanups      []func()          // cleanup functions for proxy subscriptions
+	proxyCleanupMu     sync.Mutex        // protects proxyCleanups
+	NoBroadcastKeys    []string
+	Audit              audit
+	Workers            int
+	ForcePatch         bool
+	NoPatch            bool
+	OnSubscribe        stream.Subscribe
+	OnUnsubscribe      stream.Unsubscribe
+	OnStart            func()
+	OnClose            func()
+	preCloseCleanups   []func() // cleanup functions called before stream/storage close
+	preCloseCleanupsMu sync.Mutex
+	Deadline           time.Duration
+	AllowedOrigins     []string
+	AllowedMethods     []string
+	AllowedHeaders     []string
+	ExposedHeaders     []string
+	Storage            storage.Database
+	Address            string
+	closing            int64
+	active             int64
+	Silence            bool
+	Static             bool
+	Tick               time.Duration
+	Console            *coat.Console
+	Signal             chan os.Signal
+	Client             *http.Client
+	ReadTimeout        time.Duration
+	WriteTimeout       time.Duration
+	ReadHeaderTimeout  time.Duration
+	IdleTimeout        time.Duration
+	OnStorageEvent     storage.EventCallback
+	BeforeRead         func(key string)
+	GetPivotInfo       func() *ui.PivotInfo // Optional: returns pivot status for UI
+	startErr           chan error           // channel for startup errors
+	clockStop          chan struct{}        // channel to signal clock goroutine to stop
 }
 
 // Validate checks the server configuration for common issues.
@@ -623,6 +625,13 @@ func (server *Server) Close(sig os.Signal) {
 	if atomic.LoadInt64(&server.closing) != 1 {
 		atomic.StoreInt64(&server.closing, 1)
 		atomic.StoreInt64(&server.active, 0)
+		// Call pre-close cleanups first, before any stream/storage cleanup
+		server.preCloseCleanupsMu.Lock()
+		for _, cleanup := range server.preCloseCleanups {
+			cleanup()
+		}
+		server.preCloseCleanups = nil
+		server.preCloseCleanupsMu.Unlock()
 		close(server.clockStop) // Signal clock goroutine to stop immediately
 		server.clockWg.Wait()   // Wait for clock goroutine to exit before touching Stream
 		// Close proxy subscriptions first (before closing stream connections)

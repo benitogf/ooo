@@ -4,8 +4,8 @@
 // This file requires external dependencies not included in ooo.
 // To use: go get github.com/benitogf/pivot
 
-// Package main demonstrates a node server that syncs with a pivot.
-// Node servers replicate data from the pivot and can accept local writes
+// Package main demonstrates a node server that syncs with a cluster leader.
+// Node servers replicate data from the leader and can accept local writes
 // that sync back when connectivity is restored (AP distributed system).
 //
 // Requires: go get github.com/benitogf/pivot
@@ -27,13 +27,13 @@ func main() {
 			{Path: "settings"}, // Single item sync
 			{Path: "items/*"},  // List sync
 		},
-		NodesKey: "nodes/*",        // Node discovery path
-		PivotIP:  "localhost:8888", // Address of the pivot server
+		NodesKey:   "nodes/*",        // Node discovery path
+		ClusterURL: "localhost:8800", // Address of the cluster leader
 	}
 
 	// Setup pivot - modifies server routes and storage hooks
 	server = pivot.Setup(server, config)
 	server.Start("0.0.0.0:8801")
-	log.Println("Node server running on :8801, syncing with pivot at localhost:8800")
+	log.Println("Node server running on :8801, syncing with cluster leader at localhost:8800")
 	server.WaitClose()
 }
