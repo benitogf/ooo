@@ -7,7 +7,12 @@ import (
 
 	"github.com/benitogf/coat"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/monotonic"
 )
+
+func init() {
+	monotonic.Init()
+}
 
 const benchDomain = "http://example.com"
 

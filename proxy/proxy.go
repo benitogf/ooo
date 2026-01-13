@@ -15,6 +15,7 @@ import (
 	"github.com/benitogf/coat"
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
+	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/ui"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
@@ -213,6 +214,24 @@ func (ps *proxyState) sendInitialState(msgChan chan wsMessage) {
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		// Key doesn't exist yet - send empty snapshot matching what the ooo server sends:
+		// - Lists (glob keys): empty array []
+		// - Objects: empty meta object with created/updated = 0
+		var emptyData []byte
+		if ps.isList {
+			emptyData = []byte("[]")
+		} else {
+			emptyData = meta.EmptyObject
+		}
+		snapshotMsg := buildSnapshotMessage(emptyData)
+		select {
+		case msgChan <- wsMessage{msgType: websocket.BinaryMessage, data: snapshotMsg}:
+		default:
+		}
+		return
+	}
 
 	if resp.StatusCode >= 400 {
 		ps.console.Err(ps.logPrefix()+": failed to fetch initial state", errors.New(resp.Status))
