@@ -110,11 +110,11 @@ type Server struct {
 	Router             *mux.Router
 	Stream             stream.Stream
 	filters            filters.Filters
-	limitFilters       map[string]int    // tracks limit filter paths and their limits
-	endpoints          []ui.EndpointInfo // registered custom endpoints
-	proxies            []ui.ProxyInfo    // registered proxy routes
-	proxyCleanups      []func()          // cleanup functions for proxy subscriptions
-	proxyCleanupMu     sync.Mutex        // protects proxyCleanups
+	limitFilters       map[string]filters.LimitFilterInfo // tracks limit filter paths and their config
+	endpoints          []ui.EndpointInfo                  // registered custom endpoints
+	proxies            []ui.ProxyInfo                     // registered proxy routes
+	proxyCleanups      []func()                           // cleanup functions for proxy subscriptions
+	proxyCleanupMu     sync.Mutex                         // protects proxyCleanups
 	NoBroadcastKeys    []string
 	Audit              audit
 	Workers            int
@@ -205,13 +205,15 @@ func (server *Server) getFiltersInfo() []ui.FilterInfo {
 			continue
 		}
 		result = append(result, ui.FilterInfo{
-			Path:      f.Path,
-			Type:      f.Type,
-			CanRead:   f.CanRead,
-			CanWrite:  f.CanWrite,
-			CanDelete: f.CanDelete,
-			IsGlob:    f.IsGlob,
-			Limit:     f.Limit,
+			Path:         f.Path,
+			Type:         f.Type,
+			CanRead:      f.CanRead,
+			CanWrite:     f.CanWrite,
+			CanDelete:    f.CanDelete,
+			IsGlob:       f.IsGlob,
+			Limit:        f.Limit,
+			LimitDynamic: f.LimitDynamic,
+			Order:        f.Order,
 		})
 	}
 	return result
@@ -222,9 +224,17 @@ func (server *Server) getFiltersInfo() []ui.FilterInfo {
 // This method just tracks the limit value for display in the ui.
 func (server *Server) RegisterLimitFilter(lf *filters.LimitFilter) {
 	if server.limitFilters == nil {
-		server.limitFilters = make(map[string]int)
+		server.limitFilters = make(map[string]filters.LimitFilterInfo)
 	}
-	server.limitFilters[lf.Path()] = lf.Limit()
+	order := "desc"
+	if lf.Order() == filters.OrderAsc {
+		order = "asc"
+	}
+	server.limitFilters[lf.Path()] = filters.LimitFilterInfo{
+		Limit:        lf.Limit(),
+		LimitDynamic: lf.IsDynamic(),
+		Order:        order,
+	}
 }
 
 // getStreamState returns stream connection pool information for the explorer

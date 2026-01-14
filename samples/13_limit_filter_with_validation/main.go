@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/benitogf/ooo"
+	"github.com/benitogf/ooo/filters"
 )
 
 // LogEntry defines the exact schema for log entries
@@ -53,7 +54,7 @@ func main() {
 	})
 
 	// Add limit filter to cap entries
-	server.LimitFilter("logs/*", 100)
+	server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 100})
 
 	log.Println("Server running with validated limit filter")
 	log.Println("POST /logs/* - validates schema and caps at 100 entries")

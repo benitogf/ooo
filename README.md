@@ -203,8 +203,18 @@ server.DeleteFilter("books/protected", func(key string) error {
 
 ```go
 // Limit list to N most recent entries (auto-deletes oldest)
-server.LimitFilter("logs/*", 100)
+server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 100})
+
+// With ascending order (oldest first in results)
+server.LimitFilter("events/*", filters.LimitFilterConfig{
+    Limit: 50,
+    Order: filters.OrderAsc,
+})
 ```
+
+`LimitFilterConfig` options:
+- `Limit` - Maximum number of entries (required)
+- `Order` - Sort order: `OrderDesc` (default, most recent first) or `OrderAsc` (oldest first)
 
 ### Audit
 

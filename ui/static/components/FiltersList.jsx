@@ -2,7 +2,7 @@ function FiltersList({ clockConnected }) {
   const { useState, useEffect, useCallback, useRef } = React;
   const { IconFilter, IconTrash, IconRefresh } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
-  
+
   const [filtersInfo, setFiltersInfo] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -57,32 +57,33 @@ function FiltersList({ clockConnected }) {
 
   const openFilter = (filter) => {
     const { path, isGlob, type } = filter;
-    
+
     // Custom filters have no client access - don't navigate
     if (type === 'custom') {
       return;
     }
-    
+
     // Glob filters always open in live mode
     if (isGlob) {
       window.location.hash = '/storage/keys/live/' + encodeURIComponent(path);
       return;
     }
-    
+
     // Read-only static filters go to live mode
     if (type === 'read-only') {
       window.location.hash = '/storage/key/live/' + encodeURIComponent(path);
       return;
     }
-    
+
     // Other static filters go to edit mode
     window.location.hash = '/storage/key/static/' + encodeURIComponent(path);
   };
 
   const getFilterTypeBadge = (filter) => {
-    const { type, limit, canRead, canWrite } = filter;
+    const { type, limit, limitDynamic, canRead, canWrite } = filter;
     if (type === 'limit') {
-      return <span className="badge-limit">LIMIT ({limit})</span>;
+      const limitDisplay = limitDynamic ? `${limit}*` : limit;
+      return <span className="badge-limit" title={limitDynamic ? 'Dynamic limit (current value shown)' : 'Fixed limit'}>LIMIT ({limitDisplay})</span>;
     }
     if (type === 'open') {
       return <span className="badge-open">OPEN</span>;
@@ -140,10 +141,10 @@ function FiltersList({ clockConnected }) {
           </div>
         </div>
         <div className="header-actions">
-          <input 
-            type="text" 
-            className="search-box" 
-            placeholder="Search..." 
+          <input
+            type="text"
+            className="search-box"
+            placeholder="Search..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -175,8 +176,8 @@ function FiltersList({ clockConnected }) {
               </tr>
             ) : (
               filteredFilters.map(filter => (
-                <tr 
-                  key={filter.path} 
+                <tr
+                  key={filter.path}
                   onClick={() => openFilter(filter)}
                   className={filter.type === 'custom' ? 'row-disabled' : ''}
                   style={filter.type === 'custom' ? { cursor: 'default' } : {}}
