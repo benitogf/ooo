@@ -40,11 +40,12 @@ func checkReservedPath(path string) {
 
 // Re-export filter types from filters package
 type (
-	Apply       = filters.Apply
-	ApplyObject = filters.ApplyObject
-	ApplyList   = filters.ApplyList
-	Block       = filters.Block
-	Notify      = filters.Notify
+	Apply        = filters.Apply
+	ApplyObject  = filters.ApplyObject
+	ApplyList    = filters.ApplyList
+	Block        = filters.Block
+	Notify       = filters.Notify
+	FilterConfig = filters.Config
 )
 
 // Re-export filter functions from filters package
@@ -57,49 +58,49 @@ var (
 )
 
 // DeleteFilter add a filter that runs before delete
-func (server *Server) DeleteFilter(path string, apply Block) {
+func (server *Server) DeleteFilter(path string, apply Block, cfg ...FilterConfig) {
 	checkReservedPath(path)
-	server.filters.AddDelete(path, apply)
+	server.filters.AddDelete(path, apply, cfg...)
 }
 
 // WriteFilter add a filter that triggers on write
-func (server *Server) WriteFilter(path string, apply Apply) {
+func (server *Server) WriteFilter(path string, apply Apply, cfg ...FilterConfig) {
 	checkReservedPath(path)
-	server.filters.AddWrite(path, apply)
+	server.filters.AddWrite(path, apply, cfg...)
 }
 
 // AfterWriteFilter add a filter that triggers after a successful write
-func (server *Server) AfterWriteFilter(path string, apply Notify) {
+func (server *Server) AfterWriteFilter(path string, apply Notify, cfg ...FilterConfig) {
 	checkReservedPath(path)
-	server.filters.AddAfterWrite(path, apply)
+	server.filters.AddAfterWrite(path, apply, cfg...)
 }
 
 // ReadObjectFilter add a filter for single meta.Object reads
-func (server *Server) ReadObjectFilter(path string, apply ApplyObject) {
+func (server *Server) ReadObjectFilter(path string, apply ApplyObject, cfg ...FilterConfig) {
 	checkReservedPath(path)
-	server.filters.AddReadObject(path, apply)
+	server.filters.AddReadObject(path, apply, cfg...)
 }
 
 // ReadListFilter add a filter for []meta.Object reads.
 // For glob paths like "things/*", individual item reads (e.g., "things/123") will also
 // be allowed if no explicit ReadObjectFilter is registered for that path.
-func (server *Server) ReadListFilter(path string, apply ApplyList) {
+func (server *Server) ReadListFilter(path string, apply ApplyList, cfg ...FilterConfig) {
 	checkReservedPath(path)
-	server.filters.AddReadList(path, apply)
+	server.filters.AddReadList(path, apply, cfg...)
 }
 
 // OpenFilter open noop read and write filters
 // For glob paths like "things/*", this also enables reading individual items like "things/123"
-func (server *Server) OpenFilter(name string) {
+func (server *Server) OpenFilter(name string, cfg ...FilterConfig) {
 	checkReservedPath(name)
-	server.filters.AddWrite(name, NoopFilter)
-	server.filters.AddDelete(name, NoopHook)
+	server.filters.AddWrite(name, NoopFilter, cfg...)
+	server.filters.AddDelete(name, NoopHook, cfg...)
 	if key.IsGlob(name) {
-		server.filters.AddReadList(name, NoopListFilter)
+		server.filters.AddReadList(name, NoopListFilter, cfg...)
 		// Also allow reading individual items that match the glob pattern
-		server.filters.AddReadObject(name, NoopObjectFilter)
+		server.filters.AddReadObject(name, NoopObjectFilter, cfg...)
 	} else {
-		server.filters.AddReadObject(name, NoopObjectFilter)
+		server.filters.AddReadObject(name, NoopObjectFilter, cfg...)
 	}
 }
 
@@ -113,25 +114,30 @@ func (server *Server) LimitFilter(path string, cfg filters.LimitFilterConfig) {
 	if err != nil {
 		panic(err)
 	}
-	server.registerLimitFilter(path, lf)
+	server.registerLimitFilter(path, lf, cfg.Description, reflectSchema(cfg.Schema))
 }
 
-func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter) {
+func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter, description string, schema map[string]any) {
+	var cfg []FilterConfig
+	if description != "" || schema != nil {
+		cfg = []FilterConfig{{Description: description, Schema: schema}}
+	}
+
 	// Allow writes and deletes
-	server.filters.AddWrite(path, NoopFilter)
-	server.filters.AddDelete(path, NoopHook)
+	server.filters.AddWrite(path, NoopFilter, cfg...)
+	server.filters.AddDelete(path, NoopHook, cfg...)
 
 	// ReadListFilter ensures clients never see more than limit items (meta-based, more efficient)
-	server.filters.AddReadList(path, lf.ReadListFilter)
+	server.filters.AddReadList(path, lf.ReadListFilter, cfg...)
 
 	// Also allow reading individual items that match the glob pattern
-	server.filters.AddReadObject(path, NoopObjectFilter)
+	server.filters.AddReadObject(path, NoopObjectFilter, cfg...)
 
 	// AfterWrite triggers cleanup of old entries
 	server.filters.AddAfterWrite(path, func(k string) {
 		lf.Check()
-	})
+	}, cfg...)
 
 	// Register for explorer display
-	server.RegisterLimitFilter(lf)
+	server.RegisterLimitFilter(lf, description, schema)
 }

@@ -1,7 +1,7 @@
 function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnly }) {
   const { useState, useRef, useEffect } = React;
   const JsonEditorWrapper = window.JsonEditorWrapper;
-  const { IconTrash, IconX, IconSend } = window.Icons;
+  const { IconTrash, IconX, IconSend, IconCopy, IconCheck, IconChevronDown, IconChevronRight } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
   
   const [loading, setLoading] = useState(true);
@@ -12,6 +12,9 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const [filterInfo, setFilterInfo] = useState(null);
+  const [schemaExpanded, setSchemaExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const editorRef = useRef(null);
 
   useEffect(() => {
@@ -21,11 +24,25 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
       setError('');
       setSaving(false);
       setInitialContent(null);
+      setSchemaExpanded(false);
+      setCopied(false);
       
       // Small delay to ensure loading state renders first
       setTimeout(() => setReady(true), 50);
       
       const minDelay = new Promise(r => setTimeout(r, 400));
+      
+      // Fetch filter info for schema
+      const checkPath = filterPath || keyPath;
+      fetch('/?api=filters')
+        .then(res => res.json())
+        .then(data => {
+          const info = (data.filters || []).find(f => 
+            f.path === checkPath || checkPath.match(new RegExp('^' + f.path.replace(/\*/g, '[^/]+') + '$'))
+          );
+          setFilterInfo(info);
+        })
+        .catch(() => setFilterInfo(null));
       
       Promise.all([
         fetch('/' + keyPath).then(res => {
@@ -46,7 +63,7 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
     } else if (!visible) {
       setReady(false);
     }
-  }, [visible, keyPath]);
+  }, [visible, keyPath, filterPath]);
 
   if (!visible) return null;
 
@@ -117,6 +134,19 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
   // Extract display name from path
   const displayName = keyPath.split('/').pop() || keyPath;
 
+  const hasSchema = filterInfo?.schema && Object.keys(filterInfo.schema).length > 0;
+
+  const copySchemaTemplate = async () => {
+    if (!hasSchema) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(filterInfo.schema, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal edit-key-modal" onClick={(e) => e.stopPropagation()}>
@@ -132,6 +162,31 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
           </button>
         </div>
         <div className="edit-key-modal-path">{keyPath}</div>
+        
+        {hasSchema && !loading && (
+          <div className="schema-section">
+            <div 
+              className="schema-section-header" 
+              onClick={() => setSchemaExpanded(!schemaExpanded)}
+            >
+              {schemaExpanded ? <IconChevronDown /> : <IconChevronRight />}
+              <span>Expected Schema</span>
+              <div className="schema-section-actions" onClick={(e) => e.stopPropagation()}>
+                <button 
+                  className="btn ghost sm" 
+                  onClick={copySchemaTemplate}
+                  title="Copy schema template"
+                >
+                  {copied ? <IconCheck /> : <IconCopy />}
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            {schemaExpanded && (
+              <pre className="schema-preview">{JSON.stringify(filterInfo.schema, null, 2)}</pre>
+            )}
+          </div>
+        )}
         
         {!ready || loading ? (
           <div className="edit-key-modal-loading">
@@ -150,7 +205,7 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
         
         {error && <div className="modal-error">{error}</div>}
         
-        {readOnly ? (
+        {!loading && !(!ready) && (readOnly ? (
           <div className="modal-actions">
             <div></div>
             <button className="btn-cancel" onClick={onClose}>
@@ -162,7 +217,7 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
             <button 
               className="btn danger" 
               onClick={openDeleteConfirm}
-              disabled={saving || loading}
+              disabled={saving}
             >
               <IconTrash color="#fff" /> Delete
             </button>
@@ -173,13 +228,13 @@ function EditKeyModal({ visible, keyPath, filterPath, onClose, onDelete, readOnl
               <button 
                 className="btn-confirm" 
                 onClick={save}
-                disabled={saving || loading}
+                disabled={saving}
               >
                 <IconSend /> {saving ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </div>
-        )}
+        ))}
       </div>
 
       <ConfirmModal

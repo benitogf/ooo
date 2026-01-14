@@ -14,7 +14,6 @@ import (
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/jsonpatch"
 	"github.com/benitogf/ooo/client"
-	"github.com/benitogf/ooo/filters"
 	ooio "github.com/benitogf/ooo/io"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
@@ -632,7 +631,7 @@ func StreamLimitFilterTest(t *testing.T, server *Server) {
 	const totalInserts = limit + 5 // Insert more than the limit
 
 	// Set up limit filter - uses ReadListFilter to limit view + AfterWrite to cleanup
-	server.LimitFilter("limited/*", filters.LimitFilterConfig{Limit: limit})
+	server.LimitFilter("limited/*", LimitFilterConfig{Limit: limit})
 	cfg := remoteConfig(server)
 
 	// Subscribe using raw websocket

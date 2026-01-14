@@ -1,10 +1,12 @@
 function KeyLiveView({ keyPath, fromFilter, source }) {
-  const { useState, useEffect, useRef } = React;
-  const { IconChevronLeft, IconEdit, IconWifi, IconWifiOff } = window.Icons;
+  const { useState, useEffect, useRef, useMemo } = React;
+  const { IconChevronLeft, IconEdit, IconWifi, IconWifiOff, IconFileText, IconChevronDown, IconChevronRight, IconCopy, IconCheck } = window.Icons;
   const ReactJson = window.reactJsonView ? window.reactJsonView.default : null;
 
   const [editorContent, setEditorContent] = useState(null);
   const [filterInfo, setFilterInfo] = useState(null);
+  const [schemaExpanded, setSchemaExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const { data, connected, error, version } = Api.useSubscribe(keyPath);
 
   useEffect(() => {
@@ -15,7 +17,7 @@ function KeyLiveView({ keyPath, fromFilter, source }) {
         .then(res => res.json())
         .then(data => {
           const info = (data.filters || []).find(f => 
-            f.path === checkPath || checkPath.match(new RegExp('^' + f.path.replace('*', '[^/]+') + '$'))
+            f.path === checkPath || checkPath.match(new RegExp('^' + f.path.replace(/\*/g, '[^/]+') + '$'))
           );
           setFilterInfo(info);
           // Custom filters have no client access
@@ -26,6 +28,35 @@ function KeyLiveView({ keyPath, fromFilter, source }) {
         .catch(() => {});
     }
   }, [keyPath, fromFilter]);
+
+  // Get merged description from filter info
+  const mergedDescription = useMemo(() => {
+    if (!filterInfo) return null;
+    const descriptions = [
+      filterInfo.descWrite,
+      filterInfo.descRead,
+      filterInfo.descDelete,
+      filterInfo.descAfterWrite,
+      filterInfo.descLimit
+    ].filter(Boolean);
+    if (descriptions.length === 0) return null;
+    // Return unique descriptions
+    const unique = [...new Set(descriptions)];
+    return unique.join(' | ');
+  }, [filterInfo]);
+
+  const hasSchema = filterInfo?.schema && Object.keys(filterInfo.schema).length > 0;
+
+  const copySchemaTemplate = async () => {
+    if (!hasSchema) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(filterInfo.schema, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   useEffect(() => {
     if (data && data.data) {
@@ -65,6 +96,11 @@ function KeyLiveView({ keyPath, fromFilter, source }) {
           <span className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
             {connected ? <IconWifi /> : <IconWifiOff />}
           </span>
+          {mergedDescription && (
+            <span className="filter-description-badge" title={mergedDescription}>
+              {mergedDescription.length > 50 ? mergedDescription.substring(0, 50) + '...' : mergedDescription}
+            </span>
+          )}
         </span>
         <div className="header-right">
           {filterInfo && filterInfo.type !== 'read-only' && (
@@ -79,6 +115,31 @@ function KeyLiveView({ keyPath, fromFilter, source }) {
       {error && (
         <div className="error-banner">
           Connection error: {error.message || 'Failed to connect'}
+        </div>
+      )}
+
+      {hasSchema && (
+        <div className="schema-section">
+          <div 
+            className="schema-section-header" 
+            onClick={() => setSchemaExpanded(!schemaExpanded)}
+          >
+            {schemaExpanded ? <IconChevronDown /> : <IconChevronRight />}
+            <span>Expected Schema</span>
+            <div className="schema-section-actions" onClick={(e) => e.stopPropagation()}>
+              <button 
+                className="btn ghost sm" 
+                onClick={copySchemaTemplate}
+                title="Copy schema template"
+              >
+                {copied ? <IconCheck /> : <IconCopy />}
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+          {schemaExpanded && (
+            <pre className="schema-preview">{JSON.stringify(filterInfo.schema, null, 2)}</pre>
+          )}
         </div>
       )}
 

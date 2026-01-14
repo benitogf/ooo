@@ -110,11 +110,11 @@ type Server struct {
 	Router             *mux.Router
 	Stream             stream.Stream
 	filters            filters.Filters
-	limitFilters       map[string]filters.LimitFilterInfo // tracks limit filter paths and their config
-	endpoints          []ui.EndpointInfo                  // registered custom endpoints
-	proxies            []ui.ProxyInfo                     // registered proxy routes
-	proxyCleanups      []func()                           // cleanup functions for proxy subscriptions
-	proxyCleanupMu     sync.Mutex                         // protects proxyCleanups
+	limitFilters       map[string]*limitFilterReg // tracks limit filter registrations
+	endpoints          []ui.EndpointInfo          // registered custom endpoints
+	proxies            []ui.ProxyInfo             // registered proxy routes
+	proxyCleanups      []func()                   // cleanup functions for proxy subscriptions
+	proxyCleanupMu     sync.Mutex                 // protects proxyCleanups
 	NoBroadcastKeys    []string
 	Audit              audit
 	Workers            int
@@ -194,10 +194,36 @@ func isPivotPath(path string) bool {
 	return len(path) >= len(pivotPrefix) && path[:len(pivotPrefix)] == pivotPrefix
 }
 
+// limitFilterReg stores a limit filter registration for lazy evaluation
+type limitFilterReg struct {
+	filter      *filters.LimitFilter
+	description string
+	schema      map[string]any
+}
+
+// getLimitFiltersInfo returns current limit filter info, evaluating dynamic limits lazily
+func (server *Server) getLimitFiltersInfo() map[string]filters.LimitFilterInfo {
+	result := make(map[string]filters.LimitFilterInfo, len(server.limitFilters))
+	for path, reg := range server.limitFilters {
+		order := "desc"
+		if reg.filter.Order() == filters.OrderAsc {
+			order = "asc"
+		}
+		result[path] = filters.LimitFilterInfo{
+			Limit:        reg.filter.Limit(),
+			LimitDynamic: reg.filter.IsDynamic(),
+			Order:        order,
+			Description:  reg.description,
+			Schema:       reg.schema,
+		}
+	}
+	return result
+}
+
 // getFiltersInfo returns detailed filter information for the explorer
 // Filters out pivot-prefixed paths as they are internal use only
 func (server *Server) getFiltersInfo() []ui.FilterInfo {
-	filtersInfo := server.filters.PathsInfo(server.limitFilters)
+	filtersInfo := server.filters.PathsInfo(server.getLimitFiltersInfo())
 	result := make([]ui.FilterInfo, 0, len(filtersInfo))
 	for _, f := range filtersInfo {
 		// Skip pivot-prefixed paths (internal use only)
@@ -205,15 +231,21 @@ func (server *Server) getFiltersInfo() []ui.FilterInfo {
 			continue
 		}
 		result = append(result, ui.FilterInfo{
-			Path:         f.Path,
-			Type:         f.Type,
-			CanRead:      f.CanRead,
-			CanWrite:     f.CanWrite,
-			CanDelete:    f.CanDelete,
-			IsGlob:       f.IsGlob,
-			Limit:        f.Limit,
-			LimitDynamic: f.LimitDynamic,
-			Order:        f.Order,
+			Path:           f.Path,
+			Type:           f.Type,
+			CanRead:        f.CanRead,
+			CanWrite:       f.CanWrite,
+			CanDelete:      f.CanDelete,
+			IsGlob:         f.IsGlob,
+			Limit:          f.Limit,
+			LimitDynamic:   f.LimitDynamic,
+			Order:          f.Order,
+			DescWrite:      f.DescWrite,
+			DescRead:       f.DescRead,
+			DescDelete:     f.DescDelete,
+			DescAfterWrite: f.DescAfterWrite,
+			DescLimit:      f.DescLimit,
+			Schema:         f.Schema,
 		})
 	}
 	return result
@@ -221,19 +253,15 @@ func (server *Server) getFiltersInfo() []ui.FilterInfo {
 
 // RegisterLimitFilter registers a limit filter and tracks it for the ui.
 // The LimitFilter should already be created and its filters added to the server.
-// This method just tracks the limit value for display in the ui.
-func (server *Server) RegisterLimitFilter(lf *filters.LimitFilter) {
+// This method stores a reference to the filter for lazy evaluation of dynamic limits.
+func (server *Server) RegisterLimitFilter(lf *filters.LimitFilter, description string, schema map[string]any) {
 	if server.limitFilters == nil {
-		server.limitFilters = make(map[string]filters.LimitFilterInfo)
+		server.limitFilters = make(map[string]*limitFilterReg)
 	}
-	order := "desc"
-	if lf.Order() == filters.OrderAsc {
-		order = "asc"
-	}
-	server.limitFilters[lf.Path()] = filters.LimitFilterInfo{
-		Limit:        lf.Limit(),
-		LimitDynamic: lf.IsDynamic(),
-		Order:        order,
+	server.limitFilters[lf.Path()] = &limitFilterReg{
+		filter:      lf,
+		description: description,
+		schema:      schema,
 	}
 }
 

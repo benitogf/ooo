@@ -54,6 +54,8 @@ function ProxiesList({ clockConnected }) {
     return caps.join('/');
   };
 
+  const hasAnyDescription = proxies.some(p => p.description);
+
   // Check if path has dynamic parameter (glob * or needs user input)
   const needsParamInput = (localPath) => {
     return localPath.includes('*');
@@ -161,12 +163,13 @@ function ProxiesList({ clockConnected }) {
               <th>Local Path</th>
               <th>Type</th>
               <th>Capabilities</th>
+              {hasAnyDescription && <th>Description</th>}
             </tr>
           </thead>
           <tbody>
             {filteredProxies.length === 0 ? (
               <tr>
-                <td colSpan="3">
+                <td colSpan={hasAnyDescription ? 4 : 3}>
                   <div className="empty-state">
                     <IconLink />
                     <div>No proxy routes registered</div>
@@ -189,6 +192,7 @@ function ProxiesList({ clockConnected }) {
                       {proxy.canDelete && <span className="cap-delete" title="Delete">D</span>}
                     </span>
                   </td>
+                  {hasAnyDescription && <td><span className="filter-desc">{proxy.description}</span></td>}
                 </tr>
               ))
             )}

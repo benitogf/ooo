@@ -1,12 +1,15 @@
 function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess, onEditKey }) {
   const { useState, useRef, useEffect, useMemo } = React;
   const JsonEditorWrapper = window.JsonEditorWrapper;
-  const { IconEdit, IconX } = window.Icons;
+  const { IconEdit, IconX, IconCopy, IconCheck, IconChevronDown, IconChevronRight } = window.Icons;
   
   const [pushing, setPushing] = useState(false);
   const [error, setError] = useState('');
   const [pathSegments, setPathSegments] = useState({});
   const [customIndex, setCustomIndex] = useState('');
+  const [filterInfo, setFilterInfo] = useState(null);
+  const [schemaExpanded, setSchemaExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const editorRef = useRef(null);
 
   // Use shared validation from Api
@@ -51,8 +54,18 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
       setError('');
       setPathSegments({});
       setCustomIndex('');
+      setSchemaExpanded(false);
+      setCopied(false);
+      // Fetch filter info to get schema
+      fetch('/?api=filters')
+        .then(res => res.json())
+        .then(data => {
+          const info = (data.filters || []).find(f => f.path === filterPath);
+          setFilterInfo(info);
+        })
+        .catch(() => setFilterInfo(null));
     }
-  }, [visible]);
+  }, [visible, filterPath]);
 
   if (!visible) return null;
 
@@ -140,6 +153,19 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
     setPathSegments(prev => ({ ...prev, [index]: value }));
   };
 
+  const hasSchema = filterInfo?.schema && Object.keys(filterInfo.schema).length > 0;
+
+  const copySchemaTemplate = async () => {
+    if (!hasSchema) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(filterInfo.schema, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   return (
     <div className="modal-overlay" onClick={handleOverlayClick}>
       <div className="modal push-dialog" onClick={(e) => e.stopPropagation()}>
@@ -192,6 +218,31 @@ function PushDialog({ visible, filterPath, existingKeys = [], onClose, onSuccess
           </div>
         )}
         
+        {hasSchema && !pushing && (
+          <div className="schema-section">
+            <div 
+              className="schema-section-header" 
+              onClick={() => setSchemaExpanded(!schemaExpanded)}
+            >
+              {schemaExpanded ? <IconChevronDown /> : <IconChevronRight />}
+              <span>Expected Schema</span>
+              <div className="schema-section-actions" onClick={(e) => e.stopPropagation()}>
+                <button 
+                  className="btn ghost sm" 
+                  onClick={copySchemaTemplate}
+                  title="Copy schema template"
+                >
+                  {copied ? <IconCheck /> : <IconCopy />}
+                  {copied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            {schemaExpanded && (
+              <pre className="schema-preview">{JSON.stringify(filterInfo.schema, null, 2)}</pre>
+            )}
+          </div>
+        )}
+
         {pushing ? (
           <div className="push-dialog-loading">
             <div className="spinner"></div>

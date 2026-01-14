@@ -50,15 +50,21 @@ type ServerInfo struct {
 
 // FilterInfo contains detailed information about a filter path
 type FilterInfo struct {
-	Path         string `json:"path"`
-	Type         string `json:"type"`
-	CanRead      bool   `json:"canRead"`
-	CanWrite     bool   `json:"canWrite"`
-	CanDelete    bool   `json:"canDelete"`
-	IsGlob       bool   `json:"isGlob"`
-	Limit        int    `json:"limit,omitempty"`
-	LimitDynamic bool   `json:"limitDynamic,omitempty"` // true if limit uses dynamic function
-	Order        string `json:"order,omitempty"`        // "desc" or "asc" for limit filters
+	Path           string         `json:"path"`
+	Type           string         `json:"type"`
+	CanRead        bool           `json:"canRead"`
+	CanWrite       bool           `json:"canWrite"`
+	CanDelete      bool           `json:"canDelete"`
+	IsGlob         bool           `json:"isGlob"`
+	Limit          int            `json:"limit,omitempty"`
+	LimitDynamic   bool           `json:"limitDynamic,omitempty"`   // true if limit uses dynamic function
+	Order          string         `json:"order,omitempty"`          // "desc" or "asc" for limit filters
+	DescWrite      string         `json:"descWrite,omitempty"`      // Description for write filter
+	DescRead       string         `json:"descRead,omitempty"`       // Description for read filter
+	DescDelete     string         `json:"descDelete,omitempty"`     // Description for delete filter
+	DescAfterWrite string         `json:"descAfterWrite,omitempty"` // Description for after-write watcher
+	DescLimit      string         `json:"descLimit,omitempty"`      // Description for limit filter
+	Schema         map[string]any `json:"schema,omitempty"`         // JSON schema for the data structure
 }
 
 // FiltersInfo contains filter paths exposed to the explorer
@@ -114,11 +120,12 @@ type MethodInfo struct {
 
 // ProxyInfo contains proxy route metadata for UI display
 type ProxyInfo struct {
-	LocalPath string `json:"localPath"`
-	Type      string `json:"type"`
-	CanRead   bool   `json:"canRead"`
-	CanWrite  bool   `json:"canWrite"`
-	CanDelete bool   `json:"canDelete"`
+	LocalPath   string `json:"localPath"`
+	Type        string `json:"type"`
+	CanRead     bool   `json:"canRead"`
+	CanWrite    bool   `json:"canWrite"`
+	CanDelete   bool   `json:"canDelete"`
+	Description string `json:"description,omitempty"`
 }
 
 // Handler serves the storage explorer SPA
