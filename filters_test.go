@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/benitogf/jsondiff"
+	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/meta"
 	"github.com/goccy/go-json"
 
@@ -465,7 +466,7 @@ func TestFiltersLimitAllowsPostAndRead(t *testing.T) {
 
 	// LimitFilter should allow POST, GET list, and GET individual items
 	// Must be called after Start() because it needs app.Storage
-	server.LimitFilter("limited/*", 5)
+	server.LimitFilter("limited/*", filters.LimitFilterConfig{Limit: 5})
 
 	// Create an item via POST
 	data := json.RawMessage(`{"name":"limited item"}`)
@@ -502,6 +503,124 @@ func TestFiltersLimitAllowsPostAndRead(t *testing.T) {
 	body, err = io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(body), "limited item")
+}
+
+func TestGetListWithLimitFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Static = true
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// LimitFilter with limit of 3, OrderDesc (newest first)
+	server.LimitFilter("games/*", filters.LimitFilterConfig{Limit: 3, Order: filters.OrderDesc})
+
+	// Create 5 items with different timestamps
+	for i := 1; i <= 5; i++ {
+		data := json.RawMessage(`{"name":"game` + string(rune('0'+i)) + `"}`)
+		req := httptest.NewRequest("POST", "/games/*", bytes.NewBuffer(data))
+		w := httptest.NewRecorder()
+		server.Router.ServeHTTP(w, req)
+		resp := w.Result()
+		require.Equal(t, 200, resp.StatusCode)
+	}
+
+	// Use GetList to read - should return only 3 newest items
+	type Game struct {
+		Name string `json:"name"`
+	}
+	games, err := GetList[Game](&server, "games/*")
+	require.NoError(t, err)
+	require.Equal(t, 3, len(games), "GetList should respect LimitFilter limit")
+}
+
+func TestGetListWithLimitFilterOrderAsc(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Static = true
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// LimitFilter with limit of 3, OrderAsc (oldest first for display, but keeps newest)
+	server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 3, Order: filters.OrderAsc})
+
+	// Create 5 items
+	for i := 1; i <= 5; i++ {
+		data := json.RawMessage(`{"level":"info","seq":` + string(rune('0'+i)) + `}`)
+		req := httptest.NewRequest("POST", "/logs/*", bytes.NewBuffer(data))
+		w := httptest.NewRecorder()
+		server.Router.ServeHTTP(w, req)
+		resp := w.Result()
+		require.Equal(t, 200, resp.StatusCode)
+	}
+
+	// Use GetList to read - should return 3 items (newest kept, sorted oldest first)
+	type Log struct {
+		Level string `json:"level"`
+		Seq   int    `json:"seq"`
+	}
+	logs, err := GetList[Log](&server, "logs/*")
+	require.NoError(t, err)
+	require.Equal(t, 3, len(logs), "GetList should respect LimitFilter limit with OrderAsc")
+
+	// Verify items are sorted oldest first (ascending Created)
+	for i := 1; i < len(logs); i++ {
+		require.True(t, logs[i-1].Created <= logs[i].Created,
+			"Items should be sorted oldest first with OrderAsc")
+	}
+}
+
+func TestGetListWithLimitFilterKeepsNewest(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.Static = true
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// LimitFilter with limit of 2
+	server.LimitFilter("items/*", filters.LimitFilterConfig{Limit: 2, Order: filters.OrderAsc})
+
+	// Create 3 items - oldest should be dropped
+	var createdKeys []string
+	for i := 1; i <= 3; i++ {
+		data := json.RawMessage(`{"value":` + string(rune('0'+i)) + `}`)
+		req := httptest.NewRequest("POST", "/items/*", bytes.NewBuffer(data))
+		w := httptest.NewRecorder()
+		server.Router.ServeHTTP(w, req)
+		resp := w.Result()
+		require.Equal(t, 200, resp.StatusCode)
+
+		body, _ := io.ReadAll(resp.Body)
+		var createResp struct{ Index string }
+		json.Unmarshal(body, &createResp)
+		createdKeys = append(createdKeys, createResp.Index)
+	}
+
+	// Use GetList - should have 2 items (the 2 newest)
+	type Item struct {
+		Value int `json:"value"`
+	}
+	items, err := GetList[Item](&server, "items/*")
+	require.NoError(t, err)
+	require.Equal(t, 2, len(items), "GetList should return only 2 newest items")
+
+	// Verify the oldest item (first created) is not in the list
+	for _, item := range items {
+		require.NotEqual(t, createdKeys[0], item.Index,
+			"Oldest item should have been filtered out")
+	}
 }
 
 func TestReadListFilterAllowsIndividualReads(t *testing.T) {

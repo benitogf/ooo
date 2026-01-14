@@ -107,6 +107,10 @@ func processListSet(cache *Cache, poolKey string, obj *meta.Object, filtered *me
 
 	// Insert new item
 	oldLen := len(cache.Objects)
+	// Capture old cache state for comparison
+	oldCache := make([]meta.Object, len(cache.Objects))
+	copy(oldCache, cache.Objects)
+
 	newList, _ = insertSorted(cache.Objects, *filtered)
 	// Apply list filter (may limit size and re-sort)
 	finalList, _ := filterList(poolKey, newList)
@@ -124,11 +128,26 @@ func processListSet(cache *Cache, poolKey string, obj *meta.Object, filtered *me
 	} else if actualPos >= 0 {
 		// Item is in the filtered list, no item pushed out
 		return generateListResult(cache.Objects, "add", actualPos, filtered, noPatch)
-	} else if itemPushedOut && len(finalList) == oldLen {
-		// Item was added but filtered out, and another was pushed out due to limit
-		return generateListResult(cache.Objects, "remove", len(finalList), nil, noPatch)
 	}
-	return BroadcastResult{Skip: true}
+
+	// Item was filtered out - check if list content actually changed
+	// This handles transform filters that modify the list data
+	if listsEqual(oldCache, cache.Objects) {
+		// No visible change to client
+		return BroadcastResult{Skip: true}
+	}
+
+	// List content changed (transform filter), generate patch or snapshot
+	if noPatch || len(cache.Objects) == 0 {
+		data, err := meta.Encode(cache.Objects)
+		if err != nil {
+			return BroadcastResult{Skip: true}
+		}
+		return BroadcastResult{Data: data, Snapshot: true}
+	}
+
+	// Generate replace patch for changed content
+	return generateListResult(cache.Objects, "replace", 0, &cache.Objects[0], noPatch)
 }
 
 // processListDel handles delete operations on list caches
@@ -292,6 +311,24 @@ func removeFromList(list []meta.Object, obj meta.Object) ([]meta.Object, int, bo
 		}
 	}
 	return list, -1, false
+}
+
+// listsEqual checks if two object lists have the same content.
+// Used to detect if a filter actually changed the data.
+func listsEqual(a, b []meta.Object) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Path != b[i].Path || a[i].Created != b[i].Created {
+			return false
+		}
+		// Compare Data content
+		if string(a[i].Data) != string(b[i].Data) {
+			return false
+		}
+	}
+	return true
 }
 
 // generateListPatch creates a JSON patch for a single list operation.

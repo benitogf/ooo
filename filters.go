@@ -9,6 +9,20 @@ import (
 	"github.com/benitogf/ooo/ui"
 )
 
+// LimitFilterConfig is an alias for filters.LimitFilterConfig for convenience.
+// Use this with LimitFilter to configure limit and sort order.
+type LimitFilterConfig = filters.LimitFilterConfig
+
+// LimitFunc is an alias for filters.LimitFunc for convenience.
+// Use this to provide a dynamic limit function that is called each time the limit is needed.
+type LimitFunc = filters.LimitFunc
+
+// Order constants for LimitFilterConfig
+const (
+	OrderDesc = filters.OrderDesc // Most recent first (default)
+	OrderAsc  = filters.OrderAsc  // Oldest first
+)
+
 // checkReservedPath panics if the path conflicts with reserved UI paths
 func checkReservedPath(path string) {
 	// Extract the first segment of the path
@@ -93,13 +107,16 @@ func (server *Server) OpenFilter(name string) {
 // a maximum number of entries. Uses a ReadListFilter (meta-based) to limit the view
 // (so clients never see more than limit items) and AfterWrite to delete old entries.
 // Also adds write and delete filters to allow creating and deleting items.
-func (server *Server) LimitFilter(path string, limit int) {
+func (server *Server) LimitFilter(path string, cfg filters.LimitFilterConfig) {
 	checkReservedPath(path)
-	lf, err := filters.NewLimitFilter(path, limit, server.Storage)
+	lf, err := filters.NewLimitFilter(path, cfg, server.Storage)
 	if err != nil {
 		panic(err)
 	}
+	server.registerLimitFilter(path, lf)
+}
 
+func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter) {
 	// Allow writes and deletes
 	server.filters.AddWrite(path, NoopFilter)
 	server.filters.AddDelete(path, NoopHook)

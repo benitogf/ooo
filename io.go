@@ -29,6 +29,9 @@ func GetList[T any](server *Server, path string) ([]client.Meta[T], error) {
 		return result, err
 	}
 
+	// Apply ReadListFilter if registered for this path
+	objs, _ = server.filters.ReadList.Check(path, objs, false)
+
 	for _, obj := range objs {
 		var item T
 		err = json.Unmarshal([]byte(obj.Data), &item)

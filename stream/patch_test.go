@@ -334,6 +334,225 @@ func TestRemoveFromList(t *testing.T) {
 	})
 }
 
+// Test for LimitFilter behavior: when an item is added and another is pushed out
+func TestProcessBroadcast_ListAddWithLimit(t *testing.T) {
+	// Create a filter that limits to 3 items, keeping newest (sorted desc for display)
+	limitFilter := func(key string, objs []meta.Object) ([]meta.Object, error) {
+		// Sort by Created descending (newest first)
+		for i := 0; i < len(objs)-1; i++ {
+			for j := i + 1; j < len(objs); j++ {
+				if objs[i].Created < objs[j].Created {
+					objs[i], objs[j] = objs[j], objs[i]
+				}
+			}
+		}
+		// Limit to 3
+		if len(objs) > 3 {
+			return objs[:3], nil
+		}
+		return objs, nil
+	}
+
+	// Start with 3 items at limit
+	cache := &Cache{
+		Objects: []meta.Object{
+			{Path: "items/3", Created: 300, Data: json.RawMessage(`"item3"`)},
+			{Path: "items/2", Created: 200, Data: json.RawMessage(`"item2"`)},
+			{Path: "items/1", Created: 100, Data: json.RawMessage(`"item1"`)},
+		},
+	}
+
+	// Add a new item that is newest (should push out oldest)
+	newObj := &meta.Object{
+		Path:    "items/4",
+		Created: 400,
+		Data:    json.RawMessage(`"item4"`),
+	}
+
+	result := ProcessBroadcast(cache, "items/*", "set", newObj, noopFilterObject, limitFilter, false)
+
+	if result.Skip {
+		t.Error("expected result not to be skipped when new item stays in list")
+	}
+	if len(cache.Objects) != 3 {
+		t.Errorf("expected 3 items in cache, got %d", len(cache.Objects))
+	}
+	// Newest item should be in the list
+	found := false
+	for _, obj := range cache.Objects {
+		if obj.Path == "items/4" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("new item should be in the filtered list")
+	}
+}
+
+// Test for LimitFilter behavior with OrderAsc: newest item pushed out (edge case)
+func TestProcessBroadcast_ListAddWithLimitOrderAsc(t *testing.T) {
+	// Create a filter that limits to 3 items, sorted asc (oldest first for display)
+	// but KEEPS the newest items (correct behavior after fix)
+	limitFilter := func(key string, objs []meta.Object) ([]meta.Object, error) {
+		// Sort by Created descending to find newest
+		for i := 0; i < len(objs)-1; i++ {
+			for j := i + 1; j < len(objs); j++ {
+				if objs[i].Created < objs[j].Created {
+					objs[i], objs[j] = objs[j], objs[i]
+				}
+			}
+		}
+		// Limit to 3 newest
+		if len(objs) > 3 {
+			objs = objs[:3]
+		}
+		// Re-sort ascending for display
+		for i := 0; i < len(objs)-1; i++ {
+			for j := i + 1; j < len(objs); j++ {
+				if objs[i].Created > objs[j].Created {
+					objs[i], objs[j] = objs[j], objs[i]
+				}
+			}
+		}
+		return objs, nil
+	}
+
+	// Start with 3 items at limit (sorted asc)
+	cache := &Cache{
+		Objects: []meta.Object{
+			{Path: "items/1", Created: 100, Data: json.RawMessage(`"item1"`)},
+			{Path: "items/2", Created: 200, Data: json.RawMessage(`"item2"`)},
+			{Path: "items/3", Created: 300, Data: json.RawMessage(`"item3"`)},
+		},
+	}
+
+	// Add a new item that is newest
+	newObj := &meta.Object{
+		Path:    "items/4",
+		Created: 400,
+		Data:    json.RawMessage(`"item4"`),
+	}
+
+	result := ProcessBroadcast(cache, "items/*", "set", newObj, noopFilterObject, limitFilter, false)
+
+	if result.Skip {
+		t.Error("expected result not to be skipped when newest item is added")
+	}
+	if len(cache.Objects) != 3 {
+		t.Errorf("expected 3 items in cache, got %d", len(cache.Objects))
+	}
+	// New item should be at the end (sorted asc, newest last)
+	if cache.Objects[2].Path != "items/4" {
+		t.Errorf("expected items/4 at end (newest), got %s", cache.Objects[2].Path)
+	}
+	// Oldest item should be pushed out
+	for _, obj := range cache.Objects {
+		if obj.Path == "items/1" {
+			t.Error("oldest item (items/1) should have been pushed out")
+		}
+	}
+}
+
+// Test for the Skip case: item added but immediately pushed out by limit
+func TestProcessBroadcast_ListAddPushedOutByLimit(t *testing.T) {
+	// Create a filter that keeps only items with Created >= 200
+	// This simulates a case where the new item doesn't pass the filter
+	limitFilter := func(key string, objs []meta.Object) ([]meta.Object, error) {
+		filtered := make([]meta.Object, 0)
+		for _, obj := range objs {
+			if obj.Created >= 200 {
+				filtered = append(filtered, obj)
+			}
+		}
+		return filtered, nil
+	}
+
+	// Start with 2 items that pass the filter
+	cache := &Cache{
+		Objects: []meta.Object{
+			{Path: "items/2", Created: 200, Data: json.RawMessage(`"item2"`)},
+			{Path: "items/3", Created: 300, Data: json.RawMessage(`"item3"`)},
+		},
+	}
+
+	// Add an item with Created=100 that won't pass the filter
+	newObj := &meta.Object{
+		Path:    "items/1",
+		Created: 100,
+		Data:    json.RawMessage(`"item1"`),
+	}
+
+	result := ProcessBroadcast(cache, "items/*", "set", newObj, noopFilterObject, limitFilter, false)
+
+	// Item was filtered out but nothing else changed, should skip
+	if !result.Skip {
+		t.Error("expected skip when item is immediately filtered out")
+	}
+	if len(cache.Objects) != 2 {
+		t.Errorf("expected 2 items in cache (unchanged), got %d", len(cache.Objects))
+	}
+}
+
+// Test add+remove patch generation when at limit
+func TestProcessBroadcast_ListAddRemovePatch(t *testing.T) {
+	// Create a filter that limits to 3 items (newest first)
+	limitFilter := func(key string, objs []meta.Object) ([]meta.Object, error) {
+		// Sort by Created descending
+		for i := 0; i < len(objs)-1; i++ {
+			for j := i + 1; j < len(objs); j++ {
+				if objs[i].Created < objs[j].Created {
+					objs[i], objs[j] = objs[j], objs[i]
+				}
+			}
+		}
+		if len(objs) > 3 {
+			return objs[:3], nil
+		}
+		return objs, nil
+	}
+
+	// Start with exactly 3 items
+	cache := &Cache{
+		Objects: []meta.Object{
+			{Path: "items/3", Created: 300, Data: json.RawMessage(`"item3"`)},
+			{Path: "items/2", Created: 200, Data: json.RawMessage(`"item2"`)},
+			{Path: "items/1", Created: 100, Data: json.RawMessage(`"item1"`)},
+		},
+	}
+
+	// Add a new newest item
+	newObj := &meta.Object{
+		Path:    "items/4",
+		Created: 400,
+		Data:    json.RawMessage(`"item4"`),
+	}
+
+	result := ProcessBroadcast(cache, "items/*", "set", newObj, noopFilterObject, limitFilter, false)
+
+	if result.Skip {
+		t.Error("expected add+remove result, not skip")
+	}
+	if result.Snapshot {
+		t.Error("expected patch, not snapshot")
+	}
+	// Verify the patch contains both add and remove operations
+	var patch []map[string]interface{}
+	if err := json.Unmarshal(result.Data, &patch); err != nil {
+		t.Fatalf("failed to unmarshal patch: %v", err)
+	}
+	if len(patch) != 2 {
+		t.Errorf("expected 2 operations (add+remove), got %d", len(patch))
+	}
+	// First operation should be remove, second should be add
+	if patch[0]["op"] != "remove" {
+		t.Errorf("expected first op to be 'remove', got %v", patch[0]["op"])
+	}
+	if patch[1]["op"] != "add" {
+		t.Errorf("expected second op to be 'add', got %v", patch[1]["op"])
+	}
+}
+
 func TestGenerateObjectPatch(t *testing.T) {
 	t.Run("nil old object", func(t *testing.T) {
 		newObj := &meta.Object{Path: "test", Created: 100}

@@ -1093,8 +1093,13 @@ server.<span class="function">WriteFilter</span>(<span class="string">"books/*"<
 })
 
 <span class="comment">// Limit list to N most recent entries (auto-deletes oldest)</span>
-<span class="comment">// Includes ReadListFilter, WriteFilter, DeleteFilter, AfterWriteFilter</span>
-server.<span class="function">LimitFilter</span>(<span class="string">"logs/*"</span>, <span class="type">100</span>)</code></pre>
+server.<span class="function">LimitFilter</span>(<span class="string">"logs/*"</span>, filters.LimitFilterConfig{Limit: <span class="type">100</span>})
+
+<span class="comment">// With ascending order (oldest first in results)</span>
+server.<span class="function">LimitFilter</span>(<span class="string">"events/*"</span>, filters.LimitFilterConfig{
+    Limit: <span class="type">50</span>,
+    Order: filters.OrderAsc,
+})</code></pre>
       </div>
     </div>
   </section>
@@ -1102,7 +1107,8 @@ server.<span class="function">LimitFilter</span>(<span class="string">"logs/*"</
   <section id="endpoints" class="section">
     <div class="container">
       <h2 class="section-title">Custom Endpoints</h2>
-      <p class="section-subtitle">Register custom HTTP endpoints with typed schemas visible in the storage explorer UI.</p>
+      <p class="section-subtitle">Register custom HTTP endpoints with typed schemas visible in the storage explorer UI.
+      </p>
 
       <table class="api-table" style="margin-bottom: 32px;">
         <thead>

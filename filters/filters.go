@@ -360,17 +360,26 @@ func (f *Filters) Paths() []string {
 
 // FilterInfo contains detailed information about a filter path
 type FilterInfo struct {
-	Path      string `json:"path"`
-	Type      string `json:"type"`            // "open", "read-only", "write-only", "limit", "custom"
-	CanRead   bool   `json:"canRead"`         // Has read filter (object or list)
-	CanWrite  bool   `json:"canWrite"`        // Has write filter
-	CanDelete bool   `json:"canDelete"`       // Has delete filter
-	IsGlob    bool   `json:"isGlob"`          // Path contains wildcard
-	Limit     int    `json:"limit,omitempty"` // Limit value if it's a limit filter
+	Path         string `json:"path"`
+	Type         string `json:"type"`                   // "open", "read-only", "write-only", "limit", "custom"
+	CanRead      bool   `json:"canRead"`                // Has read filter (object or list)
+	CanWrite     bool   `json:"canWrite"`               // Has write filter
+	CanDelete    bool   `json:"canDelete"`              // Has delete filter
+	IsGlob       bool   `json:"isGlob"`                 // Path contains wildcard
+	Limit        int    `json:"limit,omitempty"`        // Limit value if it's a limit filter
+	LimitDynamic bool   `json:"limitDynamic,omitempty"` // True if limit uses dynamic function
+	Order        string `json:"order,omitempty"`        // Sort order for limit filters ("desc" or "asc")
+}
+
+// LimitFilterInfo stores limit filter metadata
+type LimitFilterInfo struct {
+	Limit        int
+	LimitDynamic bool
+	Order        string
 }
 
 // PathsInfo returns detailed information about all registered filter paths.
-func (f *Filters) PathsInfo(limitFilters map[string]int) []FilterInfo {
+func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInfo {
 	pathInfo := make(map[string]*FilterInfo)
 
 	// Track write filters
@@ -416,9 +425,11 @@ func (f *Filters) PathsInfo(limitFilters map[string]int) []FilterInfo {
 	result := make([]FilterInfo, 0, len(pathInfo))
 	for path, info := range pathInfo {
 		// Check if it's a limit filter
-		if limit, ok := limitFilters[path]; ok {
+		if lf, ok := limitFilters[path]; ok {
 			info.Type = "limit"
-			info.Limit = limit
+			info.Limit = lf.Limit
+			info.LimitDynamic = lf.LimitDynamic
+			info.Order = lf.Order
 		} else if info.CanRead && info.CanWrite && info.CanDelete {
 			info.Type = "open"
 		} else if info.CanRead && !info.CanWrite {

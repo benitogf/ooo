@@ -50,13 +50,15 @@ type ServerInfo struct {
 
 // FilterInfo contains detailed information about a filter path
 type FilterInfo struct {
-	Path      string `json:"path"`
-	Type      string `json:"type"`
-	CanRead   bool   `json:"canRead"`
-	CanWrite  bool   `json:"canWrite"`
-	CanDelete bool   `json:"canDelete"`
-	IsGlob    bool   `json:"isGlob"`
-	Limit     int    `json:"limit,omitempty"`
+	Path         string `json:"path"`
+	Type         string `json:"type"`
+	CanRead      bool   `json:"canRead"`
+	CanWrite     bool   `json:"canWrite"`
+	CanDelete    bool   `json:"canDelete"`
+	IsGlob       bool   `json:"isGlob"`
+	Limit        int    `json:"limit,omitempty"`
+	LimitDynamic bool   `json:"limitDynamic,omitempty"` // true if limit uses dynamic function
+	Order        string `json:"order,omitempty"`        // "desc" or "asc" for limit filters
 }
 
 // FiltersInfo contains filter paths exposed to the explorer

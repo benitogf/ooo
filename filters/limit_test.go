@@ -22,16 +22,16 @@ func TestLimitFilter_Errors(t *testing.T) {
 
 	// Test limit must be positive - should panic
 	require.Panics(t, func() {
-		server.LimitFilter("test/*", 0)
+		server.LimitFilter("test/*", filters.LimitFilterConfig{Limit: 0})
 	})
 
 	require.Panics(t, func() {
-		server.LimitFilter("test/*", -1)
+		server.LimitFilter("test/*", filters.LimitFilterConfig{Limit: -1})
 	})
 
 	// Test path must be glob - should panic
 	require.Panics(t, func() {
-		server.LimitFilter("test/specific", 5)
+		server.LimitFilter("test/specific", filters.LimitFilterConfig{Limit: 5})
 	})
 }
 
@@ -43,7 +43,7 @@ func TestLimitFilter_Valid(t *testing.T) {
 
 	// Should not panic
 	require.NotPanics(t, func() {
-		server.LimitFilter("test/*", 5)
+		server.LimitFilter("test/*", filters.LimitFilterConfig{Limit: 5})
 	})
 }
 
@@ -53,7 +53,7 @@ func TestLimitFilter_Check_UnderLimit(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	lf, err := filters.NewLimitFilter("items/*", 5, server.Storage)
+	lf, err := filters.NewLimitFilter("items/*", filters.LimitFilterConfig{Limit: 5}, server.Storage)
 	require.NoError(t, err)
 
 	// Add 3 items (under limit of 5)
@@ -79,7 +79,7 @@ func TestLimitFilter_ViaHTTP(t *testing.T) {
 	defer server.Close(os.Interrupt)
 
 	// Use server.LimitFilter which registers ReadFilter + AfterWrite
-	server.LimitFilter("logs/*", 3)
+	server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 3})
 	server.OpenFilter("logs/*")
 
 	// Add 5 items via HTTP - ReadFilter limits view, AfterWrite cleans up
@@ -103,7 +103,7 @@ func TestLimitFilter_Check_AtLimit(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	lf, err := filters.NewLimitFilter("items/*", 3, server.Storage)
+	lf, err := filters.NewLimitFilter("items/*", filters.LimitFilterConfig{Limit: 3}, server.Storage)
 	require.NoError(t, err)
 
 	// Add 3 items (at limit)
@@ -143,7 +143,7 @@ func TestLimitFilter_Check_OverLimit(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	lf, err := filters.NewLimitFilter("items/*", 3, server.Storage)
+	lf, err := filters.NewLimitFilter("items/*", filters.LimitFilterConfig{Limit: 3}, server.Storage)
 	require.NoError(t, err)
 
 	// Add 4 items (over limit of 3)
@@ -170,7 +170,7 @@ func TestLimitFilter_ManualCheck(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	lf, err := filters.NewLimitFilter("logs/*", 3, server.Storage)
+	lf, err := filters.NewLimitFilter("logs/*", filters.LimitFilterConfig{Limit: 3}, server.Storage)
 	require.NoError(t, err)
 
 	// Open the filter for the path
@@ -198,7 +198,7 @@ func TestLimitFilter_SequentialAccess(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	lf, err := filters.NewLimitFilter("concurrent/*", 10, server.Storage)
+	lf, err := filters.NewLimitFilter("concurrent/*", filters.LimitFilterConfig{Limit: 10}, server.Storage)
 	require.NoError(t, err)
 
 	// Sequential writes with limit checks
@@ -220,7 +220,7 @@ func TestLimitFilter_EmptyList(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	lf, err := filters.NewLimitFilter("empty/*", 5, server.Storage)
+	lf, err := filters.NewLimitFilter("empty/*", filters.LimitFilterConfig{Limit: 5}, server.Storage)
 	require.NoError(t, err)
 
 	// Check on empty list should not delete anything
@@ -230,4 +230,152 @@ func TestLimitFilter_EmptyList(t *testing.T) {
 	items, err := server.Storage.GetList("empty/*")
 	require.NoError(t, err)
 	require.Len(t, items, 0)
+}
+
+func TestLimitFilter_OrderDesc(t *testing.T) {
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Default order is descending (most recent first)
+	lf, err := filters.NewLimitFilter("items/*", filters.LimitFilterConfig{Limit: 3}, server.Storage)
+	require.NoError(t, err)
+	require.Equal(t, filters.OrderDesc, lf.Order())
+
+	// Add items with known order
+	for i := range 5 {
+		data, _ := json.Marshal(map[string]int{"value": i})
+		_, err := server.Storage.Set(key.Build("items/*"), data)
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+
+	// Get all items first
+	allItems, err := server.Storage.GetList("items/*")
+	require.NoError(t, err)
+	require.Len(t, allItems, 5)
+
+	// Apply filter - should return 3 most recent, sorted descending
+	filtered, err := lf.ReadListFilter("items/*", allItems)
+	require.NoError(t, err)
+	require.Len(t, filtered, 3)
+
+	// Verify descending order (most recent first)
+	require.True(t, filtered[0].Created > filtered[1].Created)
+	require.True(t, filtered[1].Created > filtered[2].Created)
+}
+
+func TestLimitFilter_OrderAsc(t *testing.T) {
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Create with ascending order
+	lf, err := filters.NewLimitFilter("items/*", filters.LimitFilterConfig{
+		Limit: 3,
+		Order: filters.OrderAsc,
+	}, server.Storage)
+	require.NoError(t, err)
+	require.Equal(t, filters.OrderAsc, lf.Order())
+
+	// Add items with known order
+	for i := range 5 {
+		data, _ := json.Marshal(map[string]int{"value": i})
+		_, err := server.Storage.Set(key.Build("items/*"), data)
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+
+	// Get all items
+	allItems, err := server.Storage.GetList("items/*")
+	require.NoError(t, err)
+	require.Len(t, allItems, 5)
+
+	// Apply filter - should return 3 most recent, sorted ascending
+	filtered, err := lf.ReadListFilter("items/*", allItems)
+	require.NoError(t, err)
+	require.Len(t, filtered, 3)
+
+	// Verify ascending order (oldest of the kept items first)
+	require.True(t, filtered[0].Created < filtered[1].Created)
+	require.True(t, filtered[1].Created < filtered[2].Created)
+}
+
+func TestLimitFilter_ViaServer_OrderAsc(t *testing.T) {
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Use server.LimitFilter for ascending order
+	server.LimitFilter("logs/*", filters.LimitFilterConfig{
+		Limit: 3,
+		Order: filters.OrderAsc,
+	})
+
+	// Add 5 items via storage
+	for i := range 5 {
+		data, _ := json.Marshal(map[string]string{"log": "entry " + strconv.Itoa(i)})
+		_, err := server.Storage.Set(key.Build("logs/*"), data)
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+
+	// Should have 5 items in storage (no cleanup yet)
+	items, err := server.Storage.GetList("logs/*")
+	require.NoError(t, err)
+	require.Equal(t, 5, len(items))
+}
+
+func TestLimitFilter_DynamicLimitFunc(t *testing.T) {
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Dynamic limit that starts at 3 and can be changed
+	dynamicLimit := 3
+
+	lf, err := filters.NewLimitFilter("items/*", filters.LimitFilterConfig{
+		LimitFunc: func() int { return dynamicLimit },
+	}, server.Storage)
+	require.NoError(t, err)
+
+	// Add 5 items
+	for i := range 5 {
+		data, _ := json.Marshal(map[string]int{"value": i})
+		_, err := server.Storage.Set(key.Build("items/*"), data)
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+
+	// Get all items
+	allItems, err := server.Storage.GetList("items/*")
+	require.NoError(t, err)
+	require.Len(t, allItems, 5)
+
+	// Apply filter with limit=3
+	filtered, err := lf.ReadListFilter("items/*", allItems)
+	require.NoError(t, err)
+	require.Len(t, filtered, 3)
+
+	// Change dynamic limit to 5
+	dynamicLimit = 5
+	filtered, err = lf.ReadListFilter("items/*", allItems)
+	require.NoError(t, err)
+	require.Len(t, filtered, 5)
+
+	// Change dynamic limit to 2
+	dynamicLimit = 2
+	filtered, err = lf.ReadListFilter("items/*", allItems)
+	require.NoError(t, err)
+	require.Len(t, filtered, 2)
+
+	// Check should delete based on current dynamic limit
+	lf.Check()
+	items, err := server.Storage.GetList("items/*")
+	require.NoError(t, err)
+	require.Len(t, items, 2)
 }
