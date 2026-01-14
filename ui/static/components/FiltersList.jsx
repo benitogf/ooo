@@ -1,7 +1,8 @@
 function FiltersList({ clockConnected }) {
   const { useState, useEffect, useCallback, useRef } = React;
-  const { IconFilter, IconTrash, IconRefresh } = window.Icons;
+  const { IconFilter, IconTrash, IconRefresh, IconFileText } = window.Icons;
   const ConfirmModal = window.ConfirmModal;
+  const SchemaModal = window.SchemaModal;
 
   const [filtersInfo, setFiltersInfo] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -10,6 +11,8 @@ function FiltersList({ clockConnected }) {
   const [filterToClear, setFilterToClear] = useState('');
   const [modalLoading, setModalLoading] = useState(false);
   const [modalError, setModalError] = useState('');
+  const [schemaModalVisible, setSchemaModalVisible] = useState(false);
+  const [schemaFilter, setSchemaFilter] = useState(null);
   const prevConnected = useRef(clockConnected);
 
   const loadData = useCallback(async () => {
@@ -97,6 +100,47 @@ function FiltersList({ clockConnected }) {
     return <span className="badge-custom">CUSTOM</span>;
   };
 
+  const getFilterDescription = (filter) => {
+    const { descWrite, descRead, descDelete, descAfterWrite, descLimit } = filter;
+    const descriptions = [descWrite, descRead, descDelete, descAfterWrite, descLimit].filter(Boolean);
+    
+    if (descriptions.length === 0) return null;
+    
+    // If all descriptions are the same, show just one
+    const uniqueDescs = [...new Set(descriptions)];
+    if (uniqueDescs.length === 1) {
+      return <span className="filter-desc">{uniqueDescs[0]}</span>;
+    }
+    
+    // Multiple different descriptions - show per-type
+    return (
+      <div className="filter-desc-multi">
+        {descWrite && <span title="Write"><strong>W:</strong> {descWrite}</span>}
+        {descRead && <span title="Read"><strong>R:</strong> {descRead}</span>}
+        {descDelete && <span title="Delete"><strong>D:</strong> {descDelete}</span>}
+        {descAfterWrite && <span title="After Write"><strong>AW:</strong> {descAfterWrite}</span>}
+        {descLimit && <span title="Limit"><strong>L:</strong> {descLimit}</span>}
+      </div>
+    );
+  };
+
+  const hasAnyDescription = filtersInfo.some(f => 
+    f.descWrite || f.descRead || f.descDelete || f.descAfterWrite || f.descLimit
+  );
+
+  const hasAnySchema = filtersInfo.some(f => f.schema && Object.keys(f.schema).length > 0);
+
+  const openSchemaModal = (e, filter) => {
+    e.stopPropagation();
+    setSchemaFilter(filter);
+    setSchemaModalVisible(true);
+  };
+
+  const closeSchemaModal = () => {
+    setSchemaModalVisible(false);
+    setSchemaFilter(null);
+  };
+
   const confirmClear = (e, path) => {
     e.stopPropagation();
     setFilterToClear(path);
@@ -161,13 +205,15 @@ function FiltersList({ clockConnected }) {
               <th>Filter Path</th>
               <th>Pattern</th>
               <th>Access</th>
+              {hasAnyDescription && <th>Description</th>}
+              {hasAnySchema && <th className="actions-col"><IconFileText /></th>}
               <th className="actions-col"><IconTrash color="#3a4a5a" /></th>
             </tr>
           </thead>
           <tbody>
             {filteredFilters.length === 0 ? (
               <tr>
-                <td colSpan="4">
+                <td colSpan={4 + (hasAnyDescription ? 1 : 0) + (hasAnySchema ? 1 : 0)}>
                   <div className="empty-state">
                     <IconFilter />
                     <div>No filters registered</div>
@@ -189,6 +235,18 @@ function FiltersList({ clockConnected }) {
                     </span>
                   </td>
                   <td>{getFilterTypeBadge(filter)}</td>
+                  {hasAnyDescription && <td>{getFilterDescription(filter)}</td>}
+                  {hasAnySchema && (
+                    <td className="actions-col">
+                      <div className="actions">
+                        {filter.schema && Object.keys(filter.schema).length > 0 && (
+                          <button className="btn ghost" title="View Schema" onClick={(e) => openSchemaModal(e, filter)}>
+                            <IconFileText />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                   <td className="actions-col">
                     <div className="actions">
                       {filter.canDelete && (
@@ -215,6 +273,14 @@ function FiltersList({ clockConnected }) {
         onCancel={closeModal}
         loading={modalLoading}
         error={modalError}
+      />
+
+      <SchemaModal
+        visible={schemaModalVisible}
+        schema={schemaFilter?.schema}
+        filterPath={schemaFilter?.path}
+        description={schemaFilter ? [schemaFilter.descWrite, schemaFilter.descRead, schemaFilter.descDelete, schemaFilter.descAfterWrite, schemaFilter.descLimit].filter(Boolean).join(' | ') : ''}
+        onClose={closeSchemaModal}
       />
     </div>
   );

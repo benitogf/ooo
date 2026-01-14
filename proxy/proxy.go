@@ -47,6 +47,8 @@ type Config struct {
 	// Optional capability overrides. If nil, all capabilities are true.
 	// Use &Capabilities{Read: true, Write: false, Delete: false} to restrict.
 	Capabilities *Capabilities
+	// Description for UI display
+	Description string
 }
 
 // Validate checks that required fields are set.
@@ -460,11 +462,12 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Register for UI visibility
 	server.RegisterProxy(ui.ProxyInfo{
-		LocalPath: localPath,
-		Type:      "single",
-		CanRead:   cfg.canRead(),
-		CanWrite:  cfg.canWrite(),
-		CanDelete: cfg.canDelete(),
+		LocalPath:   localPath,
+		Type:        "single",
+		CanRead:     cfg.canRead(),
+		CanWrite:    cfg.canWrite(),
+		CanDelete:   cfg.canDelete(),
+		Description: cfg.Description,
 	})
 
 	// Register cleanup function to be called when server closes
@@ -546,11 +549,12 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Register for UI visibility
 	server.RegisterProxy(ui.ProxyInfo{
-		LocalPath: localPath,
-		Type:      "list",
-		CanRead:   cfg.canRead(),
-		CanWrite:  cfg.canWrite(),
-		CanDelete: cfg.canDelete(),
+		LocalPath:   localPath,
+		Type:        "list",
+		CanRead:     cfg.canRead(),
+		CanWrite:    cfg.canWrite(),
+		CanDelete:   cfg.canDelete(),
+		Description: cfg.Description,
 	})
 
 	// Register cleanup function to be called when server closes
@@ -768,11 +772,12 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Register for UI visibility
 	server.RegisterProxy(ui.ProxyInfo{
-		LocalPath: localPath,
-		Type:      "vars",
-		CanRead:   cfg.canRead(),
-		CanWrite:  cfg.canWrite(),
-		CanDelete: cfg.canDelete(),
+		LocalPath:   localPath,
+		Type:        "vars",
+		CanRead:     cfg.canRead(),
+		CanWrite:    cfg.canWrite(),
+		CanDelete:   cfg.canDelete(),
+		Description: cfg.Description,
 	})
 
 	return nil
@@ -796,6 +801,8 @@ type NodeFilterConfig struct {
 	Subscribe *client.SubscribeConfig
 	// Capabilities overrides (if nil, all are true)
 	Capabilities *Capabilities
+	// Description for UI display
+	Description string
 }
 
 // RouteNodeFilter sets up a proxy route that looks up nodes from storage and routes
@@ -840,6 +847,7 @@ func RouteNodeFilter(server *ooo.Server, cfg NodeFilterConfig) error {
 		},
 		Subscribe:    cfg.Subscribe,
 		Capabilities: cfg.Capabilities,
+		Description:  cfg.Description,
 	}
 
 	return Route(server, cfg.LocalKey, proxyCfg)
@@ -858,6 +866,8 @@ type NodeListFilterConfig struct {
 	Subscribe *client.SubscribeConfig
 	// Capabilities overrides (if nil, all are true)
 	Capabilities *Capabilities
+	// Description for UI display
+	Description string
 }
 
 // RouteNodeListFilter sets up a proxy route that looks up nodes from storage and routes
@@ -945,6 +955,7 @@ func RouteNodeListFilter(server *ooo.Server, cfg NodeListFilterConfig) error {
 		},
 		Subscribe:    cfg.Subscribe,
 		Capabilities: cfg.Capabilities,
+		Description:  cfg.Description,
 	}
 
 	return RouteList(server, cfg.LocalKey, proxyCfg)

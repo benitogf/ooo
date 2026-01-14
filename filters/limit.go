@@ -30,9 +30,11 @@ type LimitFunc func() int
 
 // LimitFilterConfig contains configuration for a LimitFilter
 type LimitFilterConfig struct {
-	Limit     int       // Maximum number of entries (used if LimitFunc is nil)
-	LimitFunc LimitFunc // Dynamic limit function (takes precedence over Limit if set)
-	Order     Order     // Sort order for results (default: OrderDesc)
+	Limit       int       // Maximum number of entries (used if LimitFunc is nil)
+	LimitFunc   LimitFunc // Dynamic limit function (takes precedence over Limit if set)
+	Order       Order     // Sort order for results (default: OrderDesc)
+	Description string    // Description for UI display
+	Schema      any       // Go type for the data schema (used for UI display)
 }
 
 // Database interface for limit filter operations

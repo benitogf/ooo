@@ -9,7 +9,6 @@ import (
 	"log"
 
 	"github.com/benitogf/ooo"
-	"github.com/benitogf/ooo/filters"
 )
 
 func main() {
@@ -18,10 +17,10 @@ func main() {
 
 	// Keep only the 100 most recent log entries
 	// When a new entry is added and count > 100, oldest is deleted
-	server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 100})
+	server.LimitFilter("logs/*", ooo.LimitFilterConfig{Limit: 100})
 
 	// Keep only 50 most recent notifications per user
-	server.LimitFilter("notifications/*", filters.LimitFilterConfig{Limit: 50})
+	server.LimitFilter("notifications/*", ooo.LimitFilterConfig{Limit: 50})
 
 	log.Println("Server running with limit filters")
 	log.Println("POST /logs/* - capped at 100 entries")

@@ -1,6 +1,6 @@
 function KeyEditor({ keyPath, filterPath, isCreate }) {
-  const { useState, useEffect, useRef } = React;
-  const { IconChevronLeft, IconEye } = window.Icons;
+  const { useState, useEffect, useRef, useMemo } = React;
+  const { IconChevronLeft, IconEye, IconChevronDown, IconChevronRight, IconCopy, IconCheck } = window.Icons;
   const JsonEditorWrapper = window.JsonEditorWrapper;
   
   const [loading, setLoading] = useState(false);
@@ -8,6 +8,9 @@ function KeyEditor({ keyPath, filterPath, isCreate }) {
   const [status, setStatus] = useState({ type: '', message: '' });
   const [editorData, setEditorData] = useState(null);
   const [metadata, setMetadata] = useState({ created: 0, updated: 0 });
+  const [filterInfo, setFilterInfo] = useState(null);
+  const [schemaExpanded, setSchemaExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const editorRef = useRef(null);
 
   useEffect(() => {
@@ -18,8 +21,9 @@ function KeyEditor({ keyPath, filterPath, isCreate }) {
         .then(res => res.json())
         .then(data => {
           const info = (data.filters || []).find(f => 
-            f.path === checkPath || checkPath.match(new RegExp('^' + f.path.replace('*', '[^/]+') + '$'))
+            f.path === checkPath || checkPath.match(new RegExp('^' + f.path.replace(/\*/g, '[^/]+') + '$'))
           );
+          setFilterInfo(info);
           if (info) {
             if (info.type === 'read-only') {
               window.location.hash = '/storage/key/live/' + encodeURIComponent(keyPath) + (filterPath ? '?from=' + encodeURIComponent(filterPath) : '');
@@ -28,7 +32,7 @@ function KeyEditor({ keyPath, filterPath, isCreate }) {
             }
           }
         })
-        .catch(() => {});
+        .catch(() => setFilterInfo(null));
     }
   }, [keyPath, filterPath]);
 
@@ -157,6 +161,34 @@ function KeyEditor({ keyPath, filterPath, isCreate }) {
     }
   };
 
+  // Get merged description from filter info
+  const mergedDescription = useMemo(() => {
+    if (!filterInfo) return null;
+    const descriptions = [
+      filterInfo.descWrite,
+      filterInfo.descRead,
+      filterInfo.descDelete,
+      filterInfo.descAfterWrite,
+      filterInfo.descLimit
+    ].filter(Boolean);
+    if (descriptions.length === 0) return null;
+    const unique = [...new Set(descriptions)];
+    return unique.join(' | ');
+  }, [filterInfo]);
+
+  const hasSchema = filterInfo?.schema && Object.keys(filterInfo.schema).length > 0;
+
+  const copySchemaTemplate = async () => {
+    if (!hasSchema) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(filterInfo.schema, null, 2));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
+
   if (loading) {
     return (
       <div className="container">
@@ -200,7 +232,14 @@ function KeyEditor({ keyPath, filterPath, isCreate }) {
           <IconChevronLeft />
           Back
         </button>
-        <span className="edit-page-title">{isCreate ? 'Create Key' : 'Edit: ' + keyPath}</span>
+        <span className="edit-page-title">
+          {isCreate ? 'Create Key' : 'Edit: ' + keyPath}
+          {mergedDescription && (
+            <span className="filter-description-badge" title={mergedDescription}>
+              {mergedDescription.length > 50 ? mergedDescription.substring(0, 50) + '...' : mergedDescription}
+            </span>
+          )}
+        </span>
         {!isCreate && (
           <div className="header-right">
             <button className="btn secondary" onClick={switchToLive} title="Switch to Live Mode (Read-only)">
@@ -210,6 +249,32 @@ function KeyEditor({ keyPath, filterPath, isCreate }) {
           </div>
         )}
       </div>
+
+      {hasSchema && (
+        <div className="schema-section">
+          <div 
+            className="schema-section-header" 
+            onClick={() => setSchemaExpanded(!schemaExpanded)}
+          >
+            {schemaExpanded ? <IconChevronDown /> : <IconChevronRight />}
+            <span>Expected Schema</span>
+            <div className="schema-section-actions" onClick={(e) => e.stopPropagation()}>
+              <button 
+                className="btn ghost sm" 
+                onClick={copySchemaTemplate}
+                title="Copy schema template"
+              >
+                {copied ? <IconCheck /> : <IconCopy />}
+                {copied ? 'Copied!' : 'Copy'}
+              </button>
+            </div>
+          </div>
+          {schemaExpanded && (
+            <pre className="schema-preview">{JSON.stringify(filterInfo.schema, null, 2)}</pre>
+          )}
+        </div>
+      )}
+
       <div className="editor-wrapper">
         {editorData !== null && <JsonEditorWrapper content={editorData} editorRef={editorRef} />}
       </div>

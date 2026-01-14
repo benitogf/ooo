@@ -2,12 +2,129 @@ package filters
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/goccy/go-json"
 
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 )
+
+// reflectSchema generates a schema from a Go type using reflection
+func reflectSchema(t any) map[string]any {
+	if t == nil {
+		return nil
+	}
+
+	rv := reflect.ValueOf(t)
+	rt := rv.Type()
+
+	// Handle pointer types
+	if rt.Kind() == reflect.Ptr {
+		rt = rt.Elem()
+		rv = reflect.New(rt).Elem()
+	}
+
+	if rt.Kind() != reflect.Struct {
+		return map[string]any{"type": rt.Kind().String()}
+	}
+
+	schema := make(map[string]any)
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+
+		// Skip unexported fields
+		if !field.IsExported() {
+			continue
+		}
+
+		// Get JSON tag name
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "-" {
+			continue
+		}
+
+		parts := strings.Split(jsonTag, ",")
+		fieldName := field.Name
+		if parts[0] != "" {
+			fieldName = parts[0]
+		}
+
+		// Skip omitempty fields in request schema - they're optional
+		hasOmitempty := false
+		for _, opt := range parts[1:] {
+			if opt == "omitempty" {
+				hasOmitempty = true
+				break
+			}
+		}
+		if hasOmitempty {
+			continue
+		}
+
+		// Generate default value based on type
+		schema[fieldName] = defaultValue(field.Type)
+	}
+
+	return schema
+}
+
+// defaultValue returns a default value for a type
+func defaultValue(t reflect.Type) any {
+	switch t.Kind() {
+	case reflect.String:
+		return ""
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return 0
+	case reflect.Float32, reflect.Float64:
+		return 0.0
+	case reflect.Bool:
+		return false
+	case reflect.Slice:
+		elemDefault := defaultValue(t.Elem())
+		return []any{elemDefault}
+	case reflect.Map:
+		return map[string]any{}
+	case reflect.Struct:
+		// Recursively handle nested structs
+		nested := make(map[string]any)
+		for i := 0; i < t.NumField(); i++ {
+			field := t.Field(i)
+			if !field.IsExported() {
+				continue
+			}
+			jsonTag := field.Tag.Get("json")
+			if jsonTag == "-" {
+				continue
+			}
+			parts := strings.Split(jsonTag, ",")
+			fieldName := field.Name
+			if parts[0] != "" {
+				fieldName = parts[0]
+			}
+			// Skip omitempty fields
+			hasOmitempty := false
+			for _, opt := range parts[1:] {
+				if opt == "omitempty" {
+					hasOmitempty = true
+					break
+				}
+			}
+			if hasOmitempty {
+				continue
+			}
+			nested[fieldName] = defaultValue(field.Type)
+		}
+		return nested
+	case reflect.Ptr:
+		return defaultValue(t.Elem())
+	default:
+		return nil
+	}
+}
 
 var (
 	ErrRouteNotDefined     = fmt.Errorf("filters: route not defined")
@@ -34,32 +151,49 @@ type Block func(key string) error
 // Notify callback after a write is done
 type Notify func(key string)
 
+// Config provides optional configuration for filters.
+// Pass this as a variadic argument to filter methods to add metadata.
+type Config struct {
+	Description string
+	Schema      any // Go type for the data schema (used for UI display)
+}
+
 type block struct {
-	path  string
-	apply Block
+	path        string
+	apply       Block
+	description string
+	schema      any
 }
 
 // filter for write operations (JSON-based)
 type filter struct {
-	path  string
-	apply Apply
+	path        string
+	apply       Apply
+	description string
+	schema      any
 }
 
 // objectFilter for single meta.Object read operations
 type objectFilter struct {
-	path  string
-	apply ApplyObject
+	path        string
+	apply       ApplyObject
+	description string
+	schema      any
 }
 
 // listFilter for []meta.Object read operations
 type listFilter struct {
-	path  string
-	apply ApplyList
+	path        string
+	apply       ApplyList
+	description string
+	schema      any
 }
 
 type watch struct {
-	path  string
-	apply Notify
+	path        string
+	apply       Notify
+	description string
+	schema      any
 }
 
 // Filter for write operations (JSON-based)
@@ -85,42 +219,82 @@ type Filters struct {
 }
 
 // AddDelete adds a delete filter
-func (f *Filters) AddDelete(path string, apply Block) {
+func (f *Filters) AddDelete(path string, apply Block, cfg ...Config) {
+	var desc string
+	var schema any
+	if len(cfg) > 0 {
+		desc = cfg[0].Description
+		schema = cfg[0].Schema
+	}
 	f.Delete = append(f.Delete, block{
-		path:  path,
-		apply: apply,
+		path:        path,
+		apply:       apply,
+		description: desc,
+		schema:      schema,
 	})
 }
 
 // AddWrite adds a write filter
-func (f *Filters) AddWrite(path string, apply Apply) {
+func (f *Filters) AddWrite(path string, apply Apply, cfg ...Config) {
+	var desc string
+	var schema any
+	if len(cfg) > 0 {
+		desc = cfg[0].Description
+		schema = cfg[0].Schema
+	}
 	f.Write = append(f.Write, filter{
-		path:  path,
-		apply: apply,
+		path:        path,
+		apply:       apply,
+		description: desc,
+		schema:      schema,
 	})
 }
 
 // AddAfterWrite adds an after-write watcher
-func (f *Filters) AddAfterWrite(path string, apply Notify) {
+func (f *Filters) AddAfterWrite(path string, apply Notify, cfg ...Config) {
+	var desc string
+	var schema any
+	if len(cfg) > 0 {
+		desc = cfg[0].Description
+		schema = cfg[0].Schema
+	}
 	f.AfterWrite = append(f.AfterWrite, watch{
-		path:  path,
-		apply: apply,
+		path:        path,
+		apply:       apply,
+		description: desc,
+		schema:      schema,
 	})
 }
 
 // AddReadObject adds a read filter for single meta.Object
-func (f *Filters) AddReadObject(path string, apply ApplyObject) {
+func (f *Filters) AddReadObject(path string, apply ApplyObject, cfg ...Config) {
+	var desc string
+	var schema any
+	if len(cfg) > 0 {
+		desc = cfg[0].Description
+		schema = cfg[0].Schema
+	}
 	f.ReadObject = append(f.ReadObject, objectFilter{
-		path:  path,
-		apply: apply,
+		path:        path,
+		apply:       apply,
+		description: desc,
+		schema:      schema,
 	})
 }
 
 // AddReadList adds a read filter for []meta.Object
-func (f *Filters) AddReadList(path string, apply ApplyList) {
+func (f *Filters) AddReadList(path string, apply ApplyList, cfg ...Config) {
+	var desc string
+	var schema any
+	if len(cfg) > 0 {
+		desc = cfg[0].Description
+		schema = cfg[0].Schema
+	}
 	f.ReadList = append(f.ReadList, listFilter{
-		path:  path,
-		apply: apply,
+		path:        path,
+		apply:       apply,
+		description: desc,
+		schema:      schema,
 	})
 }
 
@@ -148,17 +322,17 @@ func NoopListFilter(key string, objs []meta.Object) ([]meta.Object, error) {
 }
 
 // AddOpenObject adds noop filters for single object paths
-func (f *Filters) AddOpenObject(name string) {
-	f.AddWrite(name, NoopFilter)
-	f.AddReadObject(name, NoopObjectFilter)
-	f.AddDelete(name, NoopHook)
+func (f *Filters) AddOpenObject(name string, cfg ...Config) {
+	f.AddWrite(name, NoopFilter, cfg...)
+	f.AddReadObject(name, NoopObjectFilter, cfg...)
+	f.AddDelete(name, NoopHook, cfg...)
 }
 
 // AddOpenList adds noop filters for list paths
-func (f *Filters) AddOpenList(name string) {
-	f.AddWrite(name, NoopFilter)
-	f.AddReadList(name, NoopListFilter)
-	f.AddDelete(name, NoopHook)
+func (f *Filters) AddOpenList(name string, cfg ...Config) {
+	f.AddWrite(name, NoopFilter, cfg...)
+	f.AddReadList(name, NoopListFilter, cfg...)
+	f.AddDelete(name, NoopHook, cfg...)
 }
 
 // findMatch returns the index of the first filter that matches the given path.
@@ -360,15 +534,21 @@ func (f *Filters) Paths() []string {
 
 // FilterInfo contains detailed information about a filter path
 type FilterInfo struct {
-	Path         string `json:"path"`
-	Type         string `json:"type"`                   // "open", "read-only", "write-only", "limit", "custom"
-	CanRead      bool   `json:"canRead"`                // Has read filter (object or list)
-	CanWrite     bool   `json:"canWrite"`               // Has write filter
-	CanDelete    bool   `json:"canDelete"`              // Has delete filter
-	IsGlob       bool   `json:"isGlob"`                 // Path contains wildcard
-	Limit        int    `json:"limit,omitempty"`        // Limit value if it's a limit filter
-	LimitDynamic bool   `json:"limitDynamic,omitempty"` // True if limit uses dynamic function
-	Order        string `json:"order,omitempty"`        // Sort order for limit filters ("desc" or "asc")
+	Path           string         `json:"path"`
+	Type           string         `json:"type"`                     // "open", "read-only", "write-only", "limit", "custom"
+	CanRead        bool           `json:"canRead"`                  // Has read filter (object or list)
+	CanWrite       bool           `json:"canWrite"`                 // Has write filter
+	CanDelete      bool           `json:"canDelete"`                // Has delete filter
+	IsGlob         bool           `json:"isGlob"`                   // Path contains wildcard
+	Limit          int            `json:"limit,omitempty"`          // Limit value if it's a limit filter
+	LimitDynamic   bool           `json:"limitDynamic,omitempty"`   // True if limit uses dynamic function
+	Order          string         `json:"order,omitempty"`          // Sort order for limit filters ("desc" or "asc")
+	DescWrite      string         `json:"descWrite,omitempty"`      // Description for write filter
+	DescRead       string         `json:"descRead,omitempty"`       // Description for read filter
+	DescDelete     string         `json:"descDelete,omitempty"`     // Description for delete filter
+	DescAfterWrite string         `json:"descAfterWrite,omitempty"` // Description for after-write watcher
+	DescLimit      string         `json:"descLimit,omitempty"`      // Description for limit filter
+	Schema         map[string]any `json:"schema,omitempty"`         // JSON schema for the data structure
 }
 
 // LimitFilterInfo stores limit filter metadata
@@ -376,6 +556,8 @@ type LimitFilterInfo struct {
 	Limit        int
 	LimitDynamic bool
 	Order        string
+	Description  string
+	Schema       map[string]any
 }
 
 // PathsInfo returns detailed information about all registered filter paths.
@@ -388,6 +570,12 @@ func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInf
 			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
 		}
 		pathInfo[filter.path].CanWrite = true
+		if filter.description != "" {
+			pathInfo[filter.path].DescWrite = filter.description
+		}
+		if filter.schema != nil && pathInfo[filter.path].Schema == nil {
+			pathInfo[filter.path].Schema = reflectSchema(filter.schema)
+		}
 	}
 
 	// Track read object filters
@@ -396,6 +584,12 @@ func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInf
 			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
 		}
 		pathInfo[filter.path].CanRead = true
+		if filter.description != "" {
+			pathInfo[filter.path].DescRead = filter.description
+		}
+		if filter.schema != nil && pathInfo[filter.path].Schema == nil {
+			pathInfo[filter.path].Schema = reflectSchema(filter.schema)
+		}
 	}
 
 	// Track read list filters
@@ -404,6 +598,12 @@ func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInf
 			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
 		}
 		pathInfo[filter.path].CanRead = true
+		if filter.description != "" {
+			pathInfo[filter.path].DescRead = filter.description
+		}
+		if filter.schema != nil && pathInfo[filter.path].Schema == nil {
+			pathInfo[filter.path].Schema = reflectSchema(filter.schema)
+		}
 	}
 
 	// Track delete filters
@@ -412,12 +612,18 @@ func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInf
 			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
 		}
 		pathInfo[filter.path].CanDelete = true
+		if filter.description != "" {
+			pathInfo[filter.path].DescDelete = filter.description
+		}
 	}
 
-	// Track after-write watchers (doesn't affect type, but path should be included)
+	// Track after-write watchers
 	for _, filter := range f.AfterWrite {
 		if _, ok := pathInfo[filter.path]; !ok {
 			pathInfo[filter.path] = &FilterInfo{Path: filter.path, IsGlob: key.IsGlob(filter.path)}
+		}
+		if filter.description != "" {
+			pathInfo[filter.path].DescAfterWrite = filter.description
 		}
 	}
 
@@ -430,6 +636,12 @@ func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInf
 			info.Limit = lf.Limit
 			info.LimitDynamic = lf.LimitDynamic
 			info.Order = lf.Order
+			if lf.Description != "" {
+				info.DescLimit = lf.Description
+			}
+			if lf.Schema != nil && info.Schema == nil {
+				info.Schema = lf.Schema
+			}
 		} else if info.CanRead && info.CanWrite && info.CanDelete {
 			info.Type = "open"
 		} else if info.CanRead && !info.CanWrite {

@@ -6,14 +6,13 @@ import (
 	"time"
 
 	"github.com/benitogf/ooo"
-	"github.com/benitogf/ooo/filters"
 )
 
 func main() {
 	server := ooo.Server{}
 
 	// Add filters similar to mono/router
-	server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 5})
+	server.LimitFilter("logs/*", ooo.LimitFilterConfig{Limit: 5})
 	server.OpenFilter("items/*")
 	server.OpenFilter("users/*")
 	server.OpenFilter("config")

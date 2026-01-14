@@ -30,7 +30,7 @@ const copyIcon = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" st
 func main() {
 	projectRoot := findProjectRoot()
 	samplesDir := filepath.Join(projectRoot, "samples")
-	indexFile := filepath.Join(projectRoot, "public", "index.html")
+	indexFile := filepath.Join(projectRoot, "docs", "index.html")
 
 	// Discover samples dynamically
 	samples, err := discoverSamples(samplesDir)
@@ -95,7 +95,7 @@ func findProjectRoot() string {
 
 	for _, dir := range candidates {
 		if _, err := os.Stat(filepath.Join(dir, "samples")); err == nil {
-			if _, err := os.Stat(filepath.Join(dir, "public", "index.html")); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, "docs", "index.html")); err == nil {
 				abs, _ := filepath.Abs(dir)
 				return abs
 			}
