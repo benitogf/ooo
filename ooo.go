@@ -148,6 +148,7 @@ type Server struct {
 	OnStorageEvent     storage.EventCallback
 	BeforeRead         func(key string)
 	GetPivotInfo       func() *ui.PivotInfo // Optional: returns pivot status for UI
+	NoCompress         bool                 // Disable gzip compression (useful for tests)
 	startErr           chan error           // channel for startup errors
 	clockStop          chan struct{}        // channel to signal clock goroutine to stop
 }
@@ -303,6 +304,10 @@ func (server *Server) waitListen() {
 		server.wg.Done()
 		return
 	}
+	var handler http.Handler = server.Router
+	if !server.NoCompress {
+		handler = handlers.CompressHandler(handler)
+	}
 	server.server = &http.Server{
 		WriteTimeout:      server.WriteTimeout,
 		ReadTimeout:       server.ReadTimeout,
@@ -316,7 +321,7 @@ func (server *Server) waitListen() {
 			ExposedHeaders: server.ExposedHeaders,
 			// AllowCredentials: true,
 			// Debug:          true,
-		}).Handler(handlers.CompressHandler(server.Router))}
+		}).Handler(handler)}
 	ln, err := net.Listen("tcp4", server.Address)
 	if err != nil {
 		server.startErr <- fmt.Errorf("ooo: failed to start tcp: %w", err)
