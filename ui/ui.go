@@ -87,19 +87,23 @@ type StateInfo struct {
 
 // PivotNodeStatus represents the health status of a single node
 type PivotNodeStatus struct {
-	Address   string `json:"address"`
-	Healthy   bool   `json:"healthy"`
-	LastCheck string `json:"lastCheck"`
+	Address    string `json:"address"`
+	Healthy    bool   `json:"healthy"`
+	LastCheck  string `json:"lastCheck"`
+	Protocol   string `json:"protocol"`   // "2.0", "unknown"
+	Compatible bool   `json:"compatible"` // true if protocol matches current version
 }
 
 // PivotInfo contains pivot synchronization status
 type PivotInfo struct {
-	Role           string            `json:"role"`           // "pivot", "node", or "none"
-	PivotIP        string            `json:"pivotIP"`        // Empty for pivot server, pivot address for nodes
-	Nodes          []PivotNodeStatus `json:"nodes"`          // Node health status (only for pivot servers)
-	SyncedKeys     []string          `json:"syncedKeys"`     // Keys being synchronized
-	PivotHealthy   bool              `json:"pivotHealthy"`   // Connection status to pivot (only for node servers)
-	PivotLastCheck string            `json:"pivotLastCheck"` // Last check time for pivot connection (only for node servers)
+	Role            string            `json:"role"`            // "pivot", "node", or "none"
+	PivotIP         string            `json:"pivotIP"`         // Empty for pivot server, pivot address for nodes
+	Nodes           []PivotNodeStatus `json:"nodes"`           // Node health status (only for pivot servers)
+	SyncedKeys      []string          `json:"syncedKeys"`      // Keys being synchronized
+	PivotHealthy    bool              `json:"pivotHealthy"`    // Connection status to pivot (only for node servers)
+	PivotLastCheck  string            `json:"pivotLastCheck"`  // Last check time for pivot connection (only for node servers)
+	PivotProtocol   string            `json:"pivotProtocol"`   // Protocol version of pivot (only for node servers)
+	PivotCompatible bool              `json:"pivotCompatible"` // true if pivot protocol matches node version (only for node servers)
 }
 
 // EndpointInfo contains endpoint metadata for UI display

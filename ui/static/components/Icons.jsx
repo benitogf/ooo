@@ -182,6 +182,14 @@ const IconWarning = () => (
   </svg>
 );
 
+const IconAlertTriangle = () => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path>
+    <line x1="12" y1="9" x2="12" y2="13"></line>
+    <line x1="12" y1="16" x2="12.01" y2="16"></line>
+  </svg>
+);
+
 const IconPlay = () => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
     <polygon points="5 3 19 12 5 21 5 3"></polygon>
@@ -220,4 +228,4 @@ const IconFileText = () => (
   </svg>
 );
 
-window.Icons = { IconBox, IconDatabase, IconSettings, IconHome, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconSend, IconRefresh, IconFilter, IconLive, IconEye, IconEdit, IconWifi, IconWifiOff, IconActivity, IconX, IconServer, IconCloud, IconCloudOff, IconCheck, IconAlertCircle, IconLink, IconWarning, IconPlay, IconCode, IconSave, IconCopy, IconFileText };
+window.Icons = { IconBox, IconDatabase, IconSettings, IconHome, IconChevronLeft, IconChevronRight, IconChevronDown, IconChevronUp, IconTrash, IconSend, IconRefresh, IconFilter, IconLive, IconEye, IconEdit, IconWifi, IconWifiOff, IconActivity, IconX, IconServer, IconCloud, IconCloudOff, IconCheck, IconAlertCircle, IconAlertTriangle, IconLink, IconWarning, IconPlay, IconCode, IconSave, IconCopy, IconFileText };
