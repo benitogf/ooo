@@ -32,23 +32,27 @@ func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 	server.handlerWg.Add(1)
 	defer server.handlerWg.Done()
 
-	client, err := server.Stream.New(_key, w, r)
-	if err != nil {
-		server.Console.Err("ooo: filtered route", err)
-		return err
-	}
-
-	// send initial msg
+	// Fetch initial data BEFORE creating WebSocket connection
 	result, err := server.fetch(_key)
 	if err != nil {
 		server.Console.Err("ooo: filtered route", err)
 		return err
 	}
 
-	// log.Println("version", version, "result.Version", strconv.FormatInt(result.Version, 16), version != strconv.FormatInt(result.Version, 16))
+	// Determine if we need to send initial snapshot
+	var initialData []byte
 	if version != strconv.FormatInt(result.Version, 16) {
-		server.Stream.Write(client, result.Data, true, result.Version)
+		initialData = result.Data
 	}
+
+	// Create connection and send initial snapshot atomically BEFORE joining broadcast pool
+	// This prevents the race condition where broadcasts could arrive before the initial snapshot
+	client, err := server.Stream.New(_key, w, r, initialData, result.Version)
+	if err != nil {
+		server.Console.Err("ooo: filtered route", err)
+		return err
+	}
+
 	server.Stream.Read(_key, client)
 	return nil
 }

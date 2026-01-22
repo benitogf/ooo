@@ -131,8 +131,11 @@ func (sm *Stream) PreallocatePools(paths []string) {
 	}
 }
 
-// New stream on a key
-func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request) (*Conn, error) {
+// New creates a WebSocket connection and sends the initial snapshot
+// BEFORE adding the connection to the broadcast pool. This prevents a race condition
+// where broadcasts could reach the client before the initial snapshot is sent.
+// Pass nil for data if no initial snapshot is needed (e.g., clock connections).
+func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data []byte, version int64) (*Conn, error) {
 	err := sm.OnSubscribe(key)
 	if err != nil {
 		return nil, err
@@ -144,7 +147,60 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request) (*Conn
 		return nil, err
 	}
 
-	return sm.newConn(key, wsClient), nil
+	client := &Conn{
+		conn:  wsClient,
+		mutex: sync.Mutex{},
+	}
+
+	// Send initial snapshot BEFORE adding to pool
+	if data != nil {
+		client.mutex.Lock()
+		client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
+		err = client.conn.WriteMessage(websocket.BinaryMessage, buildMessage(data, true, version))
+		client.mutex.Unlock()
+		if err != nil {
+			client.conn.Close()
+			return nil, err
+		}
+	}
+
+	// Now add to pool - broadcasts can now reach this client
+	sm.addConnToPool(key, client)
+	return client, nil
+}
+
+// addConnToPool adds an existing connection to the appropriate pool
+func (sm *Stream) addConnToPool(key string, client *Conn) {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	if key == "" {
+		if sm.clockPool == nil {
+			sm.clockPool = &Pool{Key: ""}
+		}
+		sm.clockPool.mutex.Lock()
+		sm.clockPool.connections = append(sm.clockPool.connections, client)
+		sm.Console.Log("stream:connections[clock]: ", len(sm.clockPool.connections))
+		sm.clockPool.mutex.Unlock()
+		return
+	}
+
+	pool := sm.getPool(key)
+	if pool == nil {
+		pool = &Pool{
+			Key:         key,
+			connections: []*Conn{client},
+		}
+		sm.pools[key] = pool
+		sm.poolIndex.insert(key, pool)
+		sm.Console.Log("stream:connections["+key+"]: ", len(pool.connections))
+		return
+	}
+
+	pool.mutex.Lock()
+	pool.connections = append(pool.connections, client)
+	sm.Console.Log("stream: connections["+key+"]: ", len(pool.connections))
+	pool.mutex.Unlock()
 }
 
 func (sm *Stream) newConn(key string, wsClient *websocket.Conn) *Conn {

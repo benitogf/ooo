@@ -144,7 +144,7 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 		defer exited.Done()
 		client.SubscribeList(client.SubscribeConfig{
 			Ctx:              ctx,
-			Server:           client.Server{Protocol: "ws", Host: "notAnIP"},
+			Server:           client.Server{Protocol: "ws", Host: "127.0.0.1:1"},
 			HandshakeTimeout: 10 * time.Millisecond,
 			Silence:          true,
 		}, "devices/*", client.SubscribeListEvents[Device]{

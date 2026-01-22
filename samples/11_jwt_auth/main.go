@@ -9,8 +9,9 @@
 // - Add JWT authentication to ooo server
 // - Protect routes with token verification
 // - Handle user registration and login
+// - Use layered storage with ko for persistent user data
 //
-// Requires: go get github.com/benitogf/auth
+// Requires: go get github.com/benitogf/auth github.com/benitogf/ko
 package main
 
 import (
@@ -26,13 +27,11 @@ import (
 )
 
 func main() {
-	// Auth storage for users
-	authStore := &ko.Storage{Path: "./auth_data"}
-	err := authStore.Start([]string{}, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-	go storage.WatchStorageNoop(authStore)
+	// Auth storage for users using layered storage with ko persistence
+	authStore := storage.New(storage.LayeredConfig{
+		Memory:   storage.NewMemoryLayer(),
+		Embedded: ko.NewEmbeddedStorage("./auth_data"),
+	})
 
 	// Create JWT auth with 10 minute token expiry
 	tokenAuth := auth.New(

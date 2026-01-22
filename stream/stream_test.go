@@ -46,7 +46,7 @@ func TestInitCacheObject(t *testing.T) {
 
 	req, w := makeStreamRequestMock(domain + "/" + testKey)
 
-	wsConn, err := stream.New(testKey, w, req)
+	wsConn, err := stream.New(testKey, w, req, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(stream.pools))
 	require.Equal(t, testKey, stream.pools[testKey].Key)
@@ -89,21 +89,21 @@ func TestConcurrentBroadcast(t *testing.T) {
 	}
 
 	req, w := makeStreamRequestMock(domain + "/root")
-	wsConn, err := stream.New("root", w, req)
+	wsConn, err := stream.New("root", w, req, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(stream.pools))
 	require.Equal(t, "root", stream.pools["root"].Key)
 	require.Equal(t, 1, len(stream.pools["root"].connections))
 
 	reqA, wA := makeStreamRequestMock(domain + "/a")
-	wsConnA, err := stream.New("a", wA, reqA)
+	wsConnA, err := stream.New("a", wA, reqA, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 2, len(stream.pools))
 	require.Equal(t, "a", stream.pools["a"].Key)
 	require.Equal(t, 1, len(stream.pools["a"].connections))
 
 	reqB, wB := makeStreamRequestMock(domain + "/b")
-	wsConnB, err := stream.New("b", wB, reqB)
+	wsConnB, err := stream.New("b", wB, reqB, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 3, len(stream.pools))
 	require.Equal(t, "b", stream.pools["b"].Key)
@@ -258,7 +258,7 @@ func TestGetState(t *testing.T) {
 
 	// Add a connection to a pool
 	req, w := makeStreamRequestMock(domain + "/test")
-	wsConn, err := stream.New("test", w, req)
+	wsConn, err := stream.New("test", w, req, nil, 0)
 	require.NoError(t, err)
 
 	state = stream.GetState()
@@ -268,7 +268,7 @@ func TestGetState(t *testing.T) {
 
 	// Add clock connection
 	reqClock, wClock := makeStreamRequestMock(domain + "/")
-	wsConnClock, err := stream.New("", wClock, reqClock)
+	wsConnClock, err := stream.New("", wClock, reqClock, nil, 0)
 	require.NoError(t, err)
 
 	state = stream.GetState()
@@ -301,7 +301,7 @@ func TestBroadcastClock(t *testing.T) {
 
 	// Add a clock connection
 	req, w := makeStreamRequestMock(domain + "/")
-	wsConn, err := stream.New("", w, req)
+	wsConn, err := stream.New("", w, req, nil, 0)
 	require.NoError(t, err)
 	require.Equal(t, 1, len(stream.clockPool.connections))
 

@@ -2083,6 +2083,8 @@ thead .actions-col svg {
 }
 .endpoints-list {
   flex: 0 0 360px;
+  min-width: 280px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -2110,6 +2112,8 @@ thead .actions-col svg {
   font-size: 14px;
   color: #79c0ff;
   margin-bottom: 4px;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 .endpoint-description {
   font-size: 13px;
@@ -2170,6 +2174,9 @@ thead .actions-col svg {
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 14px;
   color: #c9d1d9;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 .tester-section {
   display: flex;

@@ -6,8 +6,9 @@
 
 // Package main demonstrates using ko for persistent storage.
 // This example shows how to:
-// - Use ko as a persistent storage backend
+// - Use ko as a persistent storage backend with layered storage
 // - Data survives server restarts
+// - Memory layer provides fast reads, ko provides persistence
 //
 // Requires: go get github.com/benitogf/ko
 package main
@@ -21,15 +22,12 @@ import (
 )
 
 func main() {
-	// Create persistent storage with LevelDB backend
-	store := &ko.Storage{Path: "./data"}
-	err := store.Start([]string{}, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Consume storage broadcast channel (required)
-	go storage.WatchStorageNoop(store)
+	// Create layered storage with memory + ko persistence
+	// Memory layer provides fast reads, ko (LevelDB) provides persistence
+	store := storage.New(storage.LayeredConfig{
+		Memory:   storage.NewMemoryLayer(),
+		Embedded: ko.NewEmbeddedStorage("./data"),
+	})
 
 	// Create server with persistent storage
 	server := ooo.Server{

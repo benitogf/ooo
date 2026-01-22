@@ -22,8 +22,8 @@ func TestDoubleShutdown(t *testing.T) {
 func TestDoubleStart(t *testing.T) {
 	server := Server{}
 	server.Silence = true
-	server.Start("localhost:9889")
-	server.Start("localhost:9889")
+	server.Start("localhost:0")
+	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 }
 
@@ -31,10 +31,10 @@ func TestRestart(t *testing.T) {
 	server := Server{}
 	server.Silence = true
 	server.Start("localhost:0")
-	addr := server.Address
 	server.Close(os.Interrupt)
 	// https://golang.org/pkg/net/http/#example_Server_Shutdown
-	server.Start(addr)
+	// Use localhost:0 again to avoid TIME_WAIT port conflicts
+	server.Start("localhost:0")
 	require.True(t, server.Active())
 	defer server.Close(os.Interrupt)
 }
