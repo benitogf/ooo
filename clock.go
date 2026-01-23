@@ -48,11 +48,11 @@ func (server *Server) clock(w http.ResponseWriter, r *http.Request) {
 	server.handlerWg.Add(1)
 	defer server.handlerWg.Done()
 
-	client, err := server.Stream.New("", w, r)
+	client, err := server.Stream.New("", w, r, nil, 0)
 	if err != nil {
 		return
 	}
-
+	// Clock uses raw text format, not the JSON envelope
 	server.Stream.WriteClock(client, Time())
 	server.Stream.Read("", client)
 }

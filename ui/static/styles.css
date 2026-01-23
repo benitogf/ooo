@@ -1973,6 +1973,37 @@ thead .actions-col svg {
   color: #8b949e;
   margin-top: 2px;
 }
+.node-item.incompatible {
+  border-left-color: #f0ad4e;
+}
+.node-item.incompatible .node-status-icon {
+  color: #f0ad4e;
+}
+.node-item .node-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 2px;
+}
+.node-item .node-protocol {
+  font-size: 12px;
+  color: #8b949e;
+}
+.node-item.incompatible .node-protocol {
+  color: #f0ad4e;
+}
+.node-summary .incompatible-count {
+  color: #f0ad4e;
+  margin-left: 8px;
+}
+.compatibility-warning {
+  color: #f0ad4e;
+  font-size: 12px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  background: rgba(240, 173, 78, 0.1);
+  border-radius: 4px;
+  border-left: 2px solid #f0ad4e;
+}
 .pivot-connection {
   display: flex;
   align-items: center;
@@ -2052,6 +2083,8 @@ thead .actions-col svg {
 }
 .endpoints-list {
   flex: 0 0 360px;
+  min-width: 280px;
+  max-width: 400px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -2079,6 +2112,8 @@ thead .actions-col svg {
   font-size: 14px;
   color: #79c0ff;
   margin-bottom: 4px;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 .endpoint-description {
   font-size: 13px;
@@ -2139,6 +2174,9 @@ thead .actions-col svg {
   font-family: 'Monaco', 'Menlo', monospace;
   font-size: 14px;
   color: #c9d1d9;
+  word-break: break-all;
+  overflow-wrap: break-word;
+  min-width: 0;
 }
 .tester-section {
   display: flex;

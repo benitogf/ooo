@@ -188,6 +188,11 @@ func (ps *proxyState) addSubscriber(conn *websocket.Conn) chan wsMessage {
 
 // sendInitialState fetches current state via HTTP and sends it as a snapshot to the subscriber
 func (ps *proxyState) sendInitialState(msgChan chan wsMessage) {
+	// Recover from send on closed channel - subscriber may disconnect during HTTP fetch
+	defer func() {
+		recover()
+	}()
+
 	var header http.Header
 	if ps.cfg != nil {
 		header = ps.cfg.Header

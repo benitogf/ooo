@@ -710,11 +710,13 @@ func ClientCompatibilityTest(t *testing.T, server *Server) {
 		var wg sync.WaitGroup
 		var wsEvent messages.Message
 		wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/objtest"}
+
+		// Set up wg.Add(1) BEFORE dialing to avoid race with initial snapshot
+		wg.Add(1)
 		wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 		require.NoError(t, err)
 		defer wsClient.Close()
 
-		wg.Add(1)
 		go func() {
 			for {
 				_, message, err := wsClient.ReadMessage()
@@ -790,11 +792,13 @@ func ClientCompatibilityTest(t *testing.T, server *Server) {
 		var wsEvent messages.Message
 		var wsCache json.RawMessage
 		wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/items/*"}
+
+		// Set up wg.Add(1) BEFORE dialing to avoid race with initial snapshot
+		wg.Add(1)
 		wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 		require.NoError(t, err)
 		defer wsClient.Close()
 
-		wg.Add(1)
 		go func() {
 			for {
 				_, message, err := wsClient.ReadMessage()
@@ -869,6 +873,9 @@ func ClientCompatibilityTest(t *testing.T, server *Server) {
 		var wsEvent messages.Message
 		var msgCount int
 		wsURL := url.URL{Scheme: "ws", Host: server.Address, Path: "/things/*"}
+
+		// Set up wg.Add(1) BEFORE dialing to avoid race with initial snapshot
+		wg.Add(1)
 		wsClient, _, err := websocket.DefaultDialer.Dial(wsURL.String(), nil)
 		require.NoError(t, err)
 		defer wsClient.Close()
@@ -885,8 +892,7 @@ func ClientCompatibilityTest(t *testing.T, server *Server) {
 			}
 		}()
 
-		// Initial empty list
-		wg.Add(1)
+		// Initial empty list - wg.Add(1) already called before Dial
 		wg.Wait()
 
 		// Create 5 items

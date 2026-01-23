@@ -1,6 +1,6 @@
 function PivotStatus({ onClose }) {
     const { useState, useEffect } = React;
-    const { IconX, IconServer, IconCloud, IconCloudOff, IconCheck, IconAlertCircle } = window.Icons;
+    const { IconX, IconServer, IconCloud, IconCloudOff, IconCheck, IconAlertCircle, IconAlertTriangle } = window.Icons;
 
     // Use ooo-client subscription for real-time updates
     const { data: wsData, connected, error: wsError } = Api.useSubscribe('pivot/status');
@@ -92,12 +92,42 @@ function PivotStatus({ onClose }) {
 
     const getHealthyCount = () => {
         if (!pivotInfo || !pivotInfo.nodes) return 0;
-        return pivotInfo.nodes.filter(n => n.healthy).length;
+        return pivotInfo.nodes.filter(n => n.healthy && n.compatible).length;
     };
 
     const getUnhealthyCount = () => {
         if (!pivotInfo || !pivotInfo.nodes) return 0;
         return pivotInfo.nodes.filter(n => !n.healthy).length;
+    };
+
+    const getIncompatibleCount = () => {
+        if (!pivotInfo || !pivotInfo.nodes) return 0;
+        return pivotInfo.nodes.filter(n => n.healthy && !n.compatible).length;
+    };
+
+    const getNodeStatusClass = (node) => {
+        if (!node.healthy) return 'unhealthy';
+        if (!node.compatible) return 'incompatible';
+        return 'healthy';
+    };
+
+    const getNodeStatusIcon = (node) => {
+        if (!node.healthy) return <IconAlertCircle />;
+        if (!node.compatible) return <IconAlertTriangle />;
+        return <IconCheck />;
+    };
+
+    const getPivotStatusClass = () => {
+        if (!pivotInfo) return 'unhealthy';
+        if (!pivotInfo.pivotHealthy) return 'unhealthy';
+        if (!pivotInfo.pivotCompatible) return 'incompatible';
+        return 'healthy';
+    };
+
+    const getPivotStatusIcon = () => {
+        if (!pivotInfo || !pivotInfo.pivotHealthy) return <IconAlertCircle />;
+        if (!pivotInfo.pivotCompatible) return <IconAlertTriangle />;
+        return <IconCheck />;
     };
 
     // Show loading state for both initial load and connection issues
@@ -154,8 +184,11 @@ function PivotStatus({ onClose }) {
                             Node Health
                             <span className="node-summary">
                                 <span className="healthy-count">{getHealthyCount()} healthy</span>
+                                {getIncompatibleCount() > 0 && (
+                                    <span className="incompatible-count">{getIncompatibleCount()} incompatible</span>
+                                )}
                                 {getUnhealthyCount() > 0 && (
-                                    <span className="unhealthy-count">{getUnhealthyCount()} unhealthy</span>
+                                    <span className="unhealthy-count">{getUnhealthyCount()} unreachable</span>
                                 )}
                             </span>
                         </h4>
@@ -164,14 +197,19 @@ function PivotStatus({ onClose }) {
                         ) : (
                             <div className="node-list">
                                 {pivotInfo.nodes.map((node, i) => (
-                                    <div key={i} className={`node-item ${node.healthy ? 'healthy' : 'unhealthy'}`}>
+                                    <div key={i} className={`node-item ${getNodeStatusClass(node)}`}>
                                         <div className="node-status-icon">
-                                            {node.healthy ? <IconCheck /> : <IconAlertCircle />}
+                                            {getNodeStatusIcon(node)}
                                         </div>
                                         <div className="node-info">
                                             <div className="node-address">{node.address}</div>
-                                            <div className="node-last-check">
-                                                Last check: {node.lastCheck || 'Never'}
+                                            <div className="node-meta">
+                                                <span className="node-protocol">
+                                                    Protocol: {node.protocol || 'unknown'}
+                                                </span>
+                                                <span className="node-last-check">
+                                                    Last check: {node.lastCheck || 'Never'}
+                                                </span>
                                             </div>
                                         </div>
                                     </div>
@@ -184,15 +222,25 @@ function PivotStatus({ onClose }) {
                 {(pivotInfo.role === 'node' || pivotInfo.role === 'mixed') && pivotInfo.pivotIP && (
                     <div className="pivot-section">
                         <h4>Pivot Connection</h4>
-                        <div className={`node-item ${pivotInfo.pivotHealthy ? 'healthy' : 'unhealthy'}`}>
+                        <div className={`node-item ${getPivotStatusClass()}`}>
                             <div className="node-status-icon">
-                                {pivotInfo.pivotHealthy ? <IconCheck /> : <IconAlertCircle />}
+                                {getPivotStatusIcon()}
                             </div>
                             <div className="node-info">
                                 <div className="node-address">{pivotInfo.pivotIP}</div>
-                                <div className="node-last-check">
-                                    Last check: {pivotInfo.pivotLastCheck || 'Never'}
+                                <div className="node-meta">
+                                    <span className="node-protocol">
+                                        Protocol: {pivotInfo.pivotProtocol || 'unknown'}
+                                    </span>
+                                    <span className="node-last-check">
+                                        Last check: {pivotInfo.pivotLastCheck || 'Never'}
+                                    </span>
                                 </div>
+                                {!pivotInfo.pivotCompatible && pivotInfo.pivotProtocol && (
+                                    <div className="compatibility-warning">
+                                        Sync blocked: incompatible protocol version
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

@@ -2493,15 +2493,12 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 )
 
 <span class="keyword">func</span> <span class="function">main</span>() {
-	<span class="comment">// Create persistent storage with LevelDB backend</span>
-	store := &amp;ko.<span class="type">Storage</span>{<span class="type">Path</span>: <span class="string">&#34;./data&#34;</span>}
-	err := store.<span class="function">Start</span>([]string{}, <span class="keyword">nil</span>)
-	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
-		log.<span class="function">Fatal</span>(err)
-	}
-
-	<span class="comment">// Consume storage broadcast channel (required)</span>
-	<span class="keyword">go</span> storage.<span class="function">WatchStorageNoop</span>(store)
+	<span class="comment">// Create layered storage with memory + ko persistence</span>
+	<span class="comment">// Memory layer provides fast reads, ko (LevelDB) provides persistence</span>
+	store := storage.<span class="function">New</span>(storage.LayeredConfig{
+		Memory:   storage.<span class="function">NewMemoryLayer</span>(),
+		Embedded: ko.<span class="function">NewEmbeddedStorage</span>(<span class="string">&#34;./data&#34;</span>),
+	})
 
 	<span class="comment">// Create server with persistent storage</span>
 	server := ooo.<span class="type">Server</span>{
@@ -2543,7 +2540,7 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
           <pre><code><span class="comment">// To use: go get github.com/benitogf/auth github.com/benitogf/ko</span>
 
 <span class="comment">//</span>
-<span class="comment">// Requires: go get github.com/benitogf/auth</span>
+<span class="comment">// Requires: go get github.com/benitogf/auth github.com/benitogf/ko</span>
 <span class="keyword">package</span> main
 
 <span class="keyword">import</span> (
@@ -2559,13 +2556,11 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
 )
 
 <span class="keyword">func</span> <span class="function">main</span>() {
-	<span class="comment">// Auth storage for users</span>
-	authStore := &amp;ko.<span class="type">Storage</span>{<span class="type">Path</span>: <span class="string">&#34;./auth_data&#34;</span>}
-	err := authStore.<span class="function">Start</span>([]string{}, <span class="keyword">nil</span>)
-	<span class="keyword">if</span> err != <span class="keyword">nil</span> {
-		log.<span class="function">Fatal</span>(err)
-	}
-	<span class="keyword">go</span> storage.<span class="function">WatchStorageNoop</span>(authStore)
+	<span class="comment">// Auth storage for users using layered storage with ko persistence</span>
+	authStore := storage.<span class="function">New</span>(storage.LayeredConfig{
+		Memory:   storage.<span class="function">NewMemoryLayer</span>(),
+		Embedded: ko.<span class="function">NewEmbeddedStorage</span>(<span class="string">&#34;./auth_data&#34;</span>),
+	})
 
 	<span class="comment">// Create JWT auth with 10 minute token expiry</span>
 	tokenAuth := auth.<span class="function">New</span>(
