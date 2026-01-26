@@ -435,6 +435,19 @@
     }
 
     /* Samples */
+    .samples-category {
+      color: #00d4aa;
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin: 2rem 0 1rem 0;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid #1e3a4a;
+    }
+
+    .samples-category:first-of-type {
+      margin-top: 0;
+    }
+
     .sample-card {
       background: #141e2a;
       border: 1px solid #1e3a4a;
@@ -1590,15 +1603,20 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <p class="section-subtitle">Complete examples demonstrating various features. Click to expand code.</p>
 
       <!-- SAMPLES_START -->
+      <h3 class="samples-category">Core Samples</h3>
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>01 - Basic Server</h4>
+            <h4>Basic Server</h4>
             <p>Minimal server setup - the simplest way to start an ooo server</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/01_basic_server" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/basic_server" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -1611,7 +1629,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -1630,12 +1651,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>02 - Static Routes, Filters & Audit</h4>
+            <h4>Static Routes, Filters & Audit</h4>
             <p>Static mode, write/read/delete filters, and API key authentication</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/02_static_routes_filters_audit" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/static_routes_filters_audit" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -1648,7 +1673,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -1730,12 +1758,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>03 - Storage API</h4>
+            <h4>Storage API</h4>
             <p>Direct storage read/write operations without HTTP</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/03_storage_api" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/storage_api" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -1748,7 +1780,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -1815,12 +1850,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>04 - I/O Operations</h4>
+            <h4>I/O Operations</h4>
             <p>Typed I/O helpers with Go generics (Get, Set, Push, GetList)</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/04_io_operations" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/io_operations" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -1833,7 +1872,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -1908,12 +1950,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>05 - WebSocket Subscribe List</h4>
+            <h4>WebSocket Subscribe List</h4>
             <p>Real-time subscription to list paths with typed callbacks</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/05_websocket_subscribe_list" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/websocket_subscribe_list" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -1926,7 +1972,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -1989,12 +2038,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>06 - WebSocket Subscribe Single</h4>
+            <h4>WebSocket Subscribe Single</h4>
             <p>Real-time subscription to single item paths</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/06_websocket_subscribe_single" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/websocket_subscribe_single" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2007,7 +2060,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2066,116 +2122,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>07 - WebSocket Subscribe Multiple</h4>
-            <p>Subscribe to multiple list paths with different types using WaitGroup synchronization</p>
-          </div>
-          <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/07_websocket_subscribe_multiple" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-              GitHub
-            </a>
-          </div>
-          <span class="sample-toggle">▼</span>
-        </div>
-        <div class="sample-code">
-          <div class="code-header">
-            <span class="code-dot red"></span>
-            <span class="code-dot yellow"></span>
-            <span class="code-dot green"></span>
-            <span class="code-title">main.go</span>
-            <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-              Copy
-            </button>
-          </div>
-          <pre><code><span class="keyword">package</span> main
-
-<span class="keyword">import</span> (
-	<span class="string">&#34;context&#34;</span>
-	<span class="string">&#34;fmt&#34;</span>
-	<span class="string">&#34;sync&#34;</span>
-
-	<span class="string">&#34;github.com/benitogf/ooo&#34;</span>
-	<span class="string">&#34;github.com/benitogf/ooo/client&#34;</span>
-)
-
-<span class="keyword">type</span> Product <span class="keyword">struct</span> {
-	ID    <span class="type">int</span>    <span class="string">`json:<span class="string">&#34;id&#34;</span>`</span>
-	Name  string <span class="string">`json:<span class="string">&#34;name&#34;</span>`</span>
-	Price <span class="type">int</span>    <span class="string">`json:<span class="string">&#34;price&#34;</span>`</span>
-}
-
-<span class="keyword">type</span> Order <span class="keyword">struct</span> {
-	ID        <span class="type">int</span> <span class="string">`json:<span class="string">&#34;id&#34;</span>`</span>
-	ProductID <span class="type">int</span> <span class="string">`json:<span class="string">&#34;product_id&#34;</span>`</span>
-	Quantity  <span class="type">int</span> <span class="string">`json:<span class="string">&#34;quantity&#34;</span>`</span>
-}
-
-<span class="keyword">func</span> <span class="function">main</span>() {
-	<span class="comment">// Start server for demo</span>
-	server := &amp;ooo.<span class="type">Server</span>{Silence: <span class="keyword">true</span>}
-	server.<span class="function">Start</span>(<span class="string">&#34;localhost:0&#34;</span>)
-	<span class="keyword">defer</span> server.<span class="function">Close</span>(<span class="keyword">nil</span>)
-
-	ctx, cancel := context.<span class="function">WithCancel</span>(context.<span class="function">Background</span>())
-	<span class="keyword">defer</span> <span class="function">cancel</span>()
-
-	cfg := client.<span class="type">SubscribeConfig</span>{
-		Ctx:     ctx,
-		<span class="type">Server</span>:  client.<span class="type">Server</span>{Protocol: <span class="string">&#34;ws&#34;</span>, Host: server.Address},
-		Silence: <span class="keyword">true</span>,
-	}
-
-	<span class="comment">// Use WaitGroup to synchronize async operations</span>
-	<span class="keyword">var</span> wg sync.WaitGroup
-	wg.<span class="function">Add</span>(3) <span class="comment">// Expect 3 updates</span>
-
-	<span class="keyword">go</span> client.<span class="function">SubscribeMultipleList2</span>(
-		cfg,
-		[2]string{<span class="string">&#34;products/*&#34;</span>, <span class="string">&#34;orders/*&#34;</span>},
-		client.SubscribeMultipleList2Events[Product, Order]{
-			OnMessage: <span class="keyword">func</span>(products client.MultiState[Product], orders client.MultiState[Order]) {
-				<span class="comment">// Called when either subscription updates</span>
-				<span class="comment">// Use .Updated to check which one changed</span>
-				<span class="keyword">if</span> products.Updated {
-					fmt.<span class="function">Println</span>(<span class="string">&#34;products updated:&#34;</span>, <span class="function">len</span>(products.Data))
-					wg.<span class="function">Done</span>()
-				}
-				<span class="keyword">if</span> orders.Updated {
-					fmt.<span class="function">Println</span>(<span class="string">&#34;orders updated:&#34;</span>, <span class="function">len</span>(orders.Data))
-					wg.<span class="function">Done</span>()
-				}
-			},
-			OnError: <span class="keyword">func</span>(productsErr, ordersErr <span class="type">error</span>) {
-				<span class="keyword">if</span> productsErr != <span class="keyword">nil</span> {
-					fmt.<span class="function">Println</span>(<span class="string">&#34;products <span class="type">error</span>:&#34;</span>, productsErr)
-				}
-				<span class="keyword">if</span> ordersErr != <span class="keyword">nil</span> {
-					fmt.<span class="function">Println</span>(<span class="string">&#34;orders <span class="type">error</span>:&#34;</span>, ordersErr)
-				}
-			},
-		},
-	)
-
-	<span class="comment">// Create some data - updates trigger OnMessage callbacks</span>
-	ooo.<span class="function">Push</span>(server, <span class="string">&#34;products/*&#34;</span>, Product{ID: 1, Name: <span class="string">&#34;Widget&#34;</span>, Price: 100})
-	ooo.<span class="function">Push</span>(server, <span class="string">&#34;orders/*&#34;</span>, Order{ID: 1, ProductID: 1, Quantity: 5})
-	ooo.<span class="function">Push</span>(server, <span class="string">&#34;products/*&#34;</span>, Product{ID: 2, Name: <span class="string">&#34;Gadget&#34;</span>, Price: 200})
-
-	wg.<span class="function">Wait</span>()
-}</code></pre>
-        </div>
-      </div>
-
-      <div class="sample-card">
-        <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
-          <div class="sample-info">
-            <h4>08 - Remote I/O Operations</h4>
+            <h4>Remote I/O Operations</h4>
             <p>HTTP client operations with RemoteGet, RemoteSet, RemotePush, RemoteDelete</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/08_remote_io_operations" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/remote_io_operations" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2188,7 +2144,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2281,12 +2240,17 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>09 - Custom Endpoints</h4>
-            <p>Demonstrates `server.Endpoint()` for registering custom HTTP endpoints with typed schemas visible in the storage explorer UI.</p>
+            <h4>Custom Endpoints</h4>
+            <p>Demonstrates `server.Endpoint()` for registering custom HTTP endpoints with typed schemas visible in the
+              storage explorer UI.</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/09_custom_endpoints" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/custom_endpoints" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2299,7 +2263,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2453,15 +2420,20 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
+      <h3 class="samples-category">Advanced Features</h3>
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>10 - Persistent Storage with Ko</h4>
+            <h4>Persistent Storage with Ko</h4>
             <p>LevelDB-backed persistent storage using the ko package</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/10_persistent_storage_ko" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/persistent_storage_ko" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2474,7 +2446,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2515,12 +2490,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>11 - JWT Authentication</h4>
+            <h4>JWT Authentication</h4>
             <p>JWT-based authentication using the auth package</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/11_jwt_auth" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/jwt_auth" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2533,7 +2512,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2601,12 +2583,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>12 - Limit Filter</h4>
+            <h4>Limit Filter</h4>
             <p>Capped collections with automatic cleanup of oldest entries</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/12_limit_filter" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/limit_filter" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2619,7 +2605,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2653,12 +2642,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>13 - Limit Filter with Validation</h4>
+            <h4>Limit Filter with Validation</h4>
             <p>Capped collections with strict schema validation on writes</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/13_limit_filter_with_validation" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/limit_filter_with_validation" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2671,7 +2664,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2741,15 +2737,21 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
+      <h3 class="samples-category">Ecosystem Integration</h3>
       <div class="sample-card">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>14 - Custom Endpoints with nopog</h4>
-            <p>PostgreSQL storage with custom HTTP endpoints, JSONB field queries, and range queries by timestamp.</p>
+            <h4>Custom Endpoints with nopog</h4>
+            <p>PostgreSQL storage with custom HTTP endpoints, JSONB field queries, and range queries by timestamp.
+            </p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/14_custom_endpoints_nopog" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/custom_endpoints_nopog" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2762,7 +2764,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
             <span class="code-dot green"></span>
             <span class="code-title">main.go</span>
             <button class="copy-btn" onclick="copyCode(this)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
               Copy
             </button>
           </div>
@@ -2952,12 +2957,16 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card multi-file">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>15 - Pivot Synchronization</h4>
+            <h4>Pivot Synchronization</h4>
             <p>Multi-instance synchronization using the pivot package for distributed ooo servers</p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/15_pivot_synchronization" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/pivot_synchronization" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -2976,7 +2985,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
                 <span class="code-dot green"></span>
                 <span class="code-title">node_server.go</span>
                 <button class="copy-btn" onclick="copyCode(this)">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
                   Copy
                 </button>
               </div>
@@ -3028,7 +3040,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
                 <span class="code-dot green"></span>
                 <span class="code-title">pivot_server.go</span>
                 <button class="copy-btn" onclick="copyCode(this)">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
                   Copy
                 </button>
               </div>
@@ -3075,12 +3090,17 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
       <div class="sample-card multi-file">
         <div class="sample-header" onclick="this.parentElement.classList.toggle('open')">
           <div class="sample-info">
-            <h4>16 - 15 - Proxy Routes</h4>
-            <p>Demonstrates using the proxy package to expose routes from remote OOO servers with path remapping.</p>
+            <h4>Proxy Routes</h4>
+            <p>Demonstrates using the proxy package to expose routes from remote OOO servers with path remapping.
+            </p>
           </div>
           <div class="sample-links">
-            <a href="https://github.com/benitogf/ooo/tree/master/samples/16_proxy" target="_blank" onclick="event.stopPropagation()">
-              <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+            <a href="https://github.com/benitogf/ooo/tree/master/samples/proxy" target="_blank"
+              onclick="event.stopPropagation()">
+              <svg viewBox="0 0 24 24" fill="currentColor">
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
+              </svg>
               GitHub
             </a>
           </div>
@@ -3099,7 +3119,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
                 <span class="code-dot green"></span>
                 <span class="code-title">proxy_server.go</span>
                 <button class="copy-btn" onclick="copyCode(this)">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
                   Copy
                 </button>
               </div>
@@ -3183,7 +3206,10 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
                 <span class="code-dot green"></span>
                 <span class="code-title">remote_server.go</span>
                 <button class="copy-btn" onclick="copyCode(this)">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
                   Copy
                 </button>
               </div>
@@ -3221,7 +3247,7 @@ err := io.<span class="function">RemoteDelete</span>(cfg, <span class="string">"
         </div>
       </div>
 
-<!-- SAMPLES_END -->
+      <!-- SAMPLES_END -->
 
       <p style="margin-top: 24px; color: #8ba3b8;">
         See all samples including ecosystem integrations (ko, auth, nopog, pivot) on <a

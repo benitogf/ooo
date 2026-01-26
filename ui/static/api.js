@@ -296,6 +296,23 @@ const Api = (function() {
     return response.json();
   }
 
+  // Sanitize body for JSON requests - handles string, object, or already-stringified JSON
+  function sanitizeJsonBody(body) {
+    if (body === undefined || body === null) return undefined;
+    if (typeof body === 'string') {
+      // If it's a string, try to parse it to validate it's valid JSON
+      try {
+        JSON.parse(body);
+        return body; // Already valid JSON string, use as-is
+      } catch {
+        // Not valid JSON, stringify it
+        return JSON.stringify(body);
+      }
+    }
+    // Object or other type - stringify it
+    return JSON.stringify(body);
+  }
+
   // Call a custom endpoint
   async function callEndpoint(path, method, body) {
     const options = {
@@ -304,7 +321,7 @@ const Api = (function() {
     };
     if (body !== undefined && method !== 'GET' && method !== 'DELETE') {
       options.headers['Content-Type'] = 'application/json';
-      options.body = JSON.stringify(body);
+      options.body = sanitizeJsonBody(body);
     }
     const response = await fetch(path, options);
     const text = await response.text();
