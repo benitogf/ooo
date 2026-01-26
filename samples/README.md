@@ -6,24 +6,23 @@ This directory contains example code demonstrating various features of the ooo l
 
 | Sample | Description |
 |--------|-------------|
-| [01_basic_server](./01_basic_server) | Minimal server setup |
-| [02_static_routes_filters_audit](./02_static_routes_filters_audit) | Static mode, filters, and API key authentication |
-| [03_storage_api](./03_storage_api) | Direct storage read/write operations |
-| [04_io_operations](./04_io_operations) | Typed I/O helpers (Get, Set, Push, GetList) |
-| [05_websocket_subscribe_list](./05_websocket_subscribe_list) | Real-time subscription to list paths |
-| [06_websocket_subscribe_single](./06_websocket_subscribe_single) | Real-time subscription to single items |
-| [07_websocket_subscribe_multiple](./07_websocket_subscribe_multiple) | Subscribe to multiple paths with different types |
-| [08_remote_io_operations](./08_remote_io_operations) | Remote HTTP operations with retry support |
-| [09_custom_endpoints](./09_custom_endpoints) | Custom HTTP endpoints with typed schemas for UI |
+| [basic_server](./basic_server) | Minimal server setup |
+| [static_routes_filters_audit](./static_routes_filters_audit) | Static mode, filters, and API key authentication |
+| [storage_api](./storage_api) | Direct storage read/write operations |
+| [io_operations](./io_operations) | Typed I/O helpers (Get, Set, Push, GetList) |
+| [websocket_subscribe_list](./websocket_subscribe_list) | Real-time subscription to list paths |
+| [websocket_subscribe_single](./websocket_subscribe_single) | Real-time subscription to single items |
+| [remote_io_operations](./remote_io_operations) | Remote HTTP operations with retry support |
+| [custom_endpoints](./custom_endpoints) | Custom HTTP endpoints with typed schemas for UI |
 
 ## Advanced Features
 
 | Sample | Description | Requires |
 |--------|-------------|----------|
-| [10_persistent_storage_ko](./10_persistent_storage_ko) | Persistent storage with LevelDB | `go get github.com/benitogf/ko` |
-| [11_jwt_auth](./11_jwt_auth) | JWT authentication | `go get github.com/benitogf/auth github.com/benitogf/ko` |
-| [12_limit_filter](./12_limit_filter) | Capped collections with auto-cleanup | (none) |
-| [13_limit_filter_with_validation](./13_limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
+| [persistent_storage_ko](./persistent_storage_ko) | Persistent storage with LevelDB | `go get github.com/benitogf/ko` |
+| [jwt_auth](./jwt_auth) | JWT authentication | `go get github.com/benitogf/auth github.com/benitogf/ko` |
+| [limit_filter](./limit_filter) | Capped collections with auto-cleanup | (none) |
+| [limit_filter_with_validation](./limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
 
 ## Ecosystem Integration Samples
 
@@ -31,16 +30,16 @@ These samples demonstrate integration with other packages in the ecosystem.
 
 | Sample | Description | Requires |
 |--------|-------------|----------|
-| [14_custom_endpoints_nopog](./14_custom_endpoints_nopog) | Custom endpoints with PostgreSQL storage | `go get github.com/benitogf/nopog` |
-| [15_pivot_synchronization](./15_pivot_synchronization) | Multi-instance synchronization | `go get github.com/benitogf/pivot` |
-| [16_proxy](./16_proxy) | Proxy routes to remote ooo servers | (none) |
+| [custom_endpoints_nopog](./custom_endpoints_nopog) | Custom endpoints with PostgreSQL storage | `go get github.com/benitogf/nopog` |
+| [pivot_synchronization](./pivot_synchronization) | Multi-instance synchronization | `go get github.com/benitogf/pivot` |
+| [proxy](./proxy) | Proxy routes to remote ooo servers | (none) |
 
 ## Running Samples
 
 Each sample is a standalone Go program. To run a sample:
 
 ```bash
-cd samples/01_basic_server
+cd samples/basic_server
 go run main.go
 ```
 

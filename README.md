@@ -420,23 +420,6 @@ go client.Subscribe(client.SubscribeConfig{
 })
 ```
 
-#### SubscribeMultipleList2
-
-```go
-go client.SubscribeMultipleList2(
-    client.SubscribeConfig{
-        Ctx:  ctx,
-        Server: client.Server{Protocol: "ws", Host: "localhost:8800"},
-    },
-    [2]string{"products/*", "orders/*"},
-    client.SubscribeMultipleList2Events[Product, Order]{
-        OnMessage: func(products client.MultiState[Product], orders client.MultiState[Order]) {
-            // products.Updated / orders.Updated indicates which changed
-        },
-    },
-)
-```
-
 For JavaScript, use [ooo-client](https://github.com/benitogf/ooo-client).
 
 ## UI
