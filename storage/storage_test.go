@@ -490,3 +490,130 @@ func TestWatchStorageNoop(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, testDataUpdate, json.RawMessage(obj.Data))
 }
+
+func TestSetBeforeRead(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	var callCount int
+	var lastKey string
+
+	storage := New(LayeredConfig{
+		Memory: NewMemoryLayer(),
+	})
+
+	// Start WITHOUT BeforeRead callback initially
+	err := storage.Start(Options{})
+	require.NoError(t, err)
+	defer storage.Close()
+
+	// Set some data (no callback yet)
+	_, err = storage.Set("test/1", testData)
+	require.NoError(t, err)
+
+	// Now set BeforeRead using SetBeforeRead on active storage
+	callback := func(key string) {
+		mu.Lock()
+		callCount++
+		lastKey = key
+		mu.Unlock()
+	}
+	storage.SetBeforeRead(callback)
+
+	// Read should trigger BeforeRead
+	_, err = storage.Get("test/1")
+	require.NoError(t, err)
+
+	mu.Lock()
+	require.Equal(t, 1, callCount)
+	require.Equal(t, "test/1", lastKey)
+	mu.Unlock()
+
+	// Test with GetList
+	_, err = storage.GetList("test/*")
+	require.NoError(t, err)
+
+	mu.Lock()
+	require.Equal(t, 2, callCount)
+	require.Equal(t, "test/*", lastKey)
+	mu.Unlock()
+
+	// Update BeforeRead to a new callback
+	var newCallCount int
+	var newLastKey string
+	newCallback := func(key string) {
+		mu.Lock()
+		newCallCount++
+		newLastKey = key
+		mu.Unlock()
+	}
+	storage.SetBeforeRead(newCallback)
+
+	// Read should now trigger the new callback
+	_, err = storage.Get("test/1")
+	require.NoError(t, err)
+
+	mu.Lock()
+	require.Equal(t, 2, callCount, "old callback count should remain unchanged")
+	require.Equal(t, 1, newCallCount, "new callback should be called")
+	require.Equal(t, "test/1", newLastKey)
+	mu.Unlock()
+
+	// Set BeforeRead to nil should disable callback
+	storage.SetBeforeRead(nil)
+
+	_, err = storage.Get("test/1")
+	require.NoError(t, err)
+
+	mu.Lock()
+	require.Equal(t, 1, newCallCount, "callback count should not increase when nil")
+	mu.Unlock()
+}
+
+func TestSetBeforeReadConcurrent(t *testing.T) {
+	t.Parallel()
+
+	storage := New(LayeredConfig{
+		Memory: NewMemoryLayer(),
+	})
+	err := storage.Start(Options{})
+	require.NoError(t, err)
+	defer storage.Close()
+
+	// Set some data
+	_, err = storage.Set("test/1", testData)
+	require.NoError(t, err)
+
+	var wg sync.WaitGroup
+	var callCount int
+	var mu sync.Mutex
+
+	// Concurrently update BeforeRead and perform reads
+	for i := range 10 {
+		wg.Add(2)
+
+		// Goroutine to update BeforeRead
+		go func(idx int) {
+			defer wg.Done()
+			storage.SetBeforeRead(func(key string) {
+				mu.Lock()
+				callCount++
+				mu.Unlock()
+			})
+		}(i)
+
+		// Goroutine to perform reads
+		go func() {
+			defer wg.Done()
+			storage.Get("test/1")
+		}()
+	}
+
+	wg.Wait()
+
+	// Should complete without race conditions or panics
+	// The exact call count depends on timing, but should be <= 10
+	mu.Lock()
+	require.LessOrEqual(t, callCount, 10)
+	mu.Unlock()
+}

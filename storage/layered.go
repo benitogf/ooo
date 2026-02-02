@@ -58,6 +58,21 @@ func (l *Layered) Active() bool {
 	return l.active
 }
 
+// SetBeforeRead updates the BeforeRead callback without restarting the storage.
+// This is safe to call on already-active storage, including embedded/leveldb storage.
+func (l *Layered) SetBeforeRead(fn func(key string)) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	l.beforeRead = fn
+}
+
+// getBeforeRead returns the current BeforeRead callback in a thread-safe manner
+func (l *Layered) getBeforeRead() func(key string) {
+	l.mutex.RLock()
+	defer l.mutex.RUnlock()
+	return l.beforeRead
+}
+
 // Start initializes all layers and populates caches
 func (l *Layered) Start(opt Options) error {
 	if l.memory == nil && l.embedded == nil {
@@ -143,8 +158,8 @@ func (l *Layered) Close() {
 // Get retrieves a single value by exact key
 // Checks layers from fastest to slowest, populates faster layers on cache miss
 func (l *Layered) Get(path string) (meta.Object, error) {
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	if key.HasGlob(path) {
 		return meta.Object{}, ErrGlobNotAllowed
@@ -192,8 +207,8 @@ func (l *Layered) GetAndLock(path string) (meta.Object, error) {
 	if key.HasGlob(path) {
 		return meta.Object{}, ErrCantLockGlob
 	}
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	lock := l._getLock(path)
 	lock.Lock()
@@ -274,16 +289,16 @@ func (l *Layered) getList(path string, order string) ([]meta.Object, error) {
 
 // GetList retrieves list of values matching a glob pattern (ascending order)
 func (l *Layered) GetList(path string) ([]meta.Object, error) {
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	return l.getList(path, "asc")
 }
 
 // GetListDescending retrieves list of values matching a glob pattern (descending order)
 func (l *Layered) GetListDescending(path string) ([]meta.Object, error) {
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	return l.getList(path, "desc")
 }
@@ -307,24 +322,24 @@ func (l *Layered) getN(path string, limit int, order string) ([]meta.Object, err
 
 // GetN get last N elements of a path related value(s)
 func (l *Layered) GetN(path string, limit int) ([]meta.Object, error) {
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	return l.getN(path, limit, "desc")
 }
 
 // GetNAscending get first N elements of a path related value(s)
 func (l *Layered) GetNAscending(path string, limit int) ([]meta.Object, error) {
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	return l.getN(path, limit, "asc")
 }
 
 // GetNRange get last N elements in a time range
 func (l *Layered) GetNRange(path string, limit int, from, to int64) ([]meta.Object, error) {
-	if l.beforeRead != nil {
-		l.beforeRead(path)
+	if br := l.getBeforeRead(); br != nil {
+		br(path)
 	}
 	if !key.HasGlob(path) {
 		return nil, ErrInvalidPattern

@@ -135,6 +135,7 @@ type Layer interface {
 type Database interface {
 	Active() bool
 	Start(Options) error
+	SetBeforeRead(fn func(key string))
 	Close()
 	Keys() ([]string, error)
 	KeysRange(path string, from, to int64) ([]string, error)
