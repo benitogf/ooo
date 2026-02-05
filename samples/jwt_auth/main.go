@@ -32,6 +32,8 @@ func main() {
 		Memory:   storage.NewMemoryLayer(),
 		Embedded: ko.NewEmbeddedStorage("./auth_data"),
 	})
+	authStore.Start(storage.Options{})
+	go storage.WatchStorageNoop(authStore)
 
 	// Create JWT auth with 10 minute token expiry
 	tokenAuth := auth.New(
@@ -57,7 +59,7 @@ func main() {
 
 	// Add auth routes (/register, /authorize, /verify)
 	server.Router = mux.NewRouter()
-	tokenAuth.Router(&server)
+	tokenAuth.Routes(&server)
 
 	server.Start("0.0.0.0:8800")
 	log.Println("Server running with JWT auth")
