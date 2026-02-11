@@ -17,6 +17,7 @@ import (
 var (
 	ErrPoolNotFound   = errors.New("stream: pool not found")
 	ErrPoolCacheEmpty = errors.New("stream: pool cache empty")
+	ErrHijacked       = errors.New("stream: connection hijacked")
 )
 
 // Subscribe : monitoring or filtering of subscriptions
@@ -160,7 +161,8 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data [
 		client.mutex.Unlock()
 		if err != nil {
 			client.conn.Close()
-			return nil, err
+			// Wrap with ErrHijacked since connection was already upgraded
+			return nil, errors.Join(ErrHijacked, err)
 		}
 	}
 

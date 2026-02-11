@@ -1,11 +1,13 @@
 package ooo
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/key"
+	"github.com/benitogf/ooo/stream"
 	"github.com/gorilla/mux"
 )
 
@@ -49,7 +51,11 @@ func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 	// This prevents the race condition where broadcasts could arrive before the initial snapshot
 	client, err := server.Stream.New(_key, w, r, initialData, result.Version)
 	if err != nil {
-		server.Console.Err("ooo: filtered route", err)
+		if errors.Is(err, stream.ErrHijacked) {
+			server.Console.Err("ooo: websocket closed during init", err)
+		} else {
+			server.Console.Err("ooo: filtered route", err)
+		}
 		return err
 	}
 
