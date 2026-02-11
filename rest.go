@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/stream"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/mux"
 )
@@ -146,7 +148,11 @@ func (server *Server) read(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Upgrade") == "websocket" {
 		err := server.ws(w, r)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
+			// Only write HTTP status if connection was NOT hijacked
+			// After hijack, the HTTP response writer is invalid
+			if !errors.Is(err, stream.ErrHijacked) {
+				w.WriteHeader(http.StatusBadRequest)
+			}
 			return
 		}
 		return
