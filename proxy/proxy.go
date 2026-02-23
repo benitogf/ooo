@@ -107,7 +107,8 @@ type proxyState struct {
 	console         *coat.Console
 	cfg             *client.SubscribeConfig
 	isList          bool
-	remoteConnected bool // true after remote subscription is established
+	remoteConnected bool   // true after remote subscription is established
+	clientProtocol  string // Sec-Websocket-Protocol from first connecting client
 }
 
 func newProxyManager(silence bool) *proxyManager {
@@ -117,7 +118,7 @@ func newProxyManager(silence bool) *proxyManager {
 	}
 }
 
-func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client.SubscribeConfig, isList bool) *proxyState {
+func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client.SubscribeConfig, isList bool, clientProtocol string) *proxyState {
 	key := address + "/" + remotePath
 
 	pm.mu.Lock()
@@ -126,12 +127,13 @@ func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client
 	state, exists := pm.states[key]
 	if !exists {
 		state = &proxyState{
-			address:    address,
-			remotePath: remotePath,
-			localSubs:  make(map[*websocket.Conn]chan wsMessage),
-			console:    pm.console,
-			cfg:        cfg,
-			isList:     isList,
+			address:        address,
+			remotePath:     remotePath,
+			localSubs:      make(map[*websocket.Conn]chan wsMessage),
+			console:        pm.console,
+			cfg:            cfg,
+			isList:         isList,
+			clientProtocol: clientProtocol,
 		}
 		pm.states[key] = state
 	}
@@ -338,6 +340,13 @@ func (ps *proxyState) startRemoteSubscription() {
 		var header http.Header
 		if ps.cfg != nil {
 			header = ps.cfg.Header
+		}
+		// Forward client's Sec-Websocket-Protocol header to remote for auth
+		if ps.clientProtocol != "" {
+			if header == nil {
+				header = http.Header{}
+			}
+			header.Set("Sec-Websocket-Protocol", ps.clientProtocol)
 		}
 
 		ps.console.Log(ps.logPrefix() + ": connecting to remote")
@@ -569,13 +578,24 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 }
 
 func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, pm *proxyManager, address, remotePath string, subCfg *client.SubscribeConfig, upgrader websocket.Upgrader, isList bool) {
+	// Get client's Sec-Websocket-Protocol header - used for auth and needs to be forwarded to remote
+	clientProtocol := r.Header.Get("Sec-Websocket-Protocol")
+
+	// Build response headers - echo back subprotocol if client requested one
+	// This is required for browser WebSocket connections that use Sec-Websocket-Protocol for auth
+	var responseHeader http.Header
+	if clientProtocol != "" {
+		responseHeader = http.Header{}
+		responseHeader.Set("Sec-Websocket-Protocol", clientProtocol)
+	}
+
 	// Upgrade local connection
-	localConn, err := upgrader.Upgrade(w, r, nil)
+	localConn, err := upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		return
 	}
 
-	state := pm.getOrCreateState(address, remotePath, subCfg, isList)
+	state := pm.getOrCreateState(address, remotePath, subCfg, isList, clientProtocol)
 	msgChan := state.addSubscriber(localConn)
 
 	// Forward messages to local subscriber

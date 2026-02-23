@@ -14,6 +14,7 @@ import (
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/proxy"
 	"github.com/goccy/go-json"
+	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
 
@@ -740,6 +741,150 @@ func TestProxyLateSubscriberEmptyList(t *testing.T) {
 	require.Len(t, received2, 1, "late subscriber should receive empty list")
 	require.Empty(t, received2[0], "late subscriber should get empty list []")
 	mu.Unlock()
+}
+
+// TestProxyWebSocketWithBearerToken tests that a WebSocket connection with a bearer token
+// in the Sec-Websocket-Protocol header works through the proxy.
+// The remote has NO auth - the issue is the proxy rejecting the connection when client sends token.
+// This test verifies that the proxy echoes back the subprotocol to complete the handshake.
+func TestProxyWebSocketWithBearerToken(t *testing.T) {
+	// Use an arbitrary JWT-like token as shown in the browser screenshot
+	testToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QifQ.fake"
+
+	// Remote server - NO authentication required
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("settings")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	// Set initial data on remote
+	data, _ := json.Marshal(Settings{Name: "test", Value: 42})
+	_, err := remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+
+	// Proxy server - no auth required at proxy level either
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err = proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	// Test WebSocket connection with Sec-Websocket-Protocol header
+	// Browsers require the server to echo back the selected subprotocol
+	dialer := &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: 2 * time.Second,
+		Subprotocols:     []string{"bearer", testToken},
+	}
+
+	wsURL := "ws://" + proxyServer.Address + "/settings/device1"
+	conn, resp, err := dialer.Dial(wsURL, nil)
+	require.NoError(t, err, "WebSocket connection should succeed with bearer token subprotocol")
+	defer conn.Close()
+
+	// Verify the server echoed back the subprotocol (required for browser compatibility)
+	require.NotNil(t, resp)
+	negotiatedProtocol := resp.Header.Get("Sec-Websocket-Protocol")
+	require.NotEmpty(t, negotiatedProtocol, "proxy must echo back subprotocol for browser compatibility")
+
+	// Read the initial message
+	_, message, err := conn.ReadMessage()
+	require.NoError(t, err)
+	require.NotEmpty(t, message)
+}
+
+// TestProxyWebSocketWithBearerTokenAuthRequired tests that the proxy forwards
+// the bearer token to a remote server that requires authentication.
+func TestProxyWebSocketWithBearerTokenAuthRequired(t *testing.T) {
+	// Use an arbitrary JWT-like token
+	testToken := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRlc3QifQ.valid"
+
+	// Remote server - REQUIRES authentication via Sec-Websocket-Protocol header
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Static = true
+	remote.OpenFilter("settings")
+	remote.Audit = func(r *http.Request) bool {
+		// Check for bearer token in Sec-Websocket-Protocol header
+		protocols := r.Header.Get("Sec-Websocket-Protocol")
+		if protocols == "" {
+			return false
+		}
+		// Protocol format: "bearer, <token>" - verify token is present
+		return strings.Contains(protocols, testToken)
+	}
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	// Set initial data on remote (direct storage access bypasses Audit)
+	data, _ := json.Marshal(Settings{Name: "protected", Value: 42})
+	_, err := remote.Storage.Set("settings", data)
+	require.NoError(t, err)
+
+	// Proxy server - no auth at proxy level, should forward client headers to remote
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err = proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	wsURL := "ws://" + proxyServer.Address + "/settings/device1"
+
+	// Test 1: INVALID token - should fail
+	invalidToken := "invalid.token.here"
+	invalidDialer := &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: 2 * time.Second,
+		Subprotocols:     []string{"bearer", invalidToken},
+	}
+
+	invalidConn, _, err := invalidDialer.Dial(wsURL, nil)
+	if err == nil && invalidConn != nil {
+		// Connection established at proxy level, but remote should reject
+		_, _, readErr := invalidConn.ReadMessage()
+		require.Error(t, readErr, "should fail to read from remote with invalid token")
+		invalidConn.Close()
+	}
+	// If dial fails, that's also acceptable - auth rejected
+
+	// Test 2: VALID token - should succeed
+	// Previous invalid connection failed, so proxy state was cleaned up
+	validDialer := &websocket.Dialer{
+		Proxy:            http.ProxyFromEnvironment,
+		HandshakeTimeout: 2 * time.Second,
+		Subprotocols:     []string{"bearer", testToken},
+	}
+
+	conn, resp, err := validDialer.Dial(wsURL, nil)
+	require.NoError(t, err, "WebSocket connection should succeed - proxy must forward token to authenticated remote")
+	defer conn.Close()
+
+	// Verify subprotocol was echoed back
+	require.NotNil(t, resp)
+	negotiatedProtocol := resp.Header.Get("Sec-Websocket-Protocol")
+	require.NotEmpty(t, negotiatedProtocol, "proxy must echo back subprotocol")
+
+	// Read the initial message - should contain the protected data
+	_, message, err := conn.ReadMessage()
+	require.NoError(t, err, "should receive message from authenticated remote")
+	require.NotEmpty(t, message)
+	require.Contains(t, string(message), "protected", "should receive protected data after successful auth")
 }
 
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
