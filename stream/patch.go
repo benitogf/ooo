@@ -106,7 +106,6 @@ func processListSet(cache *Cache, poolKey string, obj *meta.Object, filtered *me
 	}
 
 	// Insert new item
-	oldLen := len(cache.Objects)
 	// Capture old cache state for comparison
 	oldCache := make([]meta.Object, len(cache.Objects))
 	copy(oldCache, cache.Objects)
@@ -124,7 +123,9 @@ func processListSet(cache *Cache, poolKey string, obj *meta.Object, filtered *me
 
 	if actualPos >= 0 && itemPushedOut {
 		// Item is in the filtered list AND another was pushed out
-		return generateAddRemoveResult(cache.Objects, actualPos, filtered, oldLen-1, noPatch)
+		// Find the position of the removed item in the OLD cache
+		removePos := findRemovedPosition(oldCache, finalList)
+		return generateAddRemoveResult(cache.Objects, actualPos, filtered, removePos, noPatch)
 	} else if actualPos >= 0 {
 		// Item is in the filtered list, no item pushed out
 		return generateListResult(cache.Objects, "add", actualPos, filtered, noPatch)
@@ -228,6 +229,25 @@ func findPosition(list []meta.Object, path string) int {
 		}
 	}
 	return -1
+}
+
+// findRemovedPosition finds the position of the item in oldList that is not in newList.
+// This is used to determine the correct remove position for add+remove patches.
+// Returns the position in oldList, or len(oldList)-1 as fallback.
+func findRemovedPosition(oldList, newList []meta.Object) int {
+	// Build a set of paths in newList for O(1) lookup
+	newPaths := make(map[string]struct{}, len(newList))
+	for _, item := range newList {
+		newPaths[item.Path] = struct{}{}
+	}
+	// Find the item in oldList that's not in newList
+	for i, item := range oldList {
+		if _, exists := newPaths[item.Path]; !exists {
+			return i
+		}
+	}
+	// Fallback (shouldn't happen if called correctly)
+	return len(oldList) - 1
 }
 
 // generateListResult creates a BroadcastResult for list operations
