@@ -553,6 +553,87 @@ func TestProcessBroadcast_ListAddRemovePatch(t *testing.T) {
 	}
 }
 
+// Test that verifies the correct remove position for OrderAsc limit filter
+// Bug: remove position was always oldLen-1, but for OrderAsc it should be 0
+func TestProcessBroadcast_ListAddRemovePatch_OrderAsc(t *testing.T) {
+	// Create a filter that limits to 3 items, sorted ascending (oldest first for display)
+	// but keeps the NEWEST items (removes oldest when over limit)
+	limitFilter := func(key string, objs []meta.Object) ([]meta.Object, error) {
+		// Sort by Created descending to find newest
+		for i := 0; i < len(objs)-1; i++ {
+			for j := i + 1; j < len(objs); j++ {
+				if objs[i].Created < objs[j].Created {
+					objs[i], objs[j] = objs[j], objs[i]
+				}
+			}
+		}
+		// Limit to 3 newest
+		if len(objs) > 3 {
+			objs = objs[:3]
+		}
+		// Re-sort ascending for display (oldest first)
+		for i := 0; i < len(objs)-1; i++ {
+			for j := i + 1; j < len(objs); j++ {
+				if objs[i].Created > objs[j].Created {
+					objs[i], objs[j] = objs[j], objs[i]
+				}
+			}
+		}
+		return objs, nil
+	}
+
+	// Start with exactly 3 items sorted ascending (oldest first)
+	// Client sees: [item1(oldest), item2, item3(newest)]
+	cache := &Cache{
+		Objects: []meta.Object{
+			{Path: "items/1", Created: 100, Data: json.RawMessage(`"item1"`)}, // index 0 - oldest
+			{Path: "items/2", Created: 200, Data: json.RawMessage(`"item2"`)}, // index 1
+			{Path: "items/3", Created: 300, Data: json.RawMessage(`"item3"`)}, // index 2 - newest
+		},
+	}
+
+	// Add a new newest item (will push out items/1 which is at index 0)
+	newObj := &meta.Object{
+		Path:    "items/4",
+		Created: 400,
+		Data:    json.RawMessage(`"item4"`),
+	}
+
+	result := ProcessBroadcast(cache, "items/*", "set", newObj, noopFilterObject, limitFilter, false)
+
+	if result.Skip {
+		t.Error("expected add+remove result, not skip")
+	}
+	if result.Snapshot {
+		t.Error("expected patch, not snapshot")
+	}
+
+	// Parse the patch
+	var patch []map[string]interface{}
+	if err := json.Unmarshal(result.Data, &patch); err != nil {
+		t.Fatalf("failed to unmarshal patch: %v", err)
+	}
+	if len(patch) != 2 {
+		t.Errorf("expected 2 operations (add+remove), got %d", len(patch))
+	}
+
+	// First operation should be remove at position 0 (oldest item was at beginning)
+	if patch[0]["op"] != "remove" {
+		t.Errorf("expected first op to be 'remove', got %v", patch[0]["op"])
+	}
+	if patch[0]["path"] != "/0" {
+		t.Errorf("expected remove at /0 (oldest item for OrderAsc), got %v", patch[0]["path"])
+	}
+
+	// Second operation should be add at position 2 (new item at end after remove)
+	if patch[1]["op"] != "add" {
+		t.Errorf("expected second op to be 'add', got %v", patch[1]["op"])
+	}
+	if patch[1]["path"] != "/2" {
+		t.Errorf("expected add at /2 (newest item at end for OrderAsc), got %v", patch[1]["path"])
+	}
+}
+
 func TestGenerateObjectPatch(t *testing.T) {
 	t.Run("nil old object", func(t *testing.T) {
 		newObj := &meta.Object{Path: "test", Created: 100}
