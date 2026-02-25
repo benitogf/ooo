@@ -445,7 +445,8 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 	pm := newProxyManager(silence)
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin:  func(r *http.Request) bool { return true },
+		Subprotocols: []string{"bearer"},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
@@ -512,7 +513,8 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 	pm := newProxyManager(silence)
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin:  func(r *http.Request) bool { return true },
+		Subprotocols: []string{"bearer"},
 	}
 
 	// For list routes, we need to handle both the base path and specific items
@@ -769,7 +771,8 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 	pm := newProxyManager(silence)
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin:  func(r *http.Request) bool { return true },
+		Subprotocols: []string{"bearer"},
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {

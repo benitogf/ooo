@@ -792,9 +792,13 @@ func TestProxyWebSocketWithBearerToken(t *testing.T) {
 	defer conn.Close()
 
 	// Verify the server echoed back the subprotocol (required for browser compatibility)
+	// CRITICAL: The server must respond with exactly "bearer" (one of the requested subprotocols),
+	// NOT the full header value "bearer, <token>". Browsers reject responses that don't match
+	// one of the requested subprotocols exactly.
+	// This requires the upgrader to have Subprotocols: []string{"bearer"} configured.
 	require.NotNil(t, resp)
 	negotiatedProtocol := resp.Header.Get("Sec-Websocket-Protocol")
-	require.NotEmpty(t, negotiatedProtocol, "proxy must echo back subprotocol for browser compatibility")
+	require.Equal(t, "bearer", negotiatedProtocol, "proxy must negotiate exactly 'bearer' subprotocol - not the full header value")
 
 	// Read the initial message
 	_, message, err := conn.ReadMessage()
