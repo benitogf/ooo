@@ -17,7 +17,6 @@ import (
 )
 
 var (
-	ErrClientRequired     = errors.New("io: Client is required")
 	ErrHostRequired       = errors.New("io: Host is required")
 	ErrRequestFailed      = errors.New("io: request failed")
 	ErrEmptyKey           = errors.New("io: empty key")
@@ -32,6 +31,14 @@ const (
 	DefaultRetryDelay = 100 * time.Millisecond
 	// DefaultMaxResponseSize is the maximum response body size (10MB)
 	DefaultMaxResponseSize int64 = 10 * 1024 * 1024
+	// DefaultTimeout is the default HTTP client timeout
+	DefaultTimeout = 10 * time.Second
+	// DefaultIdleConnTimeout is the default idle connection timeout
+	DefaultIdleConnTimeout = 90 * time.Second
+	// DefaultTLSHandshakeTimeout is the default TLS handshake timeout
+	DefaultTLSHandshakeTimeout = 10 * time.Second
+	// DefaultResponseHeaderTimeout is the default response header timeout
+	DefaultResponseHeaderTimeout = 10 * time.Second
 )
 
 // RetryConfig holds retry configuration for remote operations.
@@ -78,13 +85,20 @@ func (c *RemoteConfig) URL(path string) string {
 
 // Validate checks that required fields are set and applies defaults.
 func (c *RemoteConfig) Validate() error {
-	if c.Client == nil {
-		return ErrClientRequired
-	}
 	if c.Host == "" {
 		return ErrHostRequired
 	}
 	// Apply defaults
+	if c.Client == nil {
+		c.Client = &http.Client{
+			Timeout: DefaultTimeout,
+			Transport: &http.Transport{
+				IdleConnTimeout:       DefaultIdleConnTimeout,
+				TLSHandshakeTimeout:   DefaultTLSHandshakeTimeout,
+				ResponseHeaderTimeout: DefaultResponseHeaderTimeout,
+			},
+		}
+	}
 	if c.MaxResponseSize == 0 {
 		c.MaxResponseSize = DefaultMaxResponseSize
 	}
