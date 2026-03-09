@@ -240,21 +240,23 @@ func TestRemoteEmptyKeyVsRouteNotDefined(t *testing.T) {
 }
 
 func TestRemoteConfigValidation(t *testing.T) {
-	// Missing Client
+	// Missing Host
 	cfg := ooio.RemoteConfig{
-		Host: "localhost:8080",
+		Client: &http.Client{},
 	}
 	err := ooio.RemoteSet(cfg, "test", Thing{})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "Client is required")
-
-	// Missing Host
-	cfg = ooio.RemoteConfig{
-		Client: &http.Client{},
-	}
-	err = ooio.RemoteSet(cfg, "test", Thing{})
-	require.Error(t, err)
 	require.Contains(t, err.Error(), "Host is required")
+
+	// Default client is used when none provided - verify it has timeouts
+	cfg = ooio.RemoteConfig{
+		Host: "localhost:8080",
+	}
+	require.Nil(t, cfg.Client)
+	err = cfg.Validate()
+	require.NoError(t, err)
+	require.NotNil(t, cfg.Client)
+	require.Equal(t, ooio.DefaultTimeout, cfg.Client.Timeout)
 }
 
 func TestRemotePathValidation(t *testing.T) {
