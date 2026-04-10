@@ -3,7 +3,7 @@ package stream
 import (
 	"testing"
 
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 
 	"github.com/benitogf/ooo/meta"
 )

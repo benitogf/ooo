@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/benitogf/ooo/meta"
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 )
 
 var benchData = json.RawMessage(`{"name": "benchmark", "value": 12345, "nested": {"a": 1, "b": 2}}`)

@@ -5,7 +5,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 )
 
 // bufferPool is a pool of bytes.Buffer for reducing allocations in encode operations.

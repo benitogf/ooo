@@ -4,7 +4,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"

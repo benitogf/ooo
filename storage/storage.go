@@ -4,7 +4,7 @@ import (
 	"errors"
 	"hash/fnv"
 
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 
 	"github.com/benitogf/ooo/meta"
 )

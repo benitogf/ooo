@@ -7,7 +7,7 @@ import (
 
 	"github.com/benitogf/jsonpatch"
 	"github.com/benitogf/ooo/meta"
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 )
 
 var (

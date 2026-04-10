@@ -12,7 +12,7 @@ import (
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/meta"
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 
 	"github.com/stretchr/testify/require"
 )

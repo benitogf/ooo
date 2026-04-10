@@ -12,7 +12,7 @@ import (
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/stream"
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 	"github.com/gorilla/mux"
 )
 
