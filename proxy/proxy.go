@@ -136,6 +136,12 @@ func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client
 			clientProtocol: clientProtocol,
 		}
 		pm.states[key] = state
+	} else {
+		// Update protocol for reused state — a new client may have
+		// different auth credentials than the previous one.
+		state.mu.Lock()
+		state.clientProtocol = clientProtocol
+		state.mu.Unlock()
 	}
 	return state
 }
@@ -176,6 +182,9 @@ func (ps *proxyState) addSubscriber(conn *websocket.Conn) chan wsMessage {
 	ps.mu.Unlock()
 
 	if wasEmpty {
+		// Wait for any in-flight remote subscription goroutine to finish
+		// before starting a new one — prevents using stale state.
+		ps.wg.Wait()
 		// First subscriber - start remote subscription
 		// The remote will send us the initial snapshot which we'll forward
 		ps.startRemoteSubscription()
@@ -342,11 +351,14 @@ func (ps *proxyState) startRemoteSubscription() {
 			header = ps.cfg.Header
 		}
 		// Forward client's Sec-Websocket-Protocol header to remote for auth
-		if ps.clientProtocol != "" {
+		ps.mu.Lock()
+		protocol := ps.clientProtocol
+		ps.mu.Unlock()
+		if protocol != "" {
 			if header == nil {
 				header = http.Header{}
 			}
-			header.Set("Sec-Websocket-Protocol", ps.clientProtocol)
+			header.Set("Sec-Websocket-Protocol", protocol)
 		}
 
 		ps.console.Log(ps.logPrefix() + ": connecting to remote")

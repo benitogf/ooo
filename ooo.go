@@ -210,13 +210,18 @@ func (server *Server) getLimitFiltersInfo() map[string]filters.LimitFilterInfo {
 		if reg.filter.Order() == filters.OrderAsc {
 			order = "asc"
 		}
-		result[path] = filters.LimitFilterInfo{
+		info := filters.LimitFilterInfo{
 			Limit:        reg.filter.Limit(),
 			LimitDynamic: reg.filter.IsDynamic(),
 			Order:        order,
 			Description:  reg.description,
 			Schema:       reg.schema,
 		}
+		if reg.filter.HasMaxAge() {
+			info.MaxAge = reg.filter.MaxAge().String()
+			info.MaxAgeDynamic = reg.filter.IsDynamic()
+		}
+		result[path] = info
 	}
 	return result
 }
@@ -232,21 +237,25 @@ func (server *Server) getFiltersInfo() []ui.FilterInfo {
 			continue
 		}
 		result = append(result, ui.FilterInfo{
-			Path:           f.Path,
-			Type:           f.Type,
-			CanRead:        f.CanRead,
-			CanWrite:       f.CanWrite,
-			CanDelete:      f.CanDelete,
-			IsGlob:         f.IsGlob,
-			Limit:          f.Limit,
-			LimitDynamic:   f.LimitDynamic,
-			Order:          f.Order,
-			DescWrite:      f.DescWrite,
-			DescRead:       f.DescRead,
-			DescDelete:     f.DescDelete,
-			DescAfterWrite: f.DescAfterWrite,
-			DescLimit:      f.DescLimit,
-			Schema:         f.Schema,
+			Path:            f.Path,
+			Type:            f.Type,
+			CanRead:         f.CanRead,
+			CanWrite:        f.CanWrite,
+			CanDelete:       f.CanDelete,
+			IsGlob:          f.IsGlob,
+			Limit:           f.Limit,
+			LimitDynamic:    f.LimitDynamic,
+			MaxAge:          f.MaxAge,
+			MaxAgeDynamic:   f.MaxAgeDynamic,
+			Order:           f.Order,
+			CleanupEnabled:  f.CleanupEnabled,
+			CleanupInterval: f.CleanupInterval,
+			DescWrite:       f.DescWrite,
+			DescRead:        f.DescRead,
+			DescDelete:      f.DescDelete,
+			DescAfterWrite:  f.DescAfterWrite,
+			DescLimit:       f.DescLimit,
+			Schema:          f.Schema,
 		})
 	}
 	return result

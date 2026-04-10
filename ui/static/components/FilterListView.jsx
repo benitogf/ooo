@@ -550,6 +550,14 @@ function FilterListView({ filterPath, fromFilter, source }) {
           <span className={`connection-status ${connected ? 'connected' : 'disconnected'}`}>
             {connected ? <IconWifi /> : <IconWifiOff />}
           </span>
+          {filterInfo && filterInfo.type === 'limit' && (
+            <span className="filter-constraint-info">
+              {filterInfo.limit > 0 && <span className="constraint-tag" title={filterInfo.limitDynamic ? 'Dynamic limit' : 'Fixed limit'}>max {filterInfo.limitDynamic ? `${filterInfo.limit}*` : filterInfo.limit}</span>}
+              {filterInfo.maxAge && <span className="constraint-tag" title={filterInfo.maxAgeDynamic ? 'Dynamic max age' : 'Fixed max age'}>age {filterInfo.maxAgeDynamic ? `${filterInfo.maxAge}*` : filterInfo.maxAge}</span>}
+              {filterInfo.order && <span className="constraint-tag">{filterInfo.order}</span>}
+              {filterInfo.cleanupEnabled && <span className="constraint-tag" title={`Periodic cleanup every ${filterInfo.cleanupInterval}`}>cleanup {filterInfo.cleanupInterval}</span>}
+            </span>
+          )}
         </span>
         <div className="header-right">
           {hasMultipleGlobs && items.length > 0 && (

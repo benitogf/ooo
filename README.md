@@ -201,20 +201,53 @@ server.DeleteFilter("books/protected", func(key string) error {
 
 `LimitFilter` is implemented using a `ReadListFilter` (to limit visible items), a noop `WriteFilter` (to allow writes), a `DeleteFilter` (to allow deletes), and an `AfterWriteFilter` (to trigger cleanup). This means it includes open read and write access.
 
-```go
-// Limit list to N most recent entries (auto-deletes oldest)
-server.LimitFilter("logs/*", filters.LimitFilterConfig{Limit: 100})
+Supports count-based limits, time-based retention, or both combined. At least one constraint must be provided.
 
-// With ascending order (oldest first in results)
-server.LimitFilter("events/*", filters.LimitFilterConfig{
-    Limit: 50,
-    Order: filters.OrderAsc,
+```go
+// Count-only: keep N most recent entries (auto-deletes oldest)
+server.LimitFilter("logs/*", ooo.LimitFilterConfig{Limit: 100})
+
+// Time-only: keep entries younger than MaxAge (retention policy)
+server.LimitFilter("events/*", ooo.LimitFilterConfig{
+    MaxAge: 24 * time.Hour,
+})
+
+// Combined: both count and time constraints (stricter wins)
+server.LimitFilter("metrics/*", ooo.LimitFilterConfig{
+    Limit:  1000,
+    MaxAge: 7 * 24 * time.Hour,
+})
+
+// Dynamic limit based on runtime state
+server.LimitFilter("games/*", ooo.LimitFilterConfig{
+    LimitFunc: func() int { return getDeviceCap() },
+    Order:     ooo.OrderAsc,
+})
+
+// Dynamic max age from external config
+server.LimitFilter("audit/*", ooo.LimitFilterConfig{
+    MaxAgeFunc: func() time.Duration { return getRetentionPolicy() },
+})
+
+// With periodic background cleanup
+server.LimitFilter("telemetry/*", ooo.LimitFilterConfig{
+    MaxAge: 30 * 24 * time.Hour,
+    Cleanup: ooo.CleanupConfig{
+        Enabled:  true,
+        Interval: 10 * time.Minute, // default: 10min, minimum: 1min
+    },
 })
 ```
 
 `LimitFilterConfig` options:
-- `Limit` - Maximum number of entries (required)
+- `Limit` - Maximum number of entries
+- `LimitFunc` - Dynamic limit function (`func() int`)
+- `MaxAge` - Maximum age of entries (`time.Duration`)
+- `MaxAgeFunc` - Dynamic max age function (`func() time.Duration`)
 - `Order` - Sort order: `OrderDesc` (default, most recent first) or `OrderAsc` (oldest first)
+- `Cleanup` - Periodic background cleanup config (`CleanupConfig{Enabled, Interval}`)
+- `Description` - Human-readable description for the explorer UI
+- `Schema` - JSON schema struct for UI display
 
 ### Audit
 

@@ -17,6 +17,14 @@ type LimitFilterConfig = filters.LimitFilterConfig
 // Use this to provide a dynamic limit function that is called each time the limit is needed.
 type LimitFunc = filters.LimitFunc
 
+// MaxAgeFunc is an alias for filters.MaxAgeFunc for convenience.
+// Use this to provide a dynamic max age function that is called each time the max age is needed.
+type MaxAgeFunc = filters.MaxAgeFunc
+
+// CleanupConfig is an alias for filters.CleanupConfig for convenience.
+// Use this with LimitFilter to configure periodic background cleanup.
+type CleanupConfig = filters.CleanupConfig
+
 // Order constants for LimitFilterConfig
 const (
 	OrderDesc = filters.OrderDesc // Most recent first (default)
@@ -105,8 +113,8 @@ func (server *Server) OpenFilter(name string, cfg ...FilterConfig) {
 }
 
 // LimitFilter creates a limit filter for a glob pattern path that maintains
-// a maximum number of entries. Uses a ReadListFilter (meta-based) to limit the view
-// (so clients never see more than limit items) and AfterWrite to delete old entries.
+// count and/or time-based constraints. Uses a ReadListFilter (meta-based) to limit the view
+// and AfterWrite to delete old entries. Supports optional periodic background cleanup.
 // Also adds write and delete filters to allow creating and deleting items.
 func (server *Server) LimitFilter(path string, cfg filters.LimitFilterConfig) {
 	checkReservedPath(path)
@@ -127,7 +135,7 @@ func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter, 
 	server.filters.AddWrite(path, NoopFilter, cfg...)
 	server.filters.AddDelete(path, NoopHook, cfg...)
 
-	// ReadListFilter ensures clients never see more than limit items (meta-based, more efficient)
+	// ReadListFilter ensures clients never see more than the configured constraints
 	server.filters.AddReadList(path, lf.ReadListFilter, cfg...)
 
 	// Also allow reading individual items that match the glob pattern
@@ -137,6 +145,14 @@ func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter, 
 	server.filters.AddAfterWrite(path, func(k string) {
 		lf.Check()
 	}, cfg...)
+
+	// Start periodic cleanup if configured
+	lf.StartCleanup()
+
+	// Register stop on server close
+	server.preCloseCleanupsMu.Lock()
+	server.preCloseCleanups = append(server.preCloseCleanups, lf.StopCleanup)
+	server.preCloseCleanupsMu.Unlock()
 
 	// Register for explorer display
 	server.RegisterLimitFilter(lf, description, schema)

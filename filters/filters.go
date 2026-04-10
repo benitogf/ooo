@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/goccy/go-json"
+	"github.com/benitogf/go-json"
 
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
@@ -534,30 +534,38 @@ func (f *Filters) Paths() []string {
 
 // FilterInfo contains detailed information about a filter path
 type FilterInfo struct {
-	Path           string         `json:"path"`
-	Type           string         `json:"type"`                     // "open", "read-only", "write-only", "limit", "custom"
-	CanRead        bool           `json:"canRead"`                  // Has read filter (object or list)
-	CanWrite       bool           `json:"canWrite"`                 // Has write filter
-	CanDelete      bool           `json:"canDelete"`                // Has delete filter
-	IsGlob         bool           `json:"isGlob"`                   // Path contains wildcard
-	Limit          int            `json:"limit,omitempty"`          // Limit value if it's a limit filter
-	LimitDynamic   bool           `json:"limitDynamic,omitempty"`   // True if limit uses dynamic function
-	Order          string         `json:"order,omitempty"`          // Sort order for limit filters ("desc" or "asc")
-	DescWrite      string         `json:"descWrite,omitempty"`      // Description for write filter
-	DescRead       string         `json:"descRead,omitempty"`       // Description for read filter
-	DescDelete     string         `json:"descDelete,omitempty"`     // Description for delete filter
-	DescAfterWrite string         `json:"descAfterWrite,omitempty"` // Description for after-write watcher
-	DescLimit      string         `json:"descLimit,omitempty"`      // Description for limit filter
-	Schema         map[string]any `json:"schema,omitempty"`         // JSON schema for the data structure
+	Path            string         `json:"path"`
+	Type            string         `json:"type"`                      // "open", "read-only", "write-only", "limit", "custom"
+	CanRead         bool           `json:"canRead"`                   // Has read filter (object or list)
+	CanWrite        bool           `json:"canWrite"`                  // Has write filter
+	CanDelete       bool           `json:"canDelete"`                 // Has delete filter
+	IsGlob          bool           `json:"isGlob"`                    // Path contains wildcard
+	Limit           int            `json:"limit,omitempty"`           // Limit value if it's a limit filter
+	LimitDynamic    bool           `json:"limitDynamic,omitempty"`    // True if limit uses dynamic function
+	MaxAge          string         `json:"maxAge,omitempty"`          // Max age duration if configured
+	MaxAgeDynamic   bool           `json:"maxAgeDynamic,omitempty"`   // True if max age uses dynamic function
+	Order           string         `json:"order,omitempty"`           // Sort order for limit filters ("desc" or "asc")
+	CleanupEnabled  bool           `json:"cleanupEnabled,omitempty"`  // True if periodic cleanup is enabled
+	CleanupInterval string         `json:"cleanupInterval,omitempty"` // Cleanup interval duration
+	DescWrite       string         `json:"descWrite,omitempty"`       // Description for write filter
+	DescRead        string         `json:"descRead,omitempty"`        // Description for read filter
+	DescDelete      string         `json:"descDelete,omitempty"`      // Description for delete filter
+	DescAfterWrite  string         `json:"descAfterWrite,omitempty"`  // Description for after-write watcher
+	DescLimit       string         `json:"descLimit,omitempty"`       // Description for limit filter
+	Schema          map[string]any `json:"schema,omitempty"`          // JSON schema for the data structure
 }
 
 // LimitFilterInfo stores limit filter metadata
 type LimitFilterInfo struct {
-	Limit        int
-	LimitDynamic bool
-	Order        string
-	Description  string
-	Schema       map[string]any
+	Limit           int
+	LimitDynamic    bool
+	MaxAge          string // human-readable duration, e.g. "8760h0m0s"
+	MaxAgeDynamic   bool
+	Order           string
+	CleanupEnabled  bool
+	CleanupInterval string // human-readable duration
+	Description     string
+	Schema          map[string]any
 }
 
 // PathsInfo returns detailed information about all registered filter paths.
@@ -635,7 +643,11 @@ func (f *Filters) PathsInfo(limitFilters map[string]LimitFilterInfo) []FilterInf
 			info.Type = "limit"
 			info.Limit = lf.Limit
 			info.LimitDynamic = lf.LimitDynamic
+			info.MaxAge = lf.MaxAge
+			info.MaxAgeDynamic = lf.MaxAgeDynamic
 			info.Order = lf.Order
+			info.CleanupEnabled = lf.CleanupEnabled
+			info.CleanupInterval = lf.CleanupInterval
 			if lf.Description != "" {
 				info.DescLimit = lf.Description
 			}
