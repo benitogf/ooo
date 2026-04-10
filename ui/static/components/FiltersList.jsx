@@ -83,8 +83,24 @@ function FiltersList({ clockConnected }) {
   };
 
   const getFilterTypeBadge = (filter) => {
-    const { type, limit, limitDynamic, canRead, canWrite } = filter;
+    const { type, limit, limitDynamic, maxAge, maxAgeDynamic, canRead, canWrite } = filter;
     if (type === 'limit') {
+      const hasCount = limit > 0;
+      const hasAge = !!maxAge;
+      const isDynamic = limitDynamic || maxAgeDynamic;
+
+      if (hasCount && hasAge) {
+        // Combined: LIMIT (100 / 1h) or LIMIT (100* / 1h*)
+        const countPart = limitDynamic ? `${limit}*` : limit;
+        const agePart = maxAgeDynamic ? `${maxAge}*` : maxAge;
+        return <span className="badge-limit" title={isDynamic ? 'Dynamic constraint (current values shown)' : 'Fixed constraints'}>LIMIT ({countPart} / {agePart})</span>;
+      }
+      if (hasAge) {
+        // Time-only: RETENTION (1h) or RETENTION (1h*)
+        const agePart = maxAgeDynamic ? `${maxAge}*` : maxAge;
+        return <span className="badge-limit" title={maxAgeDynamic ? 'Dynamic max age (current value shown)' : 'Fixed max age'}>RETENTION ({agePart})</span>;
+      }
+      // Count-only (original behavior)
       const limitDisplay = limitDynamic ? `${limit}*` : limit;
       return <span className="badge-limit" title={limitDynamic ? 'Dynamic limit (current value shown)' : 'Fixed limit'}>LIMIT ({limitDisplay})</span>;
     }

@@ -21,7 +21,7 @@ This directory contains example code demonstrating various features of the ooo l
 |--------|-------------|----------|
 | [persistent_storage_ko](./persistent_storage_ko) | Persistent storage with LevelDB | `go get github.com/benitogf/ko` |
 | [jwt_auth](./jwt_auth) | JWT authentication | `go get github.com/benitogf/auth github.com/benitogf/ko` |
-| [limit_filter](./limit_filter) | Capped collections with auto-cleanup | (none) |
+| [limit_filter](./limit_filter) | Count limits, time retention, dynamic functions, cleanup | (none) |
 | [limit_filter_with_validation](./limit_filter_with_validation) | LimitFilter with strict schema validation | (none) |
 
 ## Ecosystem Integration Samples

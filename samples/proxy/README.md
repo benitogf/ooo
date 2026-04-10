@@ -1,4 +1,4 @@
-# 15 - Proxy Routes
+# Proxy Routes
 
 Demonstrates using the proxy package to expose routes from remote OOO servers with path remapping.
 

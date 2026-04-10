@@ -508,6 +508,22 @@ body {
   color: #00d4aa;
   border: 1px solid rgba(0, 212, 170, 0.3);
 }
+.filter-constraint-info {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.constraint-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 500;
+  background: rgba(138, 43, 226, 0.1);
+  color: #a855f7;
+  border: 1px solid rgba(138, 43, 226, 0.2);
+}
 .badge-limit {
   display: inline-block;
   padding: 3px 10px;

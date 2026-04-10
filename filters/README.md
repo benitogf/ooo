@@ -102,6 +102,31 @@ server.Filters.AddAfterWrite("events/*", func(key string) {
 })
 ```
 
+### LimitFilter
+
+LimitFilter maintains count and/or time constraints on glob paths.
+
+```go
+lf, err := filters.NewLimitFilter("logs/*", filters.LimitFilterConfig{
+    Limit:  100,                    // max entries (count constraint)
+    MaxAge: 24 * time.Hour,         // max age (time constraint)
+    Order:  filters.OrderDesc,      // sort order (default: desc)
+    Cleanup: filters.CleanupConfig{ // optional periodic background cleanup
+        Enabled:  true,
+        Interval: 10 * time.Minute, // default: 10min, minimum: 1min
+    },
+}, db)
+```
+
+Supports dynamic constraints via functions:
+
+```go
+lf, err := filters.NewLimitFilter("logs/*", filters.LimitFilterConfig{
+    LimitFunc:  func() int { return currentLimit },
+    MaxAgeFunc: func() time.Duration { return currentRetention },
+}, db)
+```
+
 ## Types
 
 | Type | Signature | Purpose |
@@ -111,3 +136,5 @@ server.Filters.AddAfterWrite("events/*", func(key string) {
 | `ApplyList` | `func(key string, objs []meta.Object) ([]meta.Object, error)` | List read filter |
 | `Block` | `func(key string) error` | Delete blocker |
 | `Notify` | `func(key string)` | Post-write callback |
+| `LimitFunc` | `func() int` | Dynamic count limit |
+| `MaxAgeFunc` | `func() time.Duration` | Dynamic time limit |
