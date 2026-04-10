@@ -7,7 +7,7 @@ require (
 	github.com/benitogf/jsondiff v0.0.0-20220926080659-c3db9b84b559
 	github.com/benitogf/jsonpatch v0.0.0-20260109052650-eec54232a9a2
 	github.com/getlantern/httptest v0.0.0-20161025015934-4b40f4c7e590
-	github.com/goccy/go-json v0.10.5
+	github.com/goccy/go-json v0.10.6
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
@@ -30,3 +30,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/goccy/go-json => github.com/TelpeNight/goccy-go-json v0.10.6-0.20260107154047-6d231cc79430
