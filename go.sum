@@ -1,3 +1,5 @@
+github.com/TelpeNight/goccy-go-json v0.10.6-0.20260107154047-6d231cc79430 h1:BsWXLLU9PBze5abJ+DqrjAiMLIt0ot5yFALic1l++jc=
+github.com/TelpeNight/goccy-go-json v0.10.6-0.20260107154047-6d231cc79430/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/bclicn/color v0.0.0-20180711051946-108f2023dc84 h1:cutFptzj+ospnc1PETUqcSVTH3VQ44Bi0rpt3nE9gvo=
 github.com/bclicn/color v0.0.0-20180711051946-108f2023dc84/go.mod h1:Va9ap1qxjAWkIVaW1E9rH0aNgE8SDI5A4n8Ds8P0fAA=
 github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec h1:I2p/9YsiAMB+J2DrC+e7OvEWZCmpwolMQ23ejoEMFEE=
@@ -15,8 +17,6 @@ github.com/getlantern/httptest v0.0.0-20161025015934-4b40f4c7e590 h1:OhyiFx+yBN3
 github.com/getlantern/httptest v0.0.0-20161025015934-4b40f4c7e590/go.mod h1:rE/jidqqHHG9sjSxC24Gd5YCfZ1AT91C2wjJ28TAOfA=
 github.com/getlantern/mockconn v0.0.0-20200818071412-cb30d065a848 h1:2MhMMVBTnaHrst6HyWFDhwQCaJ05PZuOv1bE2gN8WFY=
 github.com/getlantern/mockconn v0.0.0-20200818071412-cb30d065a848/go.mod h1:+F5GJ7qGpQ03DBtcOEyQpM30ix4BLswdaojecFtsdy8=
-github.com/goccy/go-json v0.10.5 h1:Fq85nIqj+gXn/S5ahsiTlK3TmC85qgirsdTP/+DeaC4=
-github.com/goccy/go-json v0.10.5/go.mod h1:oq7eo15ShAhp70Anwd5lgX2pLfOS3QCiwU/PULtXL6M=
 github.com/gorilla/handlers v1.5.2 h1:cLTUSsNkgcwhgRqvCNmdbRWG0A3N4F+M2nWKdScwyEE=
 github.com/gorilla/handlers v1.5.2/go.mod h1:dX+xVpaxdSw+q0Qek8SSsl3dfMk3jNddUkMzo0GtH0w=
 github.com/gorilla/mux v1.8.1 h1:TuBL49tXwgrFYWhqrNgrUNEY92u81SPhu7sTdzQEiWY=

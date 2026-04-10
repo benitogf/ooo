@@ -1,7 +1,12 @@
 package messages
 
 import (
+	"os"
+	"os/exec"
+	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/goccy/go-json"
@@ -123,4 +128,67 @@ func TestPatchInvalidMessage(t *testing.T) {
 func TestPatchListInvalidMessage(t *testing.T) {
 	_, _, err := PatchList([]byte(`invalid`), json.RawMessage(`[]`))
 	require.Error(t, err)
+}
+
+func TestGoJSONConcurrentDecoderInitNoPanic(t *testing.T) {
+	if os.Getenv("OOO_GOJSON_CHILD") == "1" {
+		runDecoderInitBurst()
+		return
+	}
+
+	// Under -race the Go toolchain compiles compile_race.go (mutex-protected),
+	// which is safe by design. The race we're guarding against only exists in
+	// the no-race build path, so skip the subprocess loop when -race is active.
+	if isRaceEnabled() {
+		t.Skip("race detector active: compile_race.go path is safe, skipping no-race stress test")
+	}
+
+	attempts := 30
+	if v := os.Getenv("OOO_GOJSON_STRESS_ATTEMPTS"); v != "" {
+		n, err := strconv.Atoi(v)
+		require.NoError(t, err)
+		attempts = n
+	}
+
+	for i := 0; i < attempts; i++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestGoJSONConcurrentDecoderInitNoPanic$", "-test.count=1")
+		cmd.Env = append(os.Environ(), "OOO_GOJSON_CHILD=1")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("go-json concurrent decoder init panicked on attempt %d/%d\n%s", i+1, attempts, string(output))
+		}
+	}
+}
+
+func runDecoderInitBurst() {
+	workers := runtime.GOMAXPROCS(0) * 16
+	if workers < 32 {
+		workers = 32
+	}
+	if v := os.Getenv("OOO_GOJSON_WORKERS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			workers = n
+		}
+	}
+
+	rounds := 800
+	payload := []byte(`{"data":{"key":"value"},"version":"v1","snapshot":true}`)
+
+	for i := 0; i < rounds; i++ {
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-start
+
+				_, _ = DecodeBuffer(payload)
+			}()
+		}
+
+		close(start)
+		wg.Wait()
+	}
 }
