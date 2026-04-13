@@ -5,8 +5,8 @@ go 1.25
 require (
 	github.com/benitogf/coat v0.0.0-20200402073050-ff807656cbec
 	github.com/benitogf/go-json v0.0.0-20260410172501-727f5690408b
-	github.com/benitogf/jsondiff v0.0.0-20220926080659-c3db9b84b559
-	github.com/benitogf/jsonpatch v0.0.0-20260109052650-eec54232a9a2
+	github.com/benitogf/jsondiff v0.0.0-20260413094925-a4be838c278b
+	github.com/benitogf/jsonpatch v0.0.0-20260413094158-a4a6cc1a3382
 	github.com/getlantern/httptest v0.0.0-20161025015934-4b40f4c7e590
 	github.com/gorilla/handlers v1.5.2
 	github.com/gorilla/mux v1.8.1
@@ -23,7 +23,6 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/getlantern/mockconn v0.0.0-20200818071412-cb30d065a848 // indirect
-	github.com/goccy/go-json v0.9.11 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/tidwall/match v1.2.0 // indirect
