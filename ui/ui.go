@@ -46,6 +46,7 @@ type ServerInfo struct {
 	Silence           bool          `json:"silence"`
 	Workers           int           `json:"workers"`
 	Tick              time.Duration `json:"tick"`
+	WatchPanics       int64         `json:"watchPanics"`
 }
 
 // FilterInfo contains detailed information about a filter path

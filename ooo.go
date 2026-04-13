@@ -149,6 +149,7 @@ type Server struct {
 	BeforeRead         func(key string)
 	GetPivotInfo       func() *ui.PivotInfo // Optional: returns pivot status for UI
 	NoCompress         bool                 // Disable gzip compression (useful for tests)
+	WatchPanics        int64                // Atomic counter of panics recovered in watch goroutines
 	startErr           chan error           // channel for startup errors
 	clockStop          chan struct{}        // channel to signal clock goroutine to stop
 }
@@ -184,6 +185,7 @@ func (server *Server) getServerInfo() ui.ServerInfo {
 		Silence:           server.Silence,
 		Workers:           server.Workers,
 		Tick:              server.Tick,
+		WatchPanics:       atomic.LoadInt64(&server.WatchPanics),
 	}
 }
 
@@ -444,27 +446,38 @@ func (server *Server) watch(sc storage.StorageChan) {
 			// Channel closed
 			break
 		}
-		if ev.Key != "" {
-			server.Console.Log("broadcast[" + ev.Key + "]")
-			server.Stream.Broadcast(ev.Key, stream.BroadcastOpt{
-				Key:       ev.Key,
-				Operation: ev.Operation,
-				Object:    ev.Object,
-				FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
-					return server.filters.ReadObject.CheckWithListFallback(key, obj, server.Static, server.filters.ReadList)
-				},
-				FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
-					return server.filters.ReadList.Check(key, objs, server.Static)
-				},
-				Static: server.Static,
-			})
-			if server.OnStorageEvent != nil {
-				server.OnStorageEvent(ev)
-			}
-		}
+		server.processEvent(ev)
 		if !server.Storage.Active() {
 			break
 		}
+	}
+}
+
+func (server *Server) processEvent(ev storage.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			atomic.AddInt64(&server.WatchPanics, 1)
+			server.Console.Err("watch:panic recovered, total:", atomic.LoadInt64(&server.WatchPanics), r)
+		}
+	}()
+	if ev.Key == "" {
+		return
+	}
+	server.Console.Log("broadcast[" + ev.Key + "]")
+	server.Stream.Broadcast(ev.Key, stream.BroadcastOpt{
+		Key:       ev.Key,
+		Operation: ev.Operation,
+		Object:    ev.Object,
+		FilterObject: func(key string, obj meta.Object) (meta.Object, error) {
+			return server.filters.ReadObject.CheckWithListFallback(key, obj, server.Static, server.filters.ReadList)
+		},
+		FilterList: func(key string, objs []meta.Object) ([]meta.Object, error) {
+			return server.filters.ReadList.Check(key, objs, server.Static)
+		},
+		Static: server.Static,
+	})
+	if server.OnStorageEvent != nil {
+		server.OnStorageEvent(ev)
 	}
 }
 
