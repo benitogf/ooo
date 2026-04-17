@@ -3,6 +3,8 @@ package storage
 import (
 	"errors"
 	"hash/fnv"
+	"log"
+	"time"
 
 	"github.com/benitogf/go-json"
 
@@ -65,10 +67,28 @@ func NewShardedChan(shardCount int) *ShardedChan {
 	}
 }
 
-// Send routes an event to the appropriate shard based on key hash.
-func (s *ShardedChan) Send(event Event) {
+// SEND_TIMEOUT is the maximum time to wait when sending an event to a shard channel.
+// If the consumer goroutine is stuck or dead, the send will time out and the event
+// will be dropped with a log warning, preventing permanent write hangs.
+const SEND_TIMEOUT = 5 * time.Second
+
+// SendWithTimeout attempts to send an event to the appropriate shard channel
+// within the given timeout. Returns true if sent, false if timed out.
+func (s *ShardedChan) SendWithTimeout(event Event, timeout time.Duration) bool {
 	shard := s.ShardFor(event.Key)
-	s.shards[shard] <- event
+	select {
+	case s.shards[shard] <- event:
+		return true
+	case <-time.After(timeout):
+		log.Printf("storage: send timeout on shard %d for key %q (consumer stuck or dead), event dropped", shard, event.Key)
+		return false
+	}
+}
+
+// Send routes an event to the appropriate shard based on key hash.
+// Uses SEND_TIMEOUT to prevent permanent blocking if the shard consumer is stuck.
+func (s *ShardedChan) Send(event Event) {
+	s.SendWithTimeout(event, SEND_TIMEOUT)
 }
 
 // ShardFor returns the shard index for a given key using FNV-1a hash.

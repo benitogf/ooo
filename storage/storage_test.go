@@ -3,10 +3,11 @@ package storage
 import (
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
-	"github.com/benitogf/go-json"
 	"github.com/stretchr/testify/require"
 )
 
@@ -616,4 +617,35 @@ func TestSetBeforeReadConcurrent(t *testing.T) {
 	mu.Lock()
 	require.LessOrEqual(t, callCount, 10)
 	mu.Unlock()
+}
+
+// TestSendTimeoutPreventsWatchSelfDeadlock verifies that Send with a timeout
+// prevents the watch goroutine from deadlocking when it writes back to storage
+// (e.g. version vector updates) while processing an event.
+//
+// The deadlock scenario:
+//  1. Watch goroutine for shard X receives an event
+//  2. During processing (OnStorageEvent), it writes to storage (VV increment)
+//  3. That write calls sendEvent(), which sends to a shard channel
+//  4. If that event hashes to shard X AND the buffer is full, the watch
+//     goroutine blocks trying to send to its own channel — self-deadlock
+//
+// Uses SendWithTimeout directly with a short timeout to keep the test fast.
+func TestSendTimeoutPreventsWatchSelfDeadlock(t *testing.T) {
+	t.Parallel()
+
+	sc := NewShardedChan(1) // single shard = guaranteed self-send
+	defer sc.Close()
+
+	// Fill the channel buffer completely (capacity 100)
+	for i := range 100 {
+		sc.Send(Event{Key: "fill/" + string(rune('a'+i%26)) + string(rune('0'+i/26))})
+	}
+
+	// Now simulate the self-deadlock: the watch goroutine (consumer of shard 0)
+	// tries to send to shard 0 while the buffer is full.
+	// Without timeout, this blocks forever.
+	// With timeout, it returns false.
+	ok := sc.SendWithTimeout(Event{Key: "self/deadlock"}, 1*time.Millisecond)
+	require.False(t, ok, "send to full channel should time out, not block forever")
 }
