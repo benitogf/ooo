@@ -119,8 +119,7 @@ func (l *Layered) Start(opt Options) error {
 
 // initializeCaches populates faster layers from slower layers
 func (l *Layered) initializeCaches() error {
-	// Load from embedded into memory unless skipped
-	if l.embedded != nil && l.memory != nil && !l.memoryOpt.SkipLoadMemory {
+	if l.embedded != nil && l.memory != nil {
 		data, err := l.embedded.Load()
 		if err != nil {
 			return err
@@ -165,24 +164,12 @@ func (l *Layered) Get(path string) (meta.Object, error) {
 		return meta.Object{}, ErrGlobNotAllowed
 	}
 
-	// Try memory first
+	// Memory is a complete mirror of embedded (seeded at Start, kept in sync on every write).
 	if l.memory != nil {
-		obj, err := l.memory.Get(path)
-		if err == nil {
-			return obj, nil
-		}
+		return l.memory.Get(path)
 	}
-
-	// Try embedded
 	if l.embedded != nil {
-		obj, err := l.embedded.Get(path)
-		if err == nil {
-			// Populate memory cache
-			if l.memory != nil {
-				_ = l.memory.Set(path, &obj)
-			}
-			return obj, nil
-		}
+		return l.embedded.Get(path)
 	}
 
 	return meta.Object{}, ErrNotFound
@@ -244,38 +231,26 @@ func (l *Layered) Unlock(path string) error {
 	return nil
 }
 
-// getList retrieves values matching a glob pattern from all layers
+// getList retrieves values matching a glob pattern.
+// Memory is a complete mirror of embedded, so we read from memory when available
+// and only fall back to embedded in memory-less configurations.
 func (l *Layered) getList(path string, order string) ([]meta.Object, error) {
 	if !key.HasGlob(path) {
 		return nil, ErrInvalidPattern
 	}
 
-	// Collect from all layers, deduplicate by path
-	seen := make(map[string]meta.Object)
-
-	// Embedded layer
-	if l.embedded != nil {
-		objs, err := l.embedded.GetList(path)
-		if err == nil {
-			for _, obj := range objs {
-				seen[obj.Path] = obj
-			}
-		}
+	var res []meta.Object
+	var err error
+	switch {
+	case l.memory != nil:
+		res, err = l.memory.GetList(path)
+	case l.embedded != nil:
+		res, err = l.embedded.GetList(path)
+	default:
+		return []meta.Object{}, nil
 	}
-
-	// Memory layer (fastest, most recent)
-	if l.memory != nil {
-		objs, err := l.memory.GetList(path)
-		if err == nil {
-			for _, obj := range objs {
-				seen[obj.Path] = obj
-			}
-		}
-	}
-
-	res := make([]meta.Object, 0, len(seen))
-	for _, obj := range seen {
-		res = append(res, obj)
+	if err != nil {
+		return nil, err
 	}
 
 	if order == "desc" {

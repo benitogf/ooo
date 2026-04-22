@@ -261,10 +261,7 @@ func TestLayeredStorageWriteThrough(t *testing.T) {
 	embedded := NewMemoryLayer()
 
 	storage := New(LayeredConfig{
-		Memory: memory,
-		MemoryOptions: LayerOptions{
-			SkipLoadMemory: true,
-		},
+		Memory:   memory,
 		Embedded: &mockEmbeddedLayer{layer: embedded},
 	})
 	err := storage.Start(Options{})
@@ -294,45 +291,6 @@ func TestLayeredStorageWriteThrough(t *testing.T) {
 
 	_, err = embedded.Get("test")
 	require.Error(t, err)
-}
-
-func TestLayeredStorageCacheMiss(t *testing.T) {
-	t.Parallel()
-
-	memory := NewMemoryLayer()
-	embedded := NewMemoryLayer()
-
-	// Pre-populate only embedded layer
-	err := embedded.Start(LayerOptions{})
-	require.NoError(t, err)
-	obj := testObject("test", testData, 1)
-	embedded.Set("test", &obj)
-
-	storage := New(LayeredConfig{
-		Memory: memory,
-		MemoryOptions: LayerOptions{
-			SkipLoadMemory: true, // Don't init cache
-		},
-		Embedded: &mockEmbeddedLayer{layer: embedded},
-	})
-
-	err = storage.Start(Options{})
-	require.NoError(t, err)
-	defer storage.Close()
-
-	// Memory should be empty initially
-	_, err = memory.Get("test")
-	require.Error(t, err)
-
-	// Get from layered should find it in embedded and populate memory
-	obj, err = storage.Get("test")
-	require.NoError(t, err)
-	require.Equal(t, testData, json.RawMessage(obj.Data))
-
-	// Now memory should have it
-	obj, err = memory.Get("test")
-	require.NoError(t, err)
-	require.Equal(t, testData, json.RawMessage(obj.Data))
 }
 
 // Helper to create test objects
