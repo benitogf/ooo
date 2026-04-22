@@ -122,10 +122,7 @@ func (s *ShardedChan) Close() {
 type EventCallback func(event Event)
 
 // LayerOptions configuration for individual storage layers
-type LayerOptions struct {
-	// SkipLoadMemory when true, skips loading data from embedded layer into memory on startup
-	SkipLoadMemory bool
-}
+type LayerOptions struct{}
 
 // Layer is the interface for individual storage layers (memory, embedded, sql)
 // This is a simpler interface focused on raw storage operations
