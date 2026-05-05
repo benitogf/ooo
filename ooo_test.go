@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/benitogf/go-json"
+	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
 
@@ -202,4 +205,43 @@ func TestIsPivotPath(t *testing.T) {
 		require.Equalf(t, c.want, isPivotPath(c.path),
 			"isPivotPath(%q) = %v, want %v", c.path, !c.want, c.want)
 	}
+}
+
+func TestOnWatchPanicReceivesOffendingEvent(t *testing.T) {
+	type capture struct {
+		ev storage.Event
+		r  any
+	}
+	got := make(chan capture, 1)
+
+	server := &Server{
+		Silence: true,
+		Workers: 1,
+	}
+	server.OnStorageEvent = func(ev storage.Event) {
+		panic("boom")
+	}
+	server.OnWatchPanic = func(ev storage.Event, r any) {
+		select {
+		case got <- capture{ev: ev, r: r}:
+		default:
+		}
+	}
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	_, err := server.Storage.Set("test/key", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	select {
+	case c := <-got:
+		require.Equal(t, "test/key", c.ev.Key)
+		require.Equal(t, "set", c.ev.Operation)
+		require.NotNil(t, c.r)
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnWatchPanic was not invoked")
+	}
+
+	require.Equal(t, int64(1), atomic.LoadInt64(&server.WatchPanics))
 }
