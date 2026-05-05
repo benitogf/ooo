@@ -216,9 +216,14 @@ func (l *Layered) SetAndUnlock(path string, data json.RawMessage) (string, error
 	if err != nil {
 		return "", err
 	}
-	res, err := l.Set(path, data)
-	lock.Unlock()
-	return res, err
+	defer lock.Unlock()
+	if !key.IsValid(path) {
+		return path, ErrInvalidPath
+	}
+	if len(data) == 0 {
+		return path, ErrInvalidStorageData
+	}
+	return l.setLocked(path, data), nil
 }
 
 // Unlock unlocks a key mutex
@@ -421,6 +426,16 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 		return path, ErrGlobNotAllowed
 	}
 
+	lock := l._getLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+	return l.setLocked(path, data), nil
+}
+
+// setLocked writes to all layers and broadcasts. Caller must hold _getLock(path).
+// Without this serialization, concurrent writers can interleave layer writes
+// (memory ends up at writer A, embedded at writer B), breaking the mirror invariant.
+func (l *Layered) setLocked(path string, data json.RawMessage) string {
 	now := monotonic.Now()
 	index := key.LastIndex(path)
 	created, updated := l.peek(path, now)
@@ -433,7 +448,6 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 		Data:    data,
 	}
 
-	// Write to all layers
 	if l.memory != nil {
 		_ = l.memory.Set(path, obj)
 	}
@@ -448,7 +462,7 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 		l.afterWrite(path)
 	}
 
-	return index, nil
+	return index
 }
 
 // Push stores data under a new key generated from a glob pattern path
@@ -475,7 +489,10 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 		Data:    data,
 	}
 
-	// Write to all layers
+	lock := l._getLock(newPath)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if l.memory != nil {
 		_ = l.memory.Set(newPath, obj)
 	}
@@ -508,7 +525,10 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 		Data:    data,
 	}
 
-	// Write to all layers
+	lock := l._getLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+
 	if l.memory != nil {
 		_ = l.memory.Set(path, obj)
 	}
@@ -528,18 +548,20 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 
 // Del deletes a key from all layers
 func (l *Layered) Del(path string) error {
-	var obj *meta.Object
-
-	// Get object for broadcast before deleting
-	if !key.HasGlob(path) {
-		o, err := l.Get(path)
-		if err != nil {
-			return ErrNotFound
-		}
-		obj = &o
+	if key.HasGlob(path) {
+		return l.delGlob(path)
 	}
 
-	// Delete from all layers
+	lock := l._getLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+
+	o, err := l.Get(path)
+	if err != nil {
+		return ErrNotFound
+	}
+	obj := &o
+
 	if l.memory != nil {
 		_ = l.memory.Del(path)
 	}
@@ -557,17 +579,47 @@ func (l *Layered) Del(path string) error {
 	return nil
 }
 
-// DelSilent deletes a key from all layers without broadcasting
-func (l *Layered) DelSilent(path string) error {
-	// Check existence for non-glob paths
-	if !key.HasGlob(path) {
-		_, err := l.Get(path)
-		if err != nil {
-			return ErrNotFound
-		}
+// delGlob deletes all keys matching a glob pattern across all layers.
+// Per-key locking is not applied because the glob doesn't resolve to a single
+// key; the underlying layers handle their own internal locking for glob deletes.
+func (l *Layered) delGlob(path string) error {
+	if l.memory != nil {
+		_ = l.memory.Del(path)
+	}
+	if l.embedded != nil {
+		_ = l.embedded.Del(path)
 	}
 
-	// Delete from all layers
+	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
+		l.sendEvent(Event{Key: path, Operation: "del", Object: nil})
+	}
+	if l.afterWrite != nil {
+		l.afterWrite(path)
+	}
+
+	return nil
+}
+
+// DelSilent deletes a key from all layers without broadcasting
+func (l *Layered) DelSilent(path string) error {
+	if key.HasGlob(path) {
+		if l.memory != nil {
+			_ = l.memory.Del(path)
+		}
+		if l.embedded != nil {
+			_ = l.embedded.Del(path)
+		}
+		return nil
+	}
+
+	lock := l._getLock(path)
+	lock.Lock()
+	defer lock.Unlock()
+
+	if _, err := l.Get(path); err != nil {
+		return ErrNotFound
+	}
+
 	if l.memory != nil {
 		_ = l.memory.Del(path)
 	}
