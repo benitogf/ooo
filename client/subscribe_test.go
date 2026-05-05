@@ -101,10 +101,10 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 	server.Start("localhost:0")
 	ctx, cancel := context.WithCancel(context.Background())
 
-	var connected sync.WaitGroup
-	connected.Add(1)
-	var disconnected sync.WaitGroup
-	disconnected.Add(1)
+	var connectedOnce sync.Once
+	connected := make(chan struct{})
+	var disconnectedOnce sync.Once
+	disconnected := make(chan struct{})
 	var exited sync.WaitGroup
 	exited.Add(1)
 
@@ -116,17 +116,17 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 			Silence: true,
 		}, "devices/*", client.SubscribeListEvents[Device]{
 			OnMessage: func(devices []client.Meta[Device]) {
-				connected.Done()
+				connectedOnce.Do(func() { close(connected) })
 			},
 			OnError: func(err error) {
-				disconnected.Done()
+				disconnectedOnce.Do(func() { close(disconnected) })
 			},
 		})
 	}()
 
-	connected.Wait()
+	<-connected
 	server.Close(os.Interrupt)
-	disconnected.Wait()
+	<-disconnected
 	cancel()
 	exited.Wait()
 }
