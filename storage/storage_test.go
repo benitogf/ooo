@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -714,4 +715,37 @@ func TestLayeredConcurrentSetMirrorInvariant(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, string(memObj.Data), string(embObj.Data),
 		"mirror invariant violated: memory=%s embedded=%s", string(memObj.Data), string(embObj.Data))
+}
+
+// TestLayeredCloseRaceWithBroadcast races concurrent writers (each broadcasts
+// through the watcher) against Close (which nils the watcher). Without
+// synchronization on the watcher field, `go test -race` flags the read in
+// sendEvent against the write in Close. With the lock-protected read, the race
+// is gone and an in-flight broadcast is held off long enough that Close's
+// channel close cannot panic the sender.
+func TestLayeredCloseRaceWithBroadcast(t *testing.T) {
+	s := New(LayeredConfig{Memory: NewMemoryLayer()})
+	require.NoError(t, s.Start(Options{}))
+
+	const writers = 8
+	const iters = 200
+	started := make(chan struct{})
+	var startOnce sync.Once
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			defer func() { _ = recover() }()
+			startOnce.Do(func() { close(started) })
+			for n := range iters {
+				_, _ = s.Set(fmt.Sprintf("k/%d/%d", id, n), json.RawMessage(`"v"`))
+			}
+		}(i)
+	}
+
+	<-started
+	time.Sleep(2 * time.Millisecond) // let writers reach the broadcast path
+	s.Close()
+	wg.Wait()
 }
