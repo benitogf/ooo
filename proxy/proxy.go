@@ -426,9 +426,9 @@ func GlobToMuxPattern(pattern string) string {
 			varCount++
 			// Last wildcard gets .* to match anything including slashes
 			if i == len(parts)-1 {
-				parts[i] = "{path" + string(rune('0'+varCount)) + ":.*}"
+				parts[i] = "{path" + strconv.Itoa(varCount) + ":.*}"
 			} else {
-				parts[i] = "{path" + string(rune('0'+varCount)) + "}"
+				parts[i] = "{path" + strconv.Itoa(varCount) + "}"
 			}
 		}
 	}

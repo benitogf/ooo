@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/proxy"
-	"github.com/benitogf/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -39,6 +39,11 @@ func TestGlobToMuxPattern(t *testing.T) {
 		{"middle glob", "devices/*/things", "devices/{path1}/things"},
 		{"multiple globs", "devices/*/things/*", "devices/{path1}/things/{path2:.*}"},
 		{"nested path no glob", "api/v1/users", "api/v1/users"},
+		{
+			"ten wildcards",
+			"a/*/b/*/c/*/d/*/e/*/f/*/g/*/h/*/i/*/j/*",
+			"a/{path1}/b/{path2}/c/{path3}/d/{path4}/e/{path5}/f/{path6}/g/{path7}/h/{path8}/i/{path9}/j/{path10:.*}",
+		},
 	}
 
 	for _, tt := range tests {
