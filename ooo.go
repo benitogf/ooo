@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -192,9 +193,11 @@ func (server *Server) getServerInfo() ui.ServerInfo {
 // pivotPrefix is the prefix used for internal pivot synchronization keys
 const pivotPrefix = "pivot"
 
-// isPivotPath checks if a path is a pivot internal path
+// isPivotPath checks if a path is a pivot internal path.
+// A path is internal only when it equals the bare prefix or sits under it
+// as a path segment (pivot/...); a user key like "pivothings" is not.
 func isPivotPath(path string) bool {
-	return len(path) >= len(pivotPrefix) && path[:len(pivotPrefix)] == pivotPrefix
+	return path == pivotPrefix || strings.HasPrefix(path, pivotPrefix+"/")
 }
 
 // limitFilterReg stores a limit filter registration for lazy evaluation

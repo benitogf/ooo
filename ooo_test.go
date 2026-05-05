@@ -171,3 +171,35 @@ func TestOnStartComposition(t *testing.T) {
 
 	require.Equal(t, []string{"first", "second"}, order)
 }
+
+func TestIsPivotPath(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		path string
+		want bool
+	}{
+		// real pivot internal paths
+		{"pivot", true},
+		{"pivot/", true},
+		{"pivot/status", true},
+		{"pivot/sync/node-1", true},
+
+		// user keys that merely start with the letters "pivot"
+		{"pivothings", false},
+		{"pivots", false},
+		{"pivots/x", false},
+		{"pivotal", false},
+
+		// unrelated keys
+		{"", false},
+		{"piv", false},
+		{"things/pivot", false},
+		{"users/alice", false},
+	}
+
+	for _, c := range cases {
+		require.Equalf(t, c.want, isPivotPath(c.path),
+			"isPivotPath(%q) = %v, want %v", c.path, !c.want, c.want)
+	}
+}
