@@ -134,8 +134,8 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 func TestClientCloseWithoutConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	var connectionFailed sync.WaitGroup
-	connectionFailed.Add(1)
+	var connectionFailedOnce sync.Once
+	connectionFailed := make(chan struct{})
 	var exited sync.WaitGroup
 	exited.Add(1)
 	messageReceived := false
@@ -152,12 +152,12 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 				messageReceived = true
 			},
 			OnError: func(err error) {
-				connectionFailed.Done()
+				connectionFailedOnce.Do(func() { close(connectionFailed) })
 			},
 		})
 	}()
 
-	connectionFailed.Wait()
+	<-connectionFailed
 	cancel()
 	exited.Wait()
 	require.False(t, messageReceived, "OnMessage should not be called when connection fails")
@@ -201,4 +201,50 @@ func TestClientListCallbackCurry(t *testing.T) {
 	}
 
 	require.Equal(t, NUM_DEVICES+1, messagesCount)
+}
+
+// TestSubscribeCancelExitsPromptlyOnDialFailure asserts that cancelling the
+// subscription context during a dial-failure backoff propagates within
+// hundreds of milliseconds. Before the fix, the dial-failure path slept a
+// fixed two seconds with no context awareness, so cancellation was delayed.
+func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	gotErr := make(chan struct{}, 1)
+	exited := make(chan struct{})
+	go func() {
+		defer close(exited)
+		_ = client.SubscribeList(client.SubscribeConfig{
+			Ctx:              ctx,
+			Server:           client.Server{Protocol: "ws", Host: "127.0.0.1:1"},
+			HandshakeTimeout: 10 * time.Millisecond,
+			Silence:          true,
+		}, "devices/*", client.SubscribeListEvents[Device]{
+			OnMessage: func([]client.Meta[Device]) {},
+			OnError: func(error) {
+				select {
+				case gotErr <- struct{}{}:
+				default:
+				}
+			},
+		})
+	}()
+
+	select {
+	case <-gotErr:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first dial failure was never reported")
+	}
+
+	cancelAt := time.Now()
+	cancel()
+
+	select {
+	case <-exited:
+		require.Less(t, time.Since(cancelAt), 500*time.Millisecond,
+			"Subscribe should exit within 500ms of context cancellation")
+	case <-time.After(2 * time.Second):
+		t.Fatal("Subscribe did not exit within 2s after context cancellation")
+	}
 }
