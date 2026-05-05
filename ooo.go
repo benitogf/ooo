@@ -147,6 +147,7 @@ type Server struct {
 	ReadHeaderTimeout  time.Duration
 	IdleTimeout        time.Duration
 	OnStorageEvent     storage.EventCallback
+	OnWatchPanic       func(ev storage.Event, r any) // optional: invoked on each recovered watch-goroutine panic with the offending event
 	BeforeRead         func(key string)
 	GetPivotInfo       func() *ui.PivotInfo // Optional: returns pivot status for UI
 	NoCompress         bool                 // Disable gzip compression (useful for tests)
@@ -460,7 +461,11 @@ func (server *Server) processEvent(ev storage.Event) {
 	defer func() {
 		if r := recover(); r != nil {
 			atomic.AddInt64(&server.WatchPanics, 1)
-			server.Console.Err("watch:panic recovered, total:", atomic.LoadInt64(&server.WatchPanics), r)
+			server.Console.Err(fmt.Sprintf("watch:panic recovered key=%q op=%q total=%d: %v",
+				ev.Key, ev.Operation, atomic.LoadInt64(&server.WatchPanics), r))
+			if server.OnWatchPanic != nil {
+				server.OnWatchPanic(ev, r)
+			}
 		}
 	}()
 	if ev.Key == "" {
