@@ -101,10 +101,12 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 	server.Start("localhost:0")
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var connected sync.WaitGroup
+	connected.Add(1)
 	var connectedOnce sync.Once
-	connected := make(chan struct{})
+	var disconnected sync.WaitGroup
+	disconnected.Add(1)
 	var disconnectedOnce sync.Once
-	disconnected := make(chan struct{})
 	var exited sync.WaitGroup
 	exited.Add(1)
 
@@ -116,17 +118,17 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 			Silence: true,
 		}, "devices/*", client.SubscribeListEvents[Device]{
 			OnMessage: func(devices []client.Meta[Device]) {
-				connectedOnce.Do(func() { close(connected) })
+				connectedOnce.Do(connected.Done)
 			},
 			OnError: func(err error) {
-				disconnectedOnce.Do(func() { close(disconnected) })
+				disconnectedOnce.Do(disconnected.Done)
 			},
 		})
 	}()
 
-	<-connected
+	connected.Wait()
 	server.Close(os.Interrupt)
-	<-disconnected
+	disconnected.Wait()
 	cancel()
 	exited.Wait()
 }
@@ -134,8 +136,9 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 func TestClientCloseWithoutConnection(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
+	var connectionFailed sync.WaitGroup
+	connectionFailed.Add(1)
 	var connectionFailedOnce sync.Once
-	connectionFailed := make(chan struct{})
 	var exited sync.WaitGroup
 	exited.Add(1)
 	messageReceived := false
@@ -152,12 +155,12 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 				messageReceived = true
 			},
 			OnError: func(err error) {
-				connectionFailedOnce.Do(func() { close(connectionFailed) })
+				connectionFailedOnce.Do(connectionFailed.Done)
 			},
 		})
 	}()
 
-	<-connectionFailed
+	connectionFailed.Wait()
 	cancel()
 	exited.Wait()
 	require.False(t, messageReceived, "OnMessage should not be called when connection fails")
@@ -211,10 +214,14 @@ func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	gotErr := make(chan struct{}, 1)
-	exited := make(chan struct{})
+	var firstErr sync.WaitGroup
+	firstErr.Add(1)
+	var firstErrOnce sync.Once
+	var exited sync.WaitGroup
+	exited.Add(1)
+
 	go func() {
-		defer close(exited)
+		defer exited.Done()
 		_ = client.SubscribeList(client.SubscribeConfig{
 			Ctx:              ctx,
 			Server:           client.Server{Protocol: "ws", Host: "127.0.0.1:1"},
@@ -223,28 +230,15 @@ func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
 		}, "devices/*", client.SubscribeListEvents[Device]{
 			OnMessage: func([]client.Meta[Device]) {},
 			OnError: func(error) {
-				select {
-				case gotErr <- struct{}{}:
-				default:
-				}
+				firstErrOnce.Do(firstErr.Done)
 			},
 		})
 	}()
 
-	select {
-	case <-gotErr:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first dial failure was never reported")
-	}
-
+	firstErr.Wait()
 	cancelAt := time.Now()
 	cancel()
-
-	select {
-	case <-exited:
-		require.Less(t, time.Since(cancelAt), 500*time.Millisecond,
-			"Subscribe should exit within 500ms of context cancellation")
-	case <-time.After(2 * time.Second):
-		t.Fatal("Subscribe did not exit within 2s after context cancellation")
-	}
+	exited.Wait()
+	require.Less(t, time.Since(cancelAt), 500*time.Millisecond,
+		"Subscribe should exit within 500ms of context cancellation")
 }
