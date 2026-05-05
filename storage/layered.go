@@ -647,8 +647,12 @@ func (l *Layered) WatchSharded() *ShardedChan {
 	return l.watcher
 }
 
-// sendEvent sends an event to the sharded watcher
+// sendEvent sends an event to the sharded watcher.
+// The read of l.watcher is synchronized with Close (which nils it) so the
+// race detector stays clean and an in-flight Send cannot race a channel close.
 func (l *Layered) sendEvent(event Event) {
+	l.mutex.RLock()
+	defer l.mutex.RUnlock()
 	if l.watcher != nil {
 		l.watcher.Send(event)
 	}
