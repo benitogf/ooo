@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"github.com/benitogf/coat"
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
-	"github.com/benitogf/go-json"
 	"github.com/gorilla/websocket"
 )
 
@@ -166,6 +166,7 @@ func (s *subscribeState[T]) logPrefix() string {
 
 // connect establishes a WebSocket connection.
 // Returns true if connection was successful, false otherwise.
+// Backoff on failure is the caller's responsibility (see waitRetry).
 func (s *subscribeState[T]) connect() bool {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
@@ -174,14 +175,13 @@ func (s *subscribeState[T]) connect() bool {
 
 	s.muClient.Lock()
 	var err error
-	s.wsClient, _, err = dialer.Dial(s.wsURL.String(), s.cfg.Header)
+	s.wsClient, _, err = dialer.DialContext(s.cfg.Ctx, s.wsURL.String(), s.cfg.Header)
 	if s.wsClient == nil || err != nil {
 		s.muClient.Unlock()
 		s.cfg.console.Err(s.logPrefix()+": failed websocket dial", err)
 		if s.events.OnError != nil {
 			s.events.OnError(err)
 		}
-		time.Sleep(2 * time.Second)
 		return false
 	}
 	s.muClient.Unlock()
@@ -243,20 +243,25 @@ func (s *subscribeState[T]) readLoop() {
 }
 
 // waitRetry waits before reconnecting based on retry count.
+// Returns immediately if the subscription context is cancelled.
 func (s *subscribeState[T]) waitRetry() {
 	s.retryCount++
-	if s.retryCount < s.cfg.Retry.MediumThreshold {
+	var delay time.Duration
+	switch {
+	case s.retryCount < s.cfg.Retry.MediumThreshold:
 		s.cfg.console.Log(s.logPrefix() + ": reconnecting...")
-		time.Sleep(s.cfg.Retry.InitialDelay)
-		return
-	}
-	if s.retryCount < s.cfg.Retry.MaxThreshold {
+		delay = s.cfg.Retry.InitialDelay
+	case s.retryCount < s.cfg.Retry.MaxThreshold:
 		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MediumDelay)
-		time.Sleep(s.cfg.Retry.MediumDelay)
-		return
+		delay = s.cfg.Retry.MediumDelay
+	default:
+		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MaxDelay)
+		delay = s.cfg.Retry.MaxDelay
 	}
-	s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MaxDelay)
-	time.Sleep(s.cfg.Retry.MaxDelay)
+	select {
+	case <-time.After(delay):
+	case <-s.cfg.Ctx.Done():
+	}
 }
 
 // startCloseWatcher starts a goroutine that closes the connection when context is done.
@@ -311,6 +316,7 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 		}
 
 		if !state.connect() {
+			state.waitRetry()
 			continue
 		}
 
@@ -346,6 +352,7 @@ func (s *subscribeListState[T]) logPrefix() string {
 
 // connect establishes a WebSocket connection.
 // Returns true if connection was successful, false otherwise.
+// Backoff on failure is the caller's responsibility (see waitRetry).
 func (s *subscribeListState[T]) connect() bool {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
@@ -354,14 +361,13 @@ func (s *subscribeListState[T]) connect() bool {
 
 	s.muClient.Lock()
 	var err error
-	s.wsClient, _, err = dialer.Dial(s.wsURL.String(), s.cfg.Header)
+	s.wsClient, _, err = dialer.DialContext(s.cfg.Ctx, s.wsURL.String(), s.cfg.Header)
 	if s.wsClient == nil || err != nil {
 		s.muClient.Unlock()
 		s.cfg.console.Err(s.logPrefix()+": failed websocket dial", err)
 		if s.events.OnError != nil {
 			s.events.OnError(err)
 		}
-		time.Sleep(2 * time.Second)
 		return false
 	}
 	s.muClient.Unlock()
@@ -428,20 +434,25 @@ func (s *subscribeListState[T]) readLoop() {
 }
 
 // waitRetry waits before reconnecting based on retry count.
+// Returns immediately if the subscription context is cancelled.
 func (s *subscribeListState[T]) waitRetry() {
 	s.retryCount++
-	if s.retryCount < s.cfg.Retry.MediumThreshold {
+	var delay time.Duration
+	switch {
+	case s.retryCount < s.cfg.Retry.MediumThreshold:
 		s.cfg.console.Log(s.logPrefix() + ": reconnecting...")
-		time.Sleep(s.cfg.Retry.InitialDelay)
-		return
-	}
-	if s.retryCount < s.cfg.Retry.MaxThreshold {
+		delay = s.cfg.Retry.InitialDelay
+	case s.retryCount < s.cfg.Retry.MaxThreshold:
 		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MediumDelay)
-		time.Sleep(s.cfg.Retry.MediumDelay)
-		return
+		delay = s.cfg.Retry.MediumDelay
+	default:
+		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MaxDelay)
+		delay = s.cfg.Retry.MaxDelay
 	}
-	s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MaxDelay)
-	time.Sleep(s.cfg.Retry.MaxDelay)
+	select {
+	case <-time.After(delay):
+	case <-s.cfg.Ctx.Done():
+	}
 }
 
 // startCloseWatcher starts a goroutine that closes the connection when context is done.
@@ -496,6 +507,7 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 		}
 
 		if !state.connect() {
+			state.waitRetry()
 			continue
 		}
 

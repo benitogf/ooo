@@ -103,8 +103,10 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 
 	var connected sync.WaitGroup
 	connected.Add(1)
+	var connectedOnce sync.Once
 	var disconnected sync.WaitGroup
 	disconnected.Add(1)
+	var disconnectedOnce sync.Once
 	var exited sync.WaitGroup
 	exited.Add(1)
 
@@ -116,10 +118,10 @@ func TestClientCloseWhileReconnecting(t *testing.T) {
 			Silence: true,
 		}, "devices/*", client.SubscribeListEvents[Device]{
 			OnMessage: func(devices []client.Meta[Device]) {
-				connected.Done()
+				connectedOnce.Do(connected.Done)
 			},
 			OnError: func(err error) {
-				disconnected.Done()
+				disconnectedOnce.Do(disconnected.Done)
 			},
 		})
 	}()
@@ -136,6 +138,7 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 
 	var connectionFailed sync.WaitGroup
 	connectionFailed.Add(1)
+	var connectionFailedOnce sync.Once
 	var exited sync.WaitGroup
 	exited.Add(1)
 	messageReceived := false
@@ -152,7 +155,7 @@ func TestClientCloseWithoutConnection(t *testing.T) {
 				messageReceived = true
 			},
 			OnError: func(err error) {
-				connectionFailed.Done()
+				connectionFailedOnce.Do(connectionFailed.Done)
 			},
 		})
 	}()
@@ -201,4 +204,41 @@ func TestClientListCallbackCurry(t *testing.T) {
 	}
 
 	require.Equal(t, NUM_DEVICES+1, messagesCount)
+}
+
+// TestSubscribeCancelExitsPromptlyOnDialFailure asserts that cancelling the
+// subscription context during a dial-failure backoff propagates within
+// hundreds of milliseconds. Before the fix, the dial-failure path slept a
+// fixed two seconds with no context awareness, so cancellation was delayed.
+func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var firstErr sync.WaitGroup
+	firstErr.Add(1)
+	var firstErrOnce sync.Once
+	var exited sync.WaitGroup
+	exited.Add(1)
+
+	go func() {
+		defer exited.Done()
+		_ = client.SubscribeList(client.SubscribeConfig{
+			Ctx:              ctx,
+			Server:           client.Server{Protocol: "ws", Host: "127.0.0.1:1"},
+			HandshakeTimeout: 10 * time.Millisecond,
+			Silence:          true,
+		}, "devices/*", client.SubscribeListEvents[Device]{
+			OnMessage: func([]client.Meta[Device]) {},
+			OnError: func(error) {
+				firstErrOnce.Do(firstErr.Done)
+			},
+		})
+	}()
+
+	firstErr.Wait()
+	cancelAt := time.Now()
+	cancel()
+	exited.Wait()
+	require.Less(t, time.Since(cancelAt), 500*time.Millisecond,
+		"Subscribe should exit within 500ms of context cancellation")
 }
