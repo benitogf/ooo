@@ -607,3 +607,111 @@ func TestSendTimeoutPreventsWatchSelfDeadlock(t *testing.T) {
 	ok := sc.SendWithTimeout(Event{Key: "self/deadlock"}, 1*time.Millisecond)
 	require.False(t, ok, "send to full channel should time out, not block forever")
 }
+
+// holdingEmbeddedLayer wraps a MemoryLayer and pauses the first Set call to
+// holdKey until release is closed, signalling blocked once that Set has parked.
+// Used to deterministically interleave two concurrent writers across the
+// memory→embedded boundary.
+type holdingEmbeddedLayer struct {
+	inner   *MemoryLayer
+	holdKey string
+	blocked chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (h *holdingEmbeddedLayer) Active() bool               { return h.inner.Active() }
+func (h *holdingEmbeddedLayer) Start(o LayerOptions) error { return h.inner.Start(o) }
+func (h *holdingEmbeddedLayer) Close()                     { h.inner.Close() }
+func (h *holdingEmbeddedLayer) Get(k string) (meta.Object, error) {
+	return h.inner.Get(k)
+}
+func (h *holdingEmbeddedLayer) GetList(p string) ([]meta.Object, error) {
+	return h.inner.GetList(p)
+}
+func (h *holdingEmbeddedLayer) Set(k string, o *meta.Object) error {
+	if k == h.holdKey {
+		first := false
+		h.once.Do(func() { first = true })
+		if first {
+			close(h.blocked)
+			<-h.release
+		}
+	}
+	return h.inner.Set(k, o)
+}
+func (h *holdingEmbeddedLayer) Del(k string) error      { return h.inner.Del(k) }
+func (h *holdingEmbeddedLayer) Keys() ([]string, error) { return h.inner.Keys() }
+func (h *holdingEmbeddedLayer) Clear()                  { h.inner.Clear() }
+func (h *holdingEmbeddedLayer) Load() (map[string]*meta.Object, error) {
+	keys, err := h.inner.Keys()
+	if err != nil {
+		return nil, err
+	}
+	data := make(map[string]*meta.Object, len(keys))
+	for _, k := range keys {
+		obj, err := h.inner.Get(k)
+		if err != nil {
+			continue
+		}
+		data[k] = &obj
+	}
+	return data, nil
+}
+
+// TestLayeredConcurrentSetMirrorInvariant drives two concurrent Set calls to
+// the same key with the embedded layer artificially paused mid-write. Without
+// per-key serialization across both layers, writer B can complete entirely
+// while writer A is mid-write, leaving memory and embedded with different
+// values — breaking the invariant that memory mirrors embedded.
+func TestLayeredConcurrentSetMirrorInvariant(t *testing.T) {
+	embedded := &holdingEmbeddedLayer{
+		inner:   NewMemoryLayer(),
+		holdKey: "k",
+		blocked: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	memory := NewMemoryLayer()
+	s := New(LayeredConfig{Memory: memory, Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	aDone := make(chan error, 1)
+	go func() {
+		_, err := s.Set("k", json.RawMessage(`"A"`))
+		aDone <- err
+	}()
+
+	select {
+	case <-embedded.blocked:
+	case <-time.After(2 * time.Second):
+		t.Fatal("writer A never reached embedded.Set")
+	}
+
+	bDone := make(chan error, 1)
+	go func() {
+		_, err := s.Set("k", json.RawMessage(`"B"`))
+		bDone <- err
+	}()
+
+	bFinishedFirst := false
+	select {
+	case err := <-bDone:
+		require.NoError(t, err)
+		bFinishedFirst = true
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	close(embedded.release)
+	require.NoError(t, <-aDone)
+	if !bFinishedFirst {
+		require.NoError(t, <-bDone)
+	}
+
+	memObj, err := memory.Get("k")
+	require.NoError(t, err)
+	embObj, err := embedded.inner.Get("k")
+	require.NoError(t, err)
+	require.Equal(t, string(memObj.Data), string(embObj.Data),
+		"mirror invariant violated: memory=%s embedded=%s", string(memObj.Data), string(embObj.Data))
+}
