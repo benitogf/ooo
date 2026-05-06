@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -93,7 +94,7 @@ func TestServerValidate(t *testing.T) {
 	require.Contains(t, err.Error(), "Deadline cannot be negative")
 }
 
-func TestCloseResetsState(t *testing.T) {
+func TestCloseMarksServerInactive(t *testing.T) {
 	server := Server{}
 	server.Silence = true
 	server.Start("localhost:0")
@@ -103,9 +104,9 @@ func TestCloseResetsState(t *testing.T) {
 
 	server.Close(os.Interrupt)
 
-	// After close, internal state should be cleared
-	require.Nil(t, server.Router)
-	require.Nil(t, server.Storage)
+	// Close marks the server inactive; the field references stay populated
+	// so leaked handlers / callbacks don't nil-deref.
+	require.False(t, server.Active())
 }
 
 // TestServerCloseShutdownBoundedByDeadline asserts that Server.Close does not
@@ -177,6 +178,146 @@ func TestServerCloseShutdownBoundedByDeadline(t *testing.T) {
 	// handler exit before the test ends.
 	close(unblock)
 	requestExited.Wait()
+}
+
+// TestServerCloseCancelsHandlerContext asserts that Server.Close cancels
+// in-flight request contexts so well-behaved handlers (those that respect
+// r.Context().Done()) exit cleanly. Without the post-Shutdown force-close,
+// stdlib Shutdown timing out leaves request contexts uncancelled and the
+// handler goroutine leaks.
+func TestServerCloseCancelsHandlerContext(t *testing.T) {
+	server := &Server{
+		Silence:  true,
+		Deadline: 200 * time.Millisecond,
+	}
+
+	var entered sync.WaitGroup
+	entered.Add(1)
+	var enteredOnce sync.Once
+
+	var handlerExited sync.WaitGroup
+	handlerExited.Add(1)
+	var handlerOnce sync.Once
+	var contextCancelled atomic.Bool
+
+	server.Start("localhost:0")
+	server.Endpoint(EndpointConfig{
+		Path: "/context-aware-handler",
+		Methods: Methods{
+			http.MethodGet: {Response: nil},
+		},
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			defer handlerOnce.Do(handlerExited.Done)
+			enteredOnce.Do(entered.Done)
+			// Well-behaved handler: block until the request context is
+			// cancelled. Close should cancel it via force-close.
+			<-r.Context().Done()
+			contextCancelled.Store(true)
+		},
+	})
+
+	var requestExited sync.WaitGroup
+	requestExited.Add(1)
+	go func() {
+		defer requestExited.Done()
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, _ := http.NewRequest(http.MethodGet, "http://"+server.Address+"/context-aware-handler", nil)
+		resp, err := client.Do(req)
+		if err == nil && resp != nil {
+			resp.Body.Close()
+		}
+	}()
+
+	entered.Wait()
+
+	server.Close(os.Interrupt)
+
+	// Bound waits: handler must have exited via ctx.Done() by the time
+	// Close returned (or shortly after the force-close took effect).
+	exitedDone := make(chan struct{})
+	go func() {
+		handlerExited.Wait()
+		close(exitedDone)
+	}()
+	select {
+	case <-exitedDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not exit after Server.Close — request context was not cancelled")
+	}
+	requestExited.Wait()
+
+	require.True(t, contextCancelled.Load(),
+		"handler should have observed r.Context().Done() during Close")
+}
+
+// TestServerCloseDoesNotNilFieldsUnderHandler asserts that Server.Close does
+// not nil fields like Storage out from under a leaked handler goroutine.
+// Pre-fix, Close cleared server.Storage = nil with no synchronisation; a
+// handler that resumed after Close panicked on nil deref.
+func TestServerCloseDoesNotNilFieldsUnderHandler(t *testing.T) {
+	server := &Server{
+		Silence:  true,
+		Deadline: 200 * time.Millisecond,
+	}
+
+	var entered sync.WaitGroup
+	entered.Add(1)
+	var enteredOnce sync.Once
+
+	unblock := make(chan struct{})
+
+	var handlerExited sync.WaitGroup
+	handlerExited.Add(1)
+	var handlerOnce sync.Once
+	var handlerPanic atomic.Value
+
+	server.Start("localhost:0")
+	server.Endpoint(EndpointConfig{
+		Path: "/leaky-handler",
+		Methods: Methods{
+			http.MethodGet: {Response: nil},
+		},
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			defer handlerOnce.Do(handlerExited.Done)
+			defer func() {
+				if rec := recover(); rec != nil {
+					handlerPanic.Store(fmt.Sprintf("%v", rec))
+				}
+			}()
+			enteredOnce.Do(entered.Done)
+			<-unblock
+			// Touch a field that Close used to nil. Pre-fix this panics
+			// with nil pointer dereference; post-fix the call returns
+			// without panic (Storage may be closed but the field is non-nil).
+			_, _ = server.Storage.Get("never-set")
+		},
+	})
+
+	var requestExited sync.WaitGroup
+	requestExited.Add(1)
+	go func() {
+		defer requestExited.Done()
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, _ := http.NewRequest(http.MethodGet, "http://"+server.Address+"/leaky-handler", nil)
+		resp, err := client.Do(req)
+		if err == nil && resp != nil {
+			resp.Body.Close()
+		}
+	}()
+
+	entered.Wait()
+
+	server.Close(os.Interrupt)
+
+	// Release the leaked handler. Pre-fix, the handler now nil-derefs
+	// because Close cleared server.Storage.
+	close(unblock)
+	handlerExited.Wait()
+	requestExited.Wait()
+
+	if v := handlerPanic.Load(); v != nil {
+		t.Fatalf("handler panicked after Server.Close: %v", v)
+	}
 }
 
 func TestStartWithError(t *testing.T) {
