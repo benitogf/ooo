@@ -182,10 +182,18 @@ func Patch[T any](server *Server, path string, item T) error {
 		return err
 	}
 
-	mergedBytes, _, err := merge.MergeBytes(currentObj.Data, patchData)
+	mergedBytes, info, err := merge.MergeBytes(currentObj.Data, patchData)
 	if err != nil {
 		log.Println("Patch["+path+"]: failed to merge data", err)
 		return err
+	}
+	// Non-fatal merge errors (e.g. type mismatch at a specific path) leave
+	// the original value in place at that path. Surface them rather than
+	// silently committing a partially-applied patch.
+	if len(info.Errors) > 0 {
+		joined := errors.Join(info.Errors...)
+		log.Println("Patch["+path+"]: merge reported errors", joined)
+		return joined
 	}
 
 	// See note in GetList: in-process helpers do not enforce Static mode.

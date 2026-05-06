@@ -7,12 +7,12 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/stream"
-	"github.com/benitogf/go-json"
 	"github.com/gorilla/mux"
 )
 
@@ -103,10 +103,19 @@ func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mergedBytes, _, err := merge.MergeBytes(currentObj.Data, patchData)
+	mergedBytes, info, err := merge.MergeBytes(currentObj.Data, patchData)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
+		return
+	}
+	// Non-fatal merge errors (e.g. type mismatch at a specific path) leave
+	// the original value in place at that path. Persisting silently would
+	// confirm a 200 for a partially-applied patch.
+	if len(info.Errors) > 0 {
+		server.Console.Err("patchError["+_key+"]", info.Errors)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprintf(w, "%s", errors.Join(info.Errors...))
 		return
 	}
 
