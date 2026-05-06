@@ -223,7 +223,7 @@ func (l *Layered) SetAndUnlock(path string, data json.RawMessage) (string, error
 	if len(data) == 0 {
 		return path, ErrInvalidStorageData
 	}
-	return l.setLocked(path, data), nil
+	return l.setLocked(path, data)
 }
 
 // Unlock unlocks a key mutex
@@ -429,13 +429,20 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 	lock := l._getLock(path)
 	lock.Lock()
 	defer lock.Unlock()
-	return l.setLocked(path, data), nil
+	return l.setLocked(path, data)
 }
 
 // setLocked writes to all layers and broadcasts. Caller must hold _getLock(path).
 // Without this serialization, concurrent writers can interleave layer writes
-// (memory ends up at writer A, embedded at writer B), breaking the mirror invariant.
-func (l *Layered) setLocked(path string, data json.RawMessage) string {
+// (memory ends up at writer A, embedded at writer B), breaking the mirror
+// invariant.
+//
+// If the embedded layer rejects the write, the error is returned to the
+// caller and the broadcast / afterWrite hooks are suppressed: callers and
+// subscribers must not be told a write succeeded when it did not durably
+// commit. The memory layer keeps the new value (Layered is memory-first by
+// design); on restart embedded reseeds memory from the prior committed value.
+func (l *Layered) setLocked(path string, data json.RawMessage) (string, error) {
 	now := monotonic.Now()
 	index := key.LastIndex(path)
 	created, updated := l.peek(path, now)
@@ -449,10 +456,14 @@ func (l *Layered) setLocked(path string, data json.RawMessage) string {
 	}
 
 	if l.memory != nil {
-		_ = l.memory.Set(path, obj)
+		if err := l.memory.Set(path, obj); err != nil {
+			return index, err
+		}
 	}
 	if l.embedded != nil {
-		_ = l.embedded.Set(path, obj)
+		if err := l.embedded.Set(path, obj); err != nil {
+			return index, err
+		}
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -462,7 +473,7 @@ func (l *Layered) setLocked(path string, data json.RawMessage) string {
 		l.afterWrite(path)
 	}
 
-	return index
+	return index, nil
 }
 
 // Push stores data under a new key generated from a glob pattern path
@@ -494,10 +505,14 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 	defer lock.Unlock()
 
 	if l.memory != nil {
-		_ = l.memory.Set(newPath, obj)
+		if err := l.memory.Set(newPath, obj); err != nil {
+			return index, err
+		}
 	}
 	if l.embedded != nil {
-		_ = l.embedded.Set(newPath, obj)
+		if err := l.embedded.Set(newPath, obj); err != nil {
+			return index, err
+		}
 	}
 
 	if !key.Contains(l.noBroadcastKeys, newPath) && l.Active() {
@@ -530,10 +545,14 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 	defer lock.Unlock()
 
 	if l.memory != nil {
-		_ = l.memory.Set(path, obj)
+		if err := l.memory.Set(path, obj); err != nil {
+			return index, err
+		}
 	}
 	if l.embedded != nil {
-		_ = l.embedded.Set(path, obj)
+		if err := l.embedded.Set(path, obj); err != nil {
+			return index, err
+		}
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -563,10 +582,14 @@ func (l *Layered) Del(path string) error {
 	obj := &o
 
 	if l.memory != nil {
-		_ = l.memory.Del(path)
+		if err := l.memory.Del(path); err != nil {
+			return err
+		}
 	}
 	if l.embedded != nil {
-		_ = l.embedded.Del(path)
+		if err := l.embedded.Del(path); err != nil {
+			return err
+		}
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -584,10 +607,14 @@ func (l *Layered) Del(path string) error {
 // key; the underlying layers handle their own internal locking for glob deletes.
 func (l *Layered) delGlob(path string) error {
 	if l.memory != nil {
-		_ = l.memory.Del(path)
+		if err := l.memory.Del(path); err != nil {
+			return err
+		}
 	}
 	if l.embedded != nil {
-		_ = l.embedded.Del(path)
+		if err := l.embedded.Del(path); err != nil {
+			return err
+		}
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -604,10 +631,14 @@ func (l *Layered) delGlob(path string) error {
 func (l *Layered) DelSilent(path string) error {
 	if key.HasGlob(path) {
 		if l.memory != nil {
-			_ = l.memory.Del(path)
+			if err := l.memory.Del(path); err != nil {
+				return err
+			}
 		}
 		if l.embedded != nil {
-			_ = l.embedded.Del(path)
+			if err := l.embedded.Del(path); err != nil {
+				return err
+			}
 		}
 		return nil
 	}
@@ -621,10 +652,14 @@ func (l *Layered) DelSilent(path string) error {
 	}
 
 	if l.memory != nil {
-		_ = l.memory.Del(path)
+		if err := l.memory.Del(path); err != nil {
+			return err
+		}
 	}
 	if l.embedded != nil {
-		_ = l.embedded.Del(path)
+		if err := l.embedded.Del(path); err != nil {
+			return err
+		}
 	}
 
 	return nil
