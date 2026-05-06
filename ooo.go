@@ -716,9 +716,13 @@ func (server *Server) Close(sig os.Signal) {
 		server.proxyCleanupMu.Unlock()
 		// Force close all stream connections first
 		server.Stream.CloseAll()
-		// Shutdown HTTP server to stop accepting new connections
+		// Shutdown HTTP server to stop accepting new connections. Bound the
+		// context by Deadline so a stuck handler cannot block shutdown
+		// indefinitely (Endpoint handlers are not wrapped in TimeoutHandler).
 		if server.server != nil {
-			server.server.Shutdown(context.Background())
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), server.Deadline)
+			server.server.Shutdown(shutdownCtx)
+			cancel()
 		}
 		server.handlerWg.Wait() // Wait for HTTP handlers to finish
 		server.listenWg.Wait()  // Wait for listen goroutine to finish
