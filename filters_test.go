@@ -784,6 +784,49 @@ func TestIoDeleteEnforcesDeleteFilter(t *testing.T) {
 	require.NoError(t, err, "value should still exist; delete was rejected")
 }
 
+// TestIoGetEnforcesReadObjectFilter asserts that ooo.Get runs the configured
+// read-object filter and surfaces its rejection. Pre-fix it bypassed the
+// filter entirely.
+func TestIoGetEnforcesReadObjectFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	rejection := errors.New("read rejected")
+	server := ioFilterServer(t, func(s *Server) {
+		s.ReadObjectFilter("guarded/k", func(key string, obj meta.Object) (meta.Object, error) {
+			return meta.Object{}, rejection
+		})
+	})
+
+	_, err := server.Storage.Set("guarded/k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	_, err = Get[filterTestItem](server, "guarded/k")
+	require.ErrorIs(t, err, rejection,
+		"ooo.Get must surface the ReadObjectFilter rejection")
+}
+
+// TestIoGetListEnforcesReadListFilter asserts that ooo.GetList propagates the
+// read-list filter rejection instead of swallowing it.
+func TestIoGetListEnforcesReadListFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	rejection := errors.New("read list rejected")
+	server := ioFilterServer(t, func(s *Server) {
+		s.ReadListFilter("guarded/*", func(key string, objs []meta.Object) ([]meta.Object, error) {
+			return nil, rejection
+		})
+	})
+
+	_, err := server.Storage.Set("guarded/a", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	_, err = GetList[filterTestItem](server, "guarded/*")
+	require.ErrorIs(t, err, rejection,
+		"ooo.GetList must surface the ReadListFilter rejection")
+}
+
 // TestIoSetFiresAfterWriteFilter asserts that the after-write hook fires on a
 // successful in-process write, matching the REST behavior.
 func TestIoSetFiresAfterWriteFilter(t *testing.T) {

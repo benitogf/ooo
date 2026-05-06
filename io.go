@@ -15,6 +15,9 @@ var (
 	ErrPathGlobNotAllowed = errors.New("io: path glob not allowed")
 )
 
+// GetList retrieves all items at the supplied glob path. The configured
+// ReadListFilter (if any) is consulted with the same static-mode flag the
+// REST handler uses; a filter rejection is propagated to the caller.
 func GetList[T any](server *Server, path string) ([]client.Meta[T], error) {
 	var result []client.Meta[T]
 	if !key.IsGlob(path) {
@@ -29,8 +32,11 @@ func GetList[T any](server *Server, path string) ([]client.Meta[T], error) {
 		return result, err
 	}
 
-	// Apply ReadListFilter if registered for this path
-	objs, _ = server.filters.ReadList.Check(path, objs, false)
+	objs, err = server.filters.ReadList.Check(path, objs, server.Static)
+	if err != nil {
+		log.Println("GetList["+path+"]: read list filter rejected", err)
+		return result, err
+	}
 
 	for _, obj := range objs {
 		var item T
@@ -49,6 +55,9 @@ func GetList[T any](server *Server, path string) ([]client.Meta[T], error) {
 	return result, nil
 }
 
+// Get retrieves a single item at the specified path. The configured
+// ReadObjectFilter (with ReadListFilter fallback) is consulted before the
+// value is returned, matching the REST read handler.
 func Get[T any](server *Server, path string) (client.Meta[T], error) {
 	var result client.Meta[T]
 	if key.IsGlob(path) {
@@ -59,6 +68,11 @@ func Get[T any](server *Server, path string) (client.Meta[T], error) {
 	obj, err := server.Storage.Get(path)
 	if err != nil {
 		log.Println("Get["+path+"]: failed to get from storage", err)
+		return result, err
+	}
+	obj, err = server.filters.ReadObject.CheckWithListFallback(path, obj, server.Static, server.filters.ReadList)
+	if err != nil {
+		log.Println("Get["+path+"]: read filter rejected", err)
 		return result, err
 	}
 	var item T
