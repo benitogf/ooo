@@ -9,7 +9,16 @@ import (
 	"github.com/benitogf/ooo/meta"
 )
 
-// MemoryLayer is an in-memory storage layer
+// MemoryLayer is an in-memory storage layer.
+//
+// Aliasing contract: values are kept by reference. Set retains the caller's
+// *meta.Object pointer and the backing array of obj.Data; Get and GetList
+// return Data slices that alias the stored bytes. Callers must not mutate any
+// of these — including the input to Set after the call returns, the Data
+// slice on a returned object, or the *meta.Object itself (e.g. via
+// meta.PutObject). For most use cases prefer the typed io.* helpers
+// (io.Get, io.Set, io.Push, io.Patch, io.GetList), which marshal /
+// unmarshal at the boundary and never expose the stored bytes to the caller.
 type MemoryLayer struct {
 	data   map[string]*meta.Object
 	mutex  sync.RWMutex
@@ -45,7 +54,10 @@ func (m *MemoryLayer) Close() {
 	m.active = false
 }
 
-// Get retrieves a single value by exact key
+// Get retrieves a single value by exact key.
+//
+// The returned Data slice aliases the stored bytes. Callers must not mutate
+// it. Prefer io.Get, which unmarshals into a typed value.
 func (m *MemoryLayer) Get(k string) (meta.Object, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -58,7 +70,10 @@ func (m *MemoryLayer) Get(k string) (meta.Object, error) {
 	return *obj, nil
 }
 
-// GetList retrieves all values matching a glob pattern
+// GetList retrieves all values matching a glob pattern.
+//
+// Each returned Data slice aliases the stored bytes. Callers must not mutate
+// any of them. Prefer io.GetList, which unmarshals into a typed slice.
 func (m *MemoryLayer) GetList(path string) ([]meta.Object, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -78,7 +93,14 @@ func (m *MemoryLayer) GetList(path string) ([]meta.Object, error) {
 	return res, nil
 }
 
-// Set stores a value
+// Set stores a value.
+//
+// The stored map keeps the caller's *meta.Object pointer and the backing
+// array of obj.Data. Callers must not mutate the input slice after this call,
+// reuse a buffer they passed in, or return the *meta.Object to a sync.Pool
+// (e.g. meta.PutObject) — any of those silently corrupt the store. Prefer
+// io.Set / io.Push / io.Patch, which marshal a typed value into a fresh
+// buffer that the caller never holds.
 func (m *MemoryLayer) Set(k string, obj *meta.Object) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
