@@ -7,12 +7,14 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/meta"
-	"github.com/benitogf/go-json"
 
 	"github.com/stretchr/testify/require"
 )
@@ -677,4 +679,133 @@ func TestReadListFilterAllowsIndividualReads(t *testing.T) {
 	body, err = io.ReadAll(resp.Body)
 	require.NoError(t, err)
 	require.Contains(t, string(body), "test log")
+}
+
+type filterTestItem struct {
+	V int `json:"v"`
+}
+
+// ioFilterServer starts a Server suitable for in-process io.* tests with the
+// supplied filter registrations applied first.
+func ioFilterServer(t *testing.T, register func(*Server)) *Server {
+	t.Helper()
+	server := &Server{Silence: true}
+	register(server)
+	server.Start("localhost:0")
+	t.Cleanup(func() { server.Close(os.Interrupt) })
+	return server
+}
+
+// TestIoSetEnforcesWriteFilter asserts that ooo.Set runs the configured write
+// filter and surfaces its rejection. Pre-fix it bypassed the filter entirely.
+func TestIoSetEnforcesWriteFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	rejection := errors.New("write rejected")
+	server := ioFilterServer(t, func(s *Server) {
+		s.WriteFilter("guarded/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
+			return nil, rejection
+		})
+	})
+
+	err := Set(server, "guarded/k", filterTestItem{V: 1})
+	require.ErrorIs(t, err, rejection,
+		"ooo.Set must surface the WriteFilter rejection")
+
+	_, err = server.Storage.Get("guarded/k")
+	require.Error(t, err, "value should not have been committed")
+}
+
+// TestIoPushEnforcesWriteFilter is the Push variant.
+func TestIoPushEnforcesWriteFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	rejection := errors.New("write rejected")
+	server := ioFilterServer(t, func(s *Server) {
+		s.WriteFilter("guarded/*", func(key string, data json.RawMessage) (json.RawMessage, error) {
+			return nil, rejection
+		})
+	})
+
+	_, err := Push(server, "guarded/*", filterTestItem{V: 1})
+	require.ErrorIs(t, err, rejection,
+		"ooo.Push must surface the WriteFilter rejection")
+}
+
+// TestIoPatchEnforcesWriteFilter asserts the merged result is filtered.
+func TestIoPatchEnforcesWriteFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	rejection := errors.New("write rejected")
+	server := ioFilterServer(t, func(s *Server) {
+		s.WriteFilter("guarded/k", func(key string, data json.RawMessage) (json.RawMessage, error) {
+			return nil, rejection
+		})
+	})
+
+	// Seed via raw storage to isolate the patch path under test.
+	_, err := server.Storage.Set("guarded/k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	err = Patch(server, "guarded/k", filterTestItem{V: 2})
+	require.ErrorIs(t, err, rejection,
+		"ooo.Patch must surface the WriteFilter rejection on the merged value")
+
+	obj, err := server.Storage.Get("guarded/k")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"v":1}`, string(obj.Data),
+		"patch should not have been committed when the filter rejected it")
+}
+
+// TestIoDeleteEnforcesDeleteFilter asserts that ooo.Delete runs the configured
+// delete filter and surfaces its rejection.
+func TestIoDeleteEnforcesDeleteFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	rejection := errors.New("delete rejected")
+	server := ioFilterServer(t, func(s *Server) {
+		s.DeleteFilter("guarded/k", func(key string) error {
+			return rejection
+		})
+	})
+
+	_, err := server.Storage.Set("guarded/k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	err = Delete(server, "guarded/k")
+	require.ErrorIs(t, err, rejection,
+		"ooo.Delete must surface the DeleteFilter rejection")
+
+	_, err = server.Storage.Get("guarded/k")
+	require.NoError(t, err, "value should still exist; delete was rejected")
+}
+
+// TestIoSetFiresAfterWriteFilter asserts that the after-write hook fires on a
+// successful in-process write, matching the REST behavior.
+func TestIoSetFiresAfterWriteFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	var fired sync.WaitGroup
+	fired.Add(1)
+	var firedOnce sync.Once
+	server := ioFilterServer(t, func(s *Server) {
+		s.AfterWriteFilter("k", func(key string) {
+			firedOnce.Do(fired.Done)
+		})
+	})
+
+	require.NoError(t, Set(server, "k", filterTestItem{V: 1}))
+
+	done := make(chan struct{})
+	go func() { fired.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("AfterWriteFilter did not fire within 2s of in-process Set")
+	}
 }

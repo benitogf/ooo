@@ -4,10 +4,10 @@ import (
 	"errors"
 	"log"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/merge"
-	"github.com/benitogf/go-json"
 )
 
 var (
@@ -75,6 +75,9 @@ func Get[T any](server *Server, path string) (client.Meta[T], error) {
 	}, nil
 }
 
+// Set stores a value at the specified path. The path must not contain glob
+// patterns. The configured WriteFilter (if any) is consulted before the write
+// and may reject or transform the value; the AfterWriteFilter fires on success.
 func Set[T any](server *Server, path string, item T) error {
 	if key.IsGlob(path) {
 		log.Println("Set["+path+"]: ", ErrPathGlobNotAllowed)
@@ -86,32 +89,60 @@ func Set[T any](server *Server, path string, item T) error {
 		log.Println("Set["+path+"]: failed to marshal data", err)
 		return err
 	}
-	_, err = server.Storage.Set(path, data)
-	return err
+	data, err = server.filters.Write.Check(path, data, server.Static)
+	if err != nil {
+		log.Println("Set["+path+"]: write filter rejected", err)
+		return err
+	}
+	if _, err = server.Storage.Set(path, data); err != nil {
+		return err
+	}
+	server.filters.AfterWrite.Check(path)
+	return nil
 }
 
+// Push stores a value at a fresh key under the supplied glob path. The
+// configured WriteFilter (if any) is consulted on the resolved path before
+// the write; the AfterWriteFilter fires on success.
 func Push[T any](server *Server, path string, item T) (string, error) {
 	data, err := json.Marshal(item)
 	if err != nil {
 		log.Println("Push["+path+"]: failed to marshal data", err)
 		return "", err
 	}
-	return server.Storage.Push(path, data)
+	data, err = server.filters.Write.Check(path, data, server.Static)
+	if err != nil {
+		log.Println("Push["+path+"]: write filter rejected", err)
+		return "", err
+	}
+	index, err := server.Storage.Push(path, data)
+	if err != nil {
+		return "", err
+	}
+	server.filters.AfterWrite.Check(path)
+	return index, nil
 }
 
 // Delete removes an item at the specified path from storage.
-// The path must not contain glob patterns.
+// The path must not contain glob patterns. The configured DeleteFilter (if
+// any) is consulted before the delete and may reject it.
 func Delete(server *Server, path string) error {
 	if key.IsGlob(path) {
 		log.Println("Delete["+path+"]: ", ErrPathGlobNotAllowed)
 		return ErrPathGlobNotAllowed
+	}
+	if err := server.filters.Delete.Check(path, server.Static); err != nil {
+		log.Println("Delete["+path+"]: delete filter rejected", err)
+		return err
 	}
 	return server.Storage.Del(path)
 }
 
 // Patch applies a partial update to an existing item at the specified path.
 // The path must not contain glob patterns and the item must already exist.
-// The patch is merged with the existing data using JSON merge semantics.
+// The patch is merged with the existing data using JSON merge semantics; the
+// configured WriteFilter (if any) sees the merged result and may reject or
+// transform it. The AfterWriteFilter fires on success.
 func Patch[T any](server *Server, path string, item T) error {
 	if key.IsGlob(path) {
 		log.Println("Patch["+path+"]: ", ErrPathGlobNotAllowed)
@@ -136,6 +167,14 @@ func Patch[T any](server *Server, path string, item T) error {
 		return err
 	}
 
-	_, err = server.Storage.Set(path, mergedBytes)
-	return err
+	data, err := server.filters.Write.Check(path, json.RawMessage(mergedBytes), server.Static)
+	if err != nil {
+		log.Println("Patch["+path+"]: write filter rejected", err)
+		return err
+	}
+	if _, err = server.Storage.Set(path, data); err != nil {
+		return err
+	}
+	server.filters.AfterWrite.Check(path)
+	return nil
 }
