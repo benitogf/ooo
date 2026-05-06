@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -748,4 +749,116 @@ func TestLayeredCloseRaceWithBroadcast(t *testing.T) {
 	time.Sleep(2 * time.Millisecond) // let writers reach the broadcast path
 	s.Close()
 	wg.Wait()
+}
+
+// faultyEmbeddedLayer wraps a MemoryLayer but returns the configured errors
+// from Set / Del so tests can simulate persistence failures.
+type faultyEmbeddedLayer struct {
+	inner  *MemoryLayer
+	setErr error
+	delErr error
+}
+
+func (f *faultyEmbeddedLayer) Active() bool                      { return f.inner.Active() }
+func (f *faultyEmbeddedLayer) Start(o LayerOptions) error        { return f.inner.Start(o) }
+func (f *faultyEmbeddedLayer) Close()                            { f.inner.Close() }
+func (f *faultyEmbeddedLayer) Get(k string) (meta.Object, error) { return f.inner.Get(k) }
+func (f *faultyEmbeddedLayer) GetList(p string) ([]meta.Object, error) {
+	return f.inner.GetList(p)
+}
+func (f *faultyEmbeddedLayer) Set(k string, o *meta.Object) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	return f.inner.Set(k, o)
+}
+func (f *faultyEmbeddedLayer) Del(k string) error {
+	if f.delErr != nil {
+		return f.delErr
+	}
+	return f.inner.Del(k)
+}
+func (f *faultyEmbeddedLayer) Keys() ([]string, error) { return f.inner.Keys() }
+func (f *faultyEmbeddedLayer) Clear()                  { f.inner.Clear() }
+func (f *faultyEmbeddedLayer) Load() (map[string]*meta.Object, error) {
+	keys, err := f.inner.Keys()
+	if err != nil {
+		return nil, err
+	}
+	data := make(map[string]*meta.Object, len(keys))
+	for _, k := range keys {
+		obj, err := f.inner.Get(k)
+		if err != nil {
+			continue
+		}
+		data[k] = &obj
+	}
+	return data, nil
+}
+
+// TestLayeredSetReturnsEmbeddedError asserts the embedded layer's Set error is
+// propagated to the caller of Layered.Set instead of being silently swallowed.
+func TestLayeredSetReturnsEmbeddedError(t *testing.T) {
+	t.Parallel()
+
+	embeddedErr := errors.New("disk full")
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer(), setErr: embeddedErr}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("k", json.RawMessage(`{"v":1}`))
+	require.ErrorIs(t, err, embeddedErr,
+		"Set must return the embedded layer's error")
+}
+
+// TestLayeredPushReturnsEmbeddedError is the Push variant.
+func TestLayeredPushReturnsEmbeddedError(t *testing.T) {
+	t.Parallel()
+
+	embeddedErr := errors.New("disk full")
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer(), setErr: embeddedErr}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Push("things/*", json.RawMessage(`{"v":1}`))
+	require.ErrorIs(t, err, embeddedErr,
+		"Push must return the embedded layer's error")
+}
+
+// TestLayeredSetWithMetaReturnsEmbeddedError is the SetWithMeta variant.
+func TestLayeredSetWithMetaReturnsEmbeddedError(t *testing.T) {
+	t.Parallel()
+
+	embeddedErr := errors.New("disk full")
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer(), setErr: embeddedErr}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.SetWithMeta("k", json.RawMessage(`{"v":1}`), 1, 2)
+	require.ErrorIs(t, err, embeddedErr,
+		"SetWithMeta must return the embedded layer's error")
+}
+
+// TestLayeredDelReturnsEmbeddedError asserts the embedded layer's Del error is
+// propagated to the caller of Layered.Del.
+func TestLayeredDelReturnsEmbeddedError(t *testing.T) {
+	t.Parallel()
+
+	embeddedErr := errors.New("disk locked")
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	embedded.delErr = embeddedErr
+
+	err = s.Del("k")
+	require.ErrorIs(t, err, embeddedErr,
+		"Del must return the embedded layer's error")
 }
