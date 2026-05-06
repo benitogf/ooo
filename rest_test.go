@@ -10,9 +10,9 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/meta"
-	"github.com/benitogf/go-json"
 	"github.com/stretchr/testify/require"
 )
 
@@ -413,6 +413,35 @@ func TestRestPatchWriteFilterOnMergedData(t *testing.T) {
 	// Both fields should exist: requiredField from original, otherField patched
 	require.Equal(t, "exists", result["requiredField"])
 	require.Equal(t, "patched", result["otherField"])
+}
+
+func TestRestPatchTypeMismatchRejected(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Existing data has "nest" as an object.
+	_, err := server.Storage.Set("typemismatch", json.RawMessage(`{"nest":{"x":1},"name":"a"}`))
+	require.NoError(t, err)
+
+	// Patch tries to overwrite "nest" with a primitive — merge silently keeps
+	// the original value for that path. Without the fix, the caller sees 200
+	// but the storage has not changed for "nest".
+	patchBody := []byte(`{"nest":"replaced","name":"b"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/typemismatch", bytes.NewBuffer(patchBody))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+
+	// Storage must remain unchanged when the patch is rejected.
+	obj, err := server.Storage.Get("typemismatch")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"nest":{"x":1},"name":"a"}`, string(obj.Data))
 }
 
 func TestRestInvalidKey(t *testing.T) {

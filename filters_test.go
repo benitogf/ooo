@@ -760,6 +760,30 @@ func TestIoPatchEnforcesWriteFilter(t *testing.T) {
 		"patch should not have been committed when the filter rejected it")
 }
 
+// TestIoPatchRejectsTypeMismatch asserts that ooo.Patch surfaces non-fatal
+// merge errors (type mismatches at specific paths) instead of silently
+// persisting a partially-merged result.
+func TestIoPatchRejectsTypeMismatch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ioFilterServer(t, func(s *Server) {})
+
+	_, err := server.Storage.Set("typemismatch/k", json.RawMessage(`{"nest":{"x":1},"name":"a"}`))
+	require.NoError(t, err)
+
+	// Patch tries to overwrite "nest" (object) with a primitive — merge keeps
+	// the original value at that path. Patch must return an error rather than
+	// committing the partially-applied result.
+	err = Patch(server, "typemismatch/k", map[string]any{"nest": "replaced", "name": "b"})
+	require.Error(t, err, "ooo.Patch must reject patches with type-mismatch merge errors")
+
+	obj, err := server.Storage.Get("typemismatch/k")
+	require.NoError(t, err)
+	require.JSONEq(t, `{"nest":{"x":1},"name":"a"}`, string(obj.Data),
+		"patch should not have been committed when merge reported errors")
+}
+
 // TestIoDeleteEnforcesDeleteFilter asserts that ooo.Delete runs the configured
 // delete filter and surfaces its rejection.
 func TestIoDeleteEnforcesDeleteFilter(t *testing.T) {
