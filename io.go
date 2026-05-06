@@ -32,7 +32,10 @@ func GetList[T any](server *Server, path string) ([]client.Meta[T], error) {
 		return result, err
 	}
 
-	objs, err = server.filters.ReadList.Check(path, objs, server.Static)
+	// Pass static=false: in-process callers are trusted; Static mode's
+	// "registered route required" contract applies only to the REST boundary.
+	// Registered filters still fire regardless.
+	objs, err = server.filters.ReadList.Check(path, objs, false)
 	if err != nil {
 		log.Println("GetList["+path+"]: read list filter rejected", err)
 		return result, err
@@ -70,7 +73,8 @@ func Get[T any](server *Server, path string) (client.Meta[T], error) {
 		log.Println("Get["+path+"]: failed to get from storage", err)
 		return result, err
 	}
-	obj, err = server.filters.ReadObject.CheckWithListFallback(path, obj, server.Static, server.filters.ReadList)
+	// See note in GetList: in-process helpers do not enforce Static mode.
+	obj, err = server.filters.ReadObject.CheckWithListFallback(path, obj, false, server.filters.ReadList)
 	if err != nil {
 		log.Println("Get["+path+"]: read filter rejected", err)
 		return result, err
@@ -103,7 +107,8 @@ func Set[T any](server *Server, path string, item T) error {
 		log.Println("Set["+path+"]: failed to marshal data", err)
 		return err
 	}
-	data, err = server.filters.Write.Check(path, data, server.Static)
+	// See note in GetList: in-process helpers do not enforce Static mode.
+	data, err = server.filters.Write.Check(path, data, false)
 	if err != nil {
 		log.Println("Set["+path+"]: write filter rejected", err)
 		return err
@@ -124,7 +129,8 @@ func Push[T any](server *Server, path string, item T) (string, error) {
 		log.Println("Push["+path+"]: failed to marshal data", err)
 		return "", err
 	}
-	data, err = server.filters.Write.Check(path, data, server.Static)
+	// See note in GetList: in-process helpers do not enforce Static mode.
+	data, err = server.filters.Write.Check(path, data, false)
 	if err != nil {
 		log.Println("Push["+path+"]: write filter rejected", err)
 		return "", err
@@ -145,7 +151,8 @@ func Delete(server *Server, path string) error {
 		log.Println("Delete["+path+"]: ", ErrPathGlobNotAllowed)
 		return ErrPathGlobNotAllowed
 	}
-	if err := server.filters.Delete.Check(path, server.Static); err != nil {
+	// See note in GetList: in-process helpers do not enforce Static mode.
+	if err := server.filters.Delete.Check(path, false); err != nil {
 		log.Println("Delete["+path+"]: delete filter rejected", err)
 		return err
 	}
@@ -181,7 +188,8 @@ func Patch[T any](server *Server, path string, item T) error {
 		return err
 	}
 
-	data, err := server.filters.Write.Check(path, json.RawMessage(mergedBytes), server.Static)
+	// See note in GetList: in-process helpers do not enforce Static mode.
+	data, err := server.filters.Write.Check(path, json.RawMessage(mergedBytes), false)
 	if err != nil {
 		log.Println("Patch["+path+"]: write filter rejected", err)
 		return err
