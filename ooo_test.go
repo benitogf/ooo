@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,6 +106,77 @@ func TestCloseResetsState(t *testing.T) {
 	// After close, internal state should be cleared
 	require.Nil(t, server.Router)
 	require.Nil(t, server.Storage)
+}
+
+// TestServerCloseShutdownBoundedByDeadline asserts that Server.Close does not
+// hang forever on a stuck HTTP handler. The shutdown context must be bounded
+// by server.Deadline. Pre-fix, Shutdown(context.Background()) waited for the
+// blocking handler indefinitely.
+func TestServerCloseShutdownBoundedByDeadline(t *testing.T) {
+	server := &Server{
+		Silence:  true,
+		Deadline: 500 * time.Millisecond,
+	}
+
+	var entered sync.WaitGroup
+	entered.Add(1)
+	var enteredOnce sync.Once
+
+	unblock := make(chan struct{})
+
+	server.Start("localhost:0")
+	server.Endpoint(EndpointConfig{
+		Path: "/blocking-handler",
+		Methods: Methods{
+			http.MethodGet: {Response: nil},
+		},
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			enteredOnce.Do(entered.Done)
+			<-unblock
+		},
+	})
+
+	var requestExited sync.WaitGroup
+	requestExited.Add(1)
+	go func() {
+		defer requestExited.Done()
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, _ := http.NewRequest(http.MethodGet, "http://"+server.Address+"/blocking-handler", nil)
+		resp, err := client.Do(req)
+		if err == nil && resp != nil {
+			resp.Body.Close()
+		}
+	}()
+
+	entered.Wait()
+
+	var closed sync.WaitGroup
+	closed.Add(1)
+	closeStart := time.Now()
+	go func() {
+		defer closed.Done()
+		server.Close(os.Interrupt)
+	}()
+
+	closedDone := make(chan struct{})
+	go func() {
+		closed.Wait()
+		close(closedDone)
+	}()
+
+	select {
+	case <-closedDone:
+		elapsed := time.Since(closeStart)
+		require.Less(t, elapsed, 3*time.Second,
+			"Server.Close must be bounded by Deadline (500ms); took %s", elapsed)
+	case <-time.After(5 * time.Second):
+		t.Fatal("Server.Close did not return within bounded time on a stuck handler")
+	}
+
+	// Unblock the leaked handler goroutine so the in-flight request and the
+	// handler exit before the test ends.
+	close(unblock)
+	requestExited.Wait()
 }
 
 func TestStartWithError(t *testing.T) {
