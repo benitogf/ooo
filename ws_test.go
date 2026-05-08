@@ -3,10 +3,12 @@ package ooo
 import (
 	"context"
 	"errors"
+	"net"
 	"net/url"
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,9 +16,89 @@ import (
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/stream"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+// waitForPoolConnections waits until the pool with the given key has at least n
+// connections, so tests can synchronize ordering of dial → addConnToPool.
+func waitForPoolConnections(t *testing.T, sm *stream.Stream, key string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, p := range sm.GetState() {
+			if p.Key == key && p.Connections >= n {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("pool %q did not reach %d connections in time", key, n)
+}
+
+// TestStreamBroadcastSlowSubscriberDoesNotStallPool asserts that a slow
+// WebSocket peer (whose TCP receive buffer is full) does not delay broadcast
+// delivery to other peers on the same pool. Pre-fix Stream.Broadcast iterates
+// connections sequentially under pool.mutex, so a single slow peer blocks the
+// fast peer for up to WriteTimeout per broadcast and stalls the watcher worker
+// that fans out events.
+func TestStreamBroadcastSlowSubscriberDoesNotStallPool(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("test relies on Linux TCP buffer behavior")
+	}
+
+	server := Server{}
+	server.Silence = true
+	// Long enough that a stall is unmistakable, short enough to keep the
+	// failure mode bounded.
+	server.Stream.WriteTimeout = 5 * time.Second
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/items/*"}
+
+	// Slow subscriber dialed first so it lands at pool.connections[0].
+	// Shrink its TCP receive buffer so the server's writes back-pressure
+	// after a small payload, then never read from it.
+	slow, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	defer slow.Close()
+	tc, ok := slow.UnderlyingConn().(*net.TCPConn)
+	require.True(t, ok, "underlying conn must be *net.TCPConn")
+	require.NoError(t, tc.SetReadBuffer(2048))
+
+	waitForPoolConnections(t, &server.Stream, "items/*", 1)
+
+	// Fast subscriber dialed second.
+	fast, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	defer fast.Close()
+	waitForPoolConnections(t, &server.Stream, "items/*", 2)
+
+	// Drain the initial empty-list snapshot from fast.
+	fast.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = fast.ReadMessage()
+	require.NoError(t, err)
+
+	// 1 MiB payload definitely exceeds the default kernel send buffer, so the
+	// server's write to slow blocks once slow's tiny recv buffer fills.
+	bigPayload := strings.Repeat("x", 1024*1024)
+
+	start := time.Now()
+	_, err = server.Storage.Set("items/probe", json.RawMessage(`{"v":"`+bigPayload+`"}`))
+	require.NoError(t, err)
+
+	fast.SetReadDeadline(time.Now().Add(3 * time.Second))
+	_, _, err = fast.ReadMessage()
+	elapsed := time.Since(start)
+	require.NoError(t, err)
+
+	// Pre-fix: slow at index 0 blocks ~WriteTimeout, fast waits behind it.
+	// Post-fix: each conn has its own writer, fast gets the message in ms.
+	require.Less(t, elapsed, 1*time.Second,
+		"fast subscriber waited %v — slow peer is starving the pool", elapsed)
+}
 
 // TestStreamReadReapsHalfClosedConn asserts that a websocket client which
 // stops responding to server pings is reaped within bounded time. Pre-fix
