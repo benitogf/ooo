@@ -60,24 +60,20 @@ const DefaultPingInterval = 60 * time.Second
 // DefaultPingInterval; default leaves headroom of ~2 missed pings.
 const DefaultPongTimeout = 150 * time.Second
 
-// DefaultParallelThreshold is the minimum number of connections before parallel broadcast is used.
-const DefaultParallelThreshold = 6
-
 // Stream a group of pools
 type Stream struct {
-	mutex             sync.RWMutex
-	OnSubscribe       Subscribe
-	OnUnsubscribe     Unsubscribe
-	ForcePatch        bool
-	NoPatch           bool
-	WriteTimeout      time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
-	PingInterval      time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
-	PongTimeout       time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
-	ParallelThreshold int              // minimum connections for parallel broadcast, defaults to DefaultParallelThreshold
-	clockPool         *Pool            // dedicated clock pool (was index 0)
-	pools             map[string]*Pool // O(1) lookup by key
-	poolIndex         *poolTrie        // trie for O(k) path matching in Broadcast
-	Console           *coat.Console
+	mutex         sync.RWMutex
+	OnSubscribe   Subscribe
+	OnUnsubscribe Unsubscribe
+	ForcePatch    bool
+	NoPatch       bool
+	WriteTimeout  time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
+	PingInterval  time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
+	PongTimeout   time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
+	clockPool     *Pool            // dedicated clock pool (was index 0)
+	pools         map[string]*Pool // O(1) lookup by key
+	poolIndex     *poolTrie        // trie for O(k) path matching in Broadcast
+	Console       *coat.Console
 }
 
 // BroadcastOpt options for broadcasting storage events
@@ -352,41 +348,35 @@ func (sm *Stream) nextVersion(pool *Pool) int64 {
 	return pool.cache.Version
 }
 
+// broadcastPool dispatches msg to every connection in the pool concurrently:
+// each connection's write runs in its own goroutine, so a slow peer can no
+// longer head-of-line block its neighbors within a single broadcast. The
+// caller (Broadcast) holds pool.mutex around this call, so cross-broadcast
+// ordering for the same pool is preserved.
 func (sm *Stream) broadcastPool(pool *Pool, data []byte, snapshot bool, version int64) {
 	numConns := len(pool.connections)
-	threshold := sm.ParallelThreshold
-	if threshold == 0 {
-		threshold = DefaultParallelThreshold
+	if numConns == 0 {
+		return
 	}
 
 	msg := buildMessage(data, snapshot, version)
 
+	var mu sync.Mutex
 	var failedConns []*Conn
-
-	if numConns < threshold {
-		for _, client := range pool.connections {
-			err := sm.writeBytesPrebuilt(client, msg)
+	var wg sync.WaitGroup
+	wg.Add(numConns)
+	for _, client := range pool.connections {
+		go func(c *Conn) {
+			defer wg.Done()
+			err := sm.writeBytesPrebuilt(c, msg)
 			if err != nil {
-				failedConns = append(failedConns, client)
+				mu.Lock()
+				failedConns = append(failedConns, c)
+				mu.Unlock()
 			}
-		}
-	} else {
-		var mu sync.Mutex
-		var wg sync.WaitGroup
-		wg.Add(numConns)
-		for _, client := range pool.connections {
-			go func(c *Conn) {
-				defer wg.Done()
-				err := sm.writeBytesPrebuilt(c, msg)
-				if err != nil {
-					mu.Lock()
-					failedConns = append(failedConns, c)
-					mu.Unlock()
-				}
-			}(client)
-		}
-		wg.Wait()
+		}(client)
 	}
+	wg.Wait()
 
 	// Remove failed connections from pool while we still hold the pool lock
 	for _, client := range failedConns {
