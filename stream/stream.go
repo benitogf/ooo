@@ -28,17 +28,9 @@ type Unsubscribe func(key string)
 
 // Conn extends the websocket connection with a mutex
 // https://godoc.org/github.com/gorilla/websocket#hdr-Concurrency
-//
-// outbox + done + closeOnce form a per-connection delivery queue: broadcasts
-// non-blocking-send to outbox; a writer goroutine drains outbox in FIFO order
-// and serializes writes via mutex. This isolates each subscriber so one slow
-// peer cannot stall delivery to peers in the same pool.
 type Conn struct {
-	mutex     sync.Mutex
-	conn      *websocket.Conn
-	outbox    chan []byte
-	done      chan struct{}
-	closeOnce sync.Once
+	mutex sync.Mutex
+	conn  *websocket.Conn
 }
 
 // Pool of key filtered connections
@@ -68,26 +60,20 @@ const DefaultPingInterval = 60 * time.Second
 // DefaultPingInterval; default leaves headroom of ~2 missed pings.
 const DefaultPongTimeout = 150 * time.Second
 
-// DefaultOutboxCapacity is the default per-connection outbox buffer. A peer
-// whose outbox is full when a broadcast tries to enqueue is considered a slow
-// consumer and its connection is closed, so it does not stall the pool.
-const DefaultOutboxCapacity = 32
-
 // Stream a group of pools
 type Stream struct {
-	mutex          sync.RWMutex
-	OnSubscribe    Subscribe
-	OnUnsubscribe  Unsubscribe
-	ForcePatch     bool
-	NoPatch        bool
-	WriteTimeout   time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
-	PingInterval   time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
-	PongTimeout    time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
-	OutboxCapacity int              // per-conn outbox buffer for broadcasts, defaults to DefaultOutboxCapacity
-	clockPool      *Pool            // dedicated clock pool (was index 0)
-	pools          map[string]*Pool // O(1) lookup by key
-	poolIndex      *poolTrie        // trie for O(k) path matching in Broadcast
-	Console        *coat.Console
+	mutex         sync.RWMutex
+	OnSubscribe   Subscribe
+	OnUnsubscribe Unsubscribe
+	ForcePatch    bool
+	NoPatch       bool
+	WriteTimeout  time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
+	PingInterval  time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
+	PongTimeout   time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
+	clockPool     *Pool            // dedicated clock pool (was index 0)
+	pools         map[string]*Pool // O(1) lookup by key
+	poolIndex     *poolTrie        // trie for O(k) path matching in Broadcast
+	Console       *coat.Console
 }
 
 // BroadcastOpt options for broadcasting storage events
@@ -176,10 +162,8 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data [
 	}
 
 	client := &Conn{
-		conn:   wsClient,
-		mutex:  sync.Mutex{},
-		outbox: make(chan []byte, sm.outboxCapacity()),
-		done:   make(chan struct{}),
+		conn:  wsClient,
+		mutex: sync.Mutex{},
 	}
 
 	// Send initial snapshot BEFORE adding to pool
@@ -195,44 +179,9 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data [
 		}
 	}
 
-	// Start the per-conn writer BEFORE adding to the pool so outbox pushes
-	// from a concurrent broadcast are drained as soon as they arrive.
-	sm.startWriter(key, client)
+	// Now add to pool - broadcasts can now reach this client
 	sm.addConnToPool(key, client)
 	return client, nil
-}
-
-// outboxCapacity returns the configured per-conn outbox buffer size, falling
-// back to DefaultOutboxCapacity when unset.
-func (sm *Stream) outboxCapacity() int {
-	if sm.OutboxCapacity > 0 {
-		return sm.OutboxCapacity
-	}
-	return DefaultOutboxCapacity
-}
-
-// startWriter runs the per-conn writer goroutine. It drains outbox in FIFO
-// order, holding client.mutex around each write so it serializes with pings.
-// On any write error the connection is removed from its pool and closed.
-func (sm *Stream) startWriter(key string, client *Conn) {
-	go func() {
-		for {
-			select {
-			case msg := <-client.outbox:
-				client.mutex.Lock()
-				client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
-				err := client.conn.WriteMessage(websocket.BinaryMessage, msg)
-				client.mutex.Unlock()
-				if err != nil {
-					sm.Console.Err("stream:writer:writeStreamErr["+key+"]: ", err)
-					sm.Close(key, client)
-					return
-				}
-			case <-client.done:
-				return
-			}
-		}
-	}()
 }
 
 // addConnToPool adds an existing connection to the appropriate pool
@@ -271,10 +220,8 @@ func (sm *Stream) addConnToPool(key string, client *Conn) {
 
 func (sm *Stream) newConn(key string, wsClient *websocket.Conn) *Conn {
 	client := &Conn{
-		conn:   wsClient,
-		mutex:  sync.Mutex{},
-		outbox: make(chan []byte, sm.outboxCapacity()),
-		done:   make(chan struct{}),
+		conn:  wsClient,
+		mutex: sync.Mutex{},
 	}
 
 	sm.mutex.Lock()
@@ -322,17 +269,8 @@ func removeConn(conns []*Conn, client *Conn) []*Conn {
 	return conns
 }
 
-// Close client connection. Idempotent: subsequent calls are no-ops, so it is
-// safe to call from the read loop, the writer goroutine, and explicit teardown.
+// Close client connection
 func (sm *Stream) Close(key string, client *Conn) {
-	first := false
-	client.closeOnce.Do(func() {
-		first = true
-		close(client.done)
-	})
-	if !first {
-		return
-	}
 	sm.mutex.Lock()
 	if key == "" {
 		if sm.clockPool != nil {
@@ -358,18 +296,11 @@ func (sm *Stream) CloseAll() {
 	sm.mutex.Lock()
 	defer sm.mutex.Unlock()
 
-	closeConn := func(client *Conn) {
-		client.closeOnce.Do(func() {
-			close(client.done)
-			client.conn.Close()
-		})
-	}
-
 	// Close clock pool connections
 	if sm.clockPool != nil {
 		sm.clockPool.mutex.Lock()
 		for _, client := range sm.clockPool.connections {
-			closeConn(client)
+			client.conn.Close()
 		}
 		sm.clockPool.connections = nil
 		sm.clockPool.mutex.Unlock()
@@ -379,7 +310,7 @@ func (sm *Stream) CloseAll() {
 	for _, pool := range sm.pools {
 		pool.mutex.Lock()
 		for _, client := range pool.connections {
-			closeConn(client)
+			client.conn.Close()
 		}
 		pool.connections = nil
 		pool.mutex.Unlock()
@@ -417,50 +348,58 @@ func (sm *Stream) nextVersion(pool *Pool) int64 {
 	return pool.cache.Version
 }
 
-// broadcastPool enqueues msg into each subscriber's outbox. Per-conn writer
-// goroutines drain those outboxes in FIFO order, so one slow peer cannot stall
-// delivery to others. A peer whose outbox is already full is treated as a slow
-// consumer and disconnected; eviction happens here (under pool.mutex held by
-// the caller) so the connection list stays consistent with the broadcast set.
-//
-// The caller (Broadcast) holds pool.mutex, so iteration of pool.connections
-// and removal of slow conns are both safe.
+// broadcastPool dispatches msg to every connection in the pool concurrently:
+// each connection's write runs in its own goroutine, so a slow peer can no
+// longer head-of-line block its neighbors within a single broadcast. The
+// caller (Broadcast) holds pool.mutex around this call, so cross-broadcast
+// ordering for the same pool is preserved.
 func (sm *Stream) broadcastPool(pool *Pool, data []byte, snapshot bool, version int64) {
-	msg := buildMessage(data, snapshot, version)
-
-	var slow []*Conn
-	for _, client := range pool.connections {
-		select {
-		case client.outbox <- msg:
-		case <-client.done:
-			// Already closing; the writer or Close path will reap it.
-		default:
-			slow = append(slow, client)
-		}
-	}
-
-	if len(slow) == 0 {
+	numConns := len(pool.connections)
+	if numConns == 0 {
 		return
 	}
 
-	for _, client := range slow {
-		pool.connections = removeConn(pool.connections, client)
-	}
+	msg := buildMessage(data, snapshot, version)
 
-	// Disconnect slow consumers asynchronously so we don't block this
-	// pool while we still hold its lock. The writer goroutine for each
-	// closed conn will exit on its next iteration via client.done.
-	key := pool.Key
-	go func(conns []*Conn) {
-		for _, c := range conns {
-			c.closeOnce.Do(func() {
-				close(c.done)
-				c.conn.Close()
-			})
-			sm.Console.Err("stream:broadcastPool:slowConsumerEvicted[" + key + "]")
-			sm.OnUnsubscribe(key)
-		}
-	}(slow)
+	var mu sync.Mutex
+	var failedConns []*Conn
+	var wg sync.WaitGroup
+	wg.Add(numConns)
+	for _, client := range pool.connections {
+		go func(c *Conn) {
+			defer wg.Done()
+			err := sm.writeBytesPrebuilt(c, msg)
+			if err != nil {
+				mu.Lock()
+				failedConns = append(failedConns, c)
+				mu.Unlock()
+			}
+		}(client)
+	}
+	wg.Wait()
+
+	// Remove failed connections from pool while we still hold the pool lock
+	for _, client := range failedConns {
+		pool.connections = removeConn(pool.connections, client)
+		go sm.OnUnsubscribe(pool.Key)
+	}
+}
+
+func (sm *Stream) writeBytesPrebuilt(client *Conn, msg []byte) error {
+	client.mutex.Lock()
+	defer client.mutex.Unlock()
+	timeout := sm.WriteTimeout
+	if timeout == 0 {
+		timeout = DefaultWriteTimeout
+	}
+	client.conn.SetWriteDeadline(time.Now().Add(timeout))
+	err := client.conn.WriteMessage(websocket.BinaryMessage, msg)
+	if err != nil {
+		client.conn.Close()
+		sm.Console.Err("stream:writeBytesPrebuilt:writeStreamErr: ", err)
+		return err
+	}
+	return nil
 }
 
 func buildMessage(data []byte, snapshot bool, version int64) []byte {
