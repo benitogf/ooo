@@ -26,6 +26,48 @@ func TestStorage(t *testing.T) {
 	StorageObjectTest(app, t)
 }
 
+// TestStorageExtendedKeyChars asserts the storage layer accepts keys with
+// hyphens, dots, and underscores so that UUIDs, ISO dates, filenames, and
+// snake_case identifiers work end-to-end through Set/Get/GetList/Del.
+func TestStorageExtendedKeyChars(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	app := &Server{}
+	app.Silence = true
+	app.Start("localhost:0")
+	defer app.Close(os.Interrupt)
+
+	keys := []string{
+		"users/john-doe",
+		"logs/2026-05-08",
+		"data/report.json",
+		"users/jane_doe",
+		"550e8400-e29b-41d4-a716-446655440000",
+	}
+
+	for _, k := range keys {
+		_, err := app.Storage.Set(k, TEST_DATA)
+		require.NoError(t, err, "Set %q", k)
+
+		obj, err := app.Storage.Get(k)
+		require.NoError(t, err, "Get %q", k)
+		require.NotEmpty(t, obj.Data)
+	}
+
+	users, err := app.Storage.GetList("users/*")
+	require.NoError(t, err)
+	require.Len(t, users, 2)
+
+	logs, err := app.Storage.GetList("logs/*")
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+
+	for _, k := range keys {
+		require.NoError(t, app.Storage.Del(k))
+	}
+}
+
 func TestStreamBroadcast(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()

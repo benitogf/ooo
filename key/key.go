@@ -25,16 +25,20 @@ func HasGlob(path string) bool {
 }
 
 // isValidChar checks if a character is valid for a key path.
-// Valid characters: a-z, A-Z, 0-9, *, /
+// Valid characters: a-z, A-Z, 0-9, *, /, -, _, .
 func isValidChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') ||
 		(c >= 'A' && c <= 'Z') ||
 		(c >= '0' && c <= '9') ||
-		c == '*' || c == '/'
+		c == '*' || c == '/' ||
+		c == '-' || c == '_' || c == '.'
 }
 
 // isValidEndChar checks if a character is valid for start/end of a key.
 // Valid characters: a-z, A-Z, 0-9, *
+//
+// Separators (/, -, _, .) are explicitly excluded so a key cannot start or
+// end with one — that constraint is what makes path joins unambiguous.
 func isValidEndChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') ||
 		(c >= 'A' && c <= 'Z') ||
@@ -44,7 +48,7 @@ func isValidEndChar(c byte) bool {
 
 // IsValid checks that the key pattern is supported.
 // Uses string-based validation instead of regex for better performance.
-// Valid patterns: ^[a-zA-Z*\d]$|^[a-zA-Z*\d][a-zA-Z*\d/]+[a-zA-Z*\d]$
+// Valid patterns: ^[a-zA-Z*\d]$|^[a-zA-Z*\d][a-zA-Z*\d/\-_.]+[a-zA-Z*\d]$
 func IsValid(key string) bool {
 	if len(key) == 0 {
 		return false
