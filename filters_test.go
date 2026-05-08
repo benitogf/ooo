@@ -19,6 +19,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// fixturePostBody is a minimal valid JSON body used as POST payload in the
+// internal-package filter tests. The oootest package holds richer fixtures,
+// but importing oootest from package ooo would create a cycle.
+var fixturePostBody = json.RawMessage(`{"sample":true}`)
+
 func TestFilters(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
@@ -101,7 +106,7 @@ func TestFilters(t *testing.T) {
 	require.NoError(t, err)
 	_, err = server.filters.ReadList.Check("book/1", nil, true)
 	require.NoError(t, err)
-	req := httptest.NewRequest("POST", "/test/1", bytes.NewBuffer(TEST_DATA))
+	req := httptest.NewRequest("POST", "/test/1", bytes.NewBuffer(fixturePostBody))
 	w := httptest.NewRecorder()
 	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -113,7 +118,7 @@ func TestFilters(t *testing.T) {
 	resp = w.Result()
 	require.Equal(t, 200, resp.StatusCode)
 
-	req = httptest.NewRequest("POST", "/flyer", bytes.NewBuffer(TEST_DATA))
+	req = httptest.NewRequest("POST", "/flyer", bytes.NewBuffer(fixturePostBody))
 	w = httptest.NewRecorder()
 	server.Router.ServeHTTP(w, req)
 	resp = w.Result()

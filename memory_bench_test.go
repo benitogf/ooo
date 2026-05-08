@@ -1,17 +1,20 @@
-package ooo
+package ooo_test
 
 import (
 	"os"
 	"testing"
+
+	"github.com/benitogf/ooo"
+	"github.com/benitogf/ooo/oootest"
 )
 
 // go test -bench=.
 
 func BenchmarkMemoryStorageSetGetDel(b *testing.B) {
 	b.ReportAllocs()
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:9889")
 	defer server.Close(os.Interrupt)
-	StorageSetGetDelTestBenchmark(server.Storage, b)
+	oootest.StorageSetGetDelTestBenchmark(server.Storage, b)
 }

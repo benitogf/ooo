@@ -1,11 +1,13 @@
-package ooo
+package ooo_test
 
 import (
 	"os"
 	"runtime"
 	"testing"
 
+	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/monotonic"
+	"github.com/benitogf/ooo/oootest"
 	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -18,170 +20,170 @@ func TestStorage(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	app := &Server{}
+	app := &ooo.Server{}
 	app.Silence = true
 	app.Start("localhost:0")
 	defer app.Close(os.Interrupt)
-	StorageListTest(app, t)
-	StorageObjectTest(app, t)
+	oootest.StorageListTest(app, t)
+	oootest.StorageObjectTest(app, t)
 }
 
 func TestStreamBroadcast(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	server.ForcePatch = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StreamBroadcastTest(t, &server)
+	oootest.StreamBroadcastTest(t, &server)
 }
 
 func TestStreamGlobBroadcast(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	server.ForcePatch = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StreamGlobBroadcastTest(t, &server, 3)
+	oootest.StreamGlobBroadcastTest(t, &server, 3)
 }
 
 func TestStreamGlobBroadcastConcurrent(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	server.ForcePatch = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StreamGlobBroadcastConcurrentTest(t, &server, 3)
+	oootest.StreamGlobBroadcastConcurrentTest(t, &server, 3)
 }
 
 func TestStreamBroadcastFilter(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	server.ForcePatch = true
 	defer server.Close(os.Interrupt)
-	StreamBroadcastFilterTest(t, &server)
+	oootest.StreamBroadcastFilterTest(t, &server)
 }
 
 func TestStreamForcePatch(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	defer server.Close(os.Interrupt)
-	StreamBroadcastForcePatchTest(t, &server)
+	oootest.StreamBroadcastForcePatchTest(t, &server)
 }
 
 func TestStreamNoPatch(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	defer server.Close(os.Interrupt)
-	StreamBroadcastNoPatchTest(t, &server)
+	oootest.StreamBroadcastNoPatchTest(t, &server)
 }
 
 func TestGetN(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StorageGetNTest(server, t, 10)
+	oootest.StorageGetNTest(server, t, 10)
 }
 
 func TestGetNRange(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StorageGetNRangeTest(server, t, 10)
+	oootest.StorageGetNRangeTest(server, t, 10)
 }
 
 func TestKeysRange(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StorageKeysRangeTest(server, t, 10)
+	oootest.StorageKeysRangeTest(server, t, 10)
 }
 
 func TestStreamItemGlobBroadcast(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := Server{}
+	server := ooo.Server{}
 	server.Silence = true
 	server.ForcePatch = true
 	server.Start("localhost:0")
 	server.Storage.Clear()
 	defer server.Close(os.Interrupt)
-	StreamItemGlobBroadcastTest(t, &server)
+	oootest.StreamItemGlobBroadcastTest(t, &server)
 }
 
 func TestBatchSet(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StorageBatchSetTest(server, t, 10)
+	oootest.StorageBatchSetTest(server, t, 10)
 }
 
 func TestStreamPatch(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StreamBroadcastPatchTest(t, server)
+	oootest.StreamBroadcastPatchTest(t, server)
 }
 
 func TestStreamLimitFilter(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	StreamLimitFilterTest(t, server)
+	oootest.StreamLimitFilterTest(t, server)
 }
 
 func TestClientCompatibility(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
-	server := &Server{}
+	server := &ooo.Server{}
 	server.Silence = true
 	server.ForcePatch = true
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
-	ClientCompatibilityTest(t, server)
+	oootest.ClientCompatibilityTest(t, server)
 }
 
 func TestBeforeRead(t *testing.T) {
@@ -194,7 +196,7 @@ func TestBeforeRead(t *testing.T) {
 	err := db.Start(storage.Options{})
 	require.NoError(t, err)
 	defer db.Close()
-	StorageBeforeReadTest(db, t)
+	oootest.StorageBeforeReadTest(db, t)
 }
 
 func TestStorageAfterWrite(t *testing.T) {
@@ -207,7 +209,7 @@ func TestStorageAfterWrite(t *testing.T) {
 	err := db.Start(storage.Options{})
 	require.NoError(t, err)
 	defer db.Close()
-	StorageAfterWriteTest(db, t)
+	oootest.StorageAfterWriteTest(db, t)
 }
 
 func TestWatchStorageNoop(t *testing.T) {
@@ -220,5 +222,5 @@ func TestWatchStorageNoop(t *testing.T) {
 	err := db.Start(storage.Options{})
 	require.NoError(t, err)
 	defer db.Close()
-	WatchStorageNoopTest(db, t)
+	oootest.WatchStorageNoopTest(db, t)
 }
