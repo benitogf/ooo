@@ -717,12 +717,19 @@ func (server *Server) Close(sig os.Signal) {
 		// Force close all stream connections first
 		server.Stream.CloseAll()
 		// Shutdown HTTP server to stop accepting new connections. Bound the
-		// context by Deadline so a stuck handler cannot block shutdown
-		// indefinitely (Endpoint handlers are not wrapped in TimeoutHandler).
+		// graceful window by Deadline so a stuck handler cannot block
+		// shutdown indefinitely. Custom Endpoint handlers are not wrapped
+		// in TimeoutHandler, so they must respect r.Context().Done() to
+		// exit cleanly during this window.
+		//
+		// After the graceful window, force-close to cancel any still-running
+		// request contexts. Handlers that honour the context exit then;
+		// handlers that ignore it leak (they cannot be killed in Go).
 		if server.server != nil {
 			shutdownCtx, cancel := context.WithTimeout(context.Background(), server.Deadline)
 			server.server.Shutdown(shutdownCtx)
 			cancel()
+			server.server.Close()
 		}
 		server.handlerWg.Wait() // Wait for HTTP handlers to finish
 		server.listenWg.Wait()  // Wait for listen goroutine to finish
@@ -730,18 +737,12 @@ func (server *Server) Close(sig os.Signal) {
 		server.watchWg.Wait() // Wait for watch goroutines to finish
 		server.OnClose()
 		server.Console.Err("shutdown", sig)
-		// Clear server state to allow restarting
-		server.server = nil
-		server.Router = nil
-		server.Stream = stream.Stream{}
-		server.Storage = nil
-		server.Console = nil
-		server.filters = filters.Filters{}
-		server.limitFilters = nil
-		server.endpoints = nil
-		server.proxies = nil
-		server.startErr = nil
-		server.clockStop = nil
+		// Do not nil out Storage / Router / Console / Stream / filters here.
+		// PR #63 made shutdown bounded by Deadline, which means a stuck
+		// handler can outlive Close; nilling these fields with no
+		// synchronisation would let that goroutine nil-deref. Leaving the
+		// fields populated keeps post-close calls error-returning rather
+		// than panicking.
 	}
 }
 

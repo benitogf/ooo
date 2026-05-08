@@ -25,7 +25,13 @@ type MethodSpec struct {
 // Methods maps HTTP method to its specification
 type Methods map[string]MethodSpec
 
-// EndpointConfig configures a custom endpoint
+// EndpointConfig configures a custom endpoint.
+//
+// Handler contract: long-running handlers must respect r.Context().Done().
+// Server.Close gives handlers a graceful window of server.Deadline to exit,
+// then force-closes connections to cancel their request contexts. A handler
+// that ignores the context will leak its goroutine — Go offers no way to
+// preempt it.
 type EndpointConfig struct {
 	Path        string
 	Methods     Methods
