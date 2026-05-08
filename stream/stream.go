@@ -51,6 +51,15 @@ type Cache struct {
 // DefaultWriteTimeout is the default timeout for WebSocket write operations.
 const DefaultWriteTimeout = 15 * time.Second
 
+// DefaultPingInterval is how often the server sends a WebSocket ping to each
+// connection so half-closed peers can be detected.
+const DefaultPingInterval = 60 * time.Second
+
+// DefaultPongTimeout is how long the server waits for a pong (or any other
+// message) before declaring a connection dead. Must be greater than
+// DefaultPingInterval; default leaves headroom of ~2 missed pings.
+const DefaultPongTimeout = 150 * time.Second
+
 // DefaultParallelThreshold is the minimum number of connections before parallel broadcast is used.
 const DefaultParallelThreshold = 6
 
@@ -62,6 +71,8 @@ type Stream struct {
 	ForcePatch        bool
 	NoPatch           bool
 	WriteTimeout      time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
+	PingInterval      time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
+	PongTimeout       time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
 	ParallelThreshold int              // minimum connections for parallel broadcast, defaults to DefaultParallelThreshold
 	clockPool         *Pool            // dedicated clock pool (was index 0)
 	pools             map[string]*Pool // O(1) lookup by key
@@ -105,6 +116,12 @@ func (sm *Stream) InitClock() {
 	}
 	if sm.WriteTimeout == 0 {
 		sm.WriteTimeout = DefaultWriteTimeout
+	}
+	if sm.PingInterval == 0 {
+		sm.PingInterval = DefaultPingInterval
+	}
+	if sm.PongTimeout == 0 {
+		sm.PongTimeout = DefaultPongTimeout
 	}
 }
 
@@ -427,14 +444,48 @@ func (sm *Stream) Write(client *Conn, data []byte, snapshot bool, version int64)
 	}
 }
 
-// Read will keep alive the ws connection
+// Read will keep alive the ws connection. Half-closed peers are detected
+// via a server-side ping/pong loop: the read deadline is reset on each
+// pong, and a ping is written every PingInterval. A peer that stops
+// responding is reaped within PongTimeout.
 func (sm *Stream) Read(key string, client *Conn) {
+	client.conn.SetReadDeadline(time.Now().Add(sm.PongTimeout))
+	client.conn.SetPongHandler(func(string) error {
+		client.conn.SetReadDeadline(time.Now().Add(sm.PongTimeout))
+		return nil
+	})
+
+	stopPing := make(chan struct{})
+	var pingDone sync.WaitGroup
+	pingDone.Add(1)
+	go func() {
+		defer pingDone.Done()
+		ticker := time.NewTicker(sm.PingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopPing:
+				return
+			case <-ticker.C:
+				client.mutex.Lock()
+				client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
+				err := client.conn.WriteMessage(websocket.PingMessage, nil)
+				client.mutex.Unlock()
+				if err != nil {
+					return
+				}
+			}
+		}
+	}()
+
 	for {
 		_, _, err := client.conn.NextReader()
 		if err != nil {
 			sm.Console.Err("stream:Read:readSocketError["+key+"]", err)
+			close(stopPing)
+			pingDone.Wait()
 			sm.Close(key, client)
-			break
+			return
 		}
 	}
 }

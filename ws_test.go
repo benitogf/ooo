@@ -11,12 +11,57 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/meta"
-	"github.com/benitogf/go-json"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+// TestStreamReadReapsHalfClosedConn asserts that a websocket client which
+// stops responding to server pings is reaped within bounded time. Pre-fix
+// Stream.Read had no read deadline and no server-side pings, so a quiet pool
+// with a half-closed conn would never notice the peer was gone.
+func TestStreamReadReapsHalfClosedConn(t *testing.T) {
+	t.Parallel()
+	server := Server{}
+	server.Silence = true
+	server.Stream.PingInterval = 50 * time.Millisecond
+	server.Stream.PongTimeout = 200 * time.Millisecond
+
+	var unsubscribed sync.WaitGroup
+	unsubscribed.Add(1)
+	var unsubOnce sync.Once
+	server.OnUnsubscribe = func(key string) {
+		if key == "deadconn" {
+			unsubOnce.Do(unsubscribed.Done)
+		}
+	}
+
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/deadconn"}
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	defer c.Close()
+
+	// Override the client's ping handler so it never replies with a pong.
+	// Combined with not calling ReadMessage, the server's pong-resetting
+	// deadline expires and Stream.Read should error and Close the conn.
+	c.SetPingHandler(func(appData string) error { return nil })
+
+	done := make(chan struct{})
+	go func() {
+		unsubscribed.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server did not reap dead websocket conn within bounded time")
+	}
+}
 
 // TestWsTime tests clock websocket connections
 // Note: Uses raw websocket because clock endpoint sends raw timestamp strings, not JSON objects
