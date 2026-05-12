@@ -9,11 +9,19 @@ import (
 // BroadcastClock sends time to all the subscribers
 func (sm *Stream) BroadcastClock(data string) {
 	sm.mutex.RLock()
-	defer sm.mutex.RUnlock()
-	if sm.clockPool == nil {
+	pool := sm.clockPool
+	sm.mutex.RUnlock()
+	if pool == nil {
 		return
 	}
-	connections := sm.clockPool.connections
+
+	// Snapshot the connection slice under pool.mutex so a concurrent
+	// attachConn/Close cannot mutate it while we iterate. Writing happens
+	// outside the lock so a slow client cannot stall subscribers/teardown.
+	pool.mutex.RLock()
+	connections := make([]*Conn, len(pool.connections))
+	copy(connections, pool.connections)
+	pool.mutex.RUnlock()
 
 	for _, client := range connections {
 		sm.WriteClock(client, data)

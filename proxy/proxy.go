@@ -484,8 +484,10 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 	// Convert glob pattern to mux pattern
 	muxPattern := GlobToMuxPattern(localPath)
 
-	// Register the route
+	// Register the route and mirror onto the route oracle so the data
+	// wildcard defers to this proxy regardless of registration order.
 	server.Router.HandleFunc("/"+muxPattern, handler)
+	server.RegisterOracleRoute("/"+muxPattern, nil)
 
 	// Register for UI visibility
 	server.RegisterProxy(ui.ProxyInfo{
@@ -571,9 +573,13 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 	// Convert glob pattern to mux pattern
 	muxPattern := GlobToMuxPattern(localPath)
 
-	// Register routes - specific path first, then base
+	// Register routes - specific path first, then base. Mirror both onto
+	// the route oracle so the data wildcard defers to them regardless of
+	// registration order.
 	server.Router.HandleFunc("/"+muxPattern, itemHandler)
 	server.Router.HandleFunc("/"+basePath, listHandler)
+	server.RegisterOracleRoute("/"+muxPattern, nil)
+	server.RegisterOracleRoute("/"+basePath, nil)
 
 	// Register for UI visibility
 	server.RegisterProxy(ui.ProxyInfo{
@@ -809,6 +815,7 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 	}
 
 	server.Router.HandleFunc("/"+localPath, handler)
+	server.RegisterOracleRoute("/"+localPath, nil)
 
 	// Register for UI visibility
 	server.RegisterProxy(ui.ProxyInfo{
