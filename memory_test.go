@@ -1,10 +1,15 @@
 package ooo
 
 import (
+	"context"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/benitogf/go-json"
+	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/monotonic"
 	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
@@ -24,6 +29,127 @@ func TestStorage(t *testing.T) {
 	defer app.Close(os.Interrupt)
 	StorageListTest(app, t)
 	StorageObjectTest(app, t)
+}
+
+// waitForPoolConn polls the stream state until the named pool has at least n
+// connections. Bridges a pre-existing race where Stream.New sends the initial
+// snapshot synchronously before addConnToPool, so the client can fire its
+// initial OnMessage callback before the conn is registered for broadcasts.
+func waitForPoolConn(t *testing.T, server *Server, key string, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, p := range server.Stream.GetState() {
+			if p.Key == key && p.Connections >= n {
+				return
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("pool %q never reached %d connections", key, n)
+}
+
+// TestSubscribeExtendedKeyChars asserts that a client can subscribe to keys
+// containing hyphens, dots, and underscores end-to-end (initial snapshot +
+// follow-up broadcast on Set).
+func TestSubscribeExtendedKeyChars(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	type payload struct {
+		Value string `json:"value"`
+	}
+	keys := []string{
+		"users/john-doe",
+		"logs/2026-05-09",
+		"data/report.json",
+		"users/jane_doe",
+		"550e8400-e29b-41d4-a716-446655440000",
+	}
+	for _, k := range keys {
+		t.Run(k, func(t *testing.T) {
+			server := &Server{}
+			server.Silence = true
+			server.Start("localhost:0")
+			defer server.Close(os.Interrupt)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			cfg := client.SubscribeConfig{
+				Ctx:     ctx,
+				Server:  client.Server{Protocol: "ws", Host: server.Address},
+				Silence: true,
+			}
+
+			var state payload
+			var wg sync.WaitGroup
+
+			wg.Add(1)
+			go client.Subscribe(cfg, k, client.SubscribeEvents[payload]{
+				OnMessage: func(item client.Meta[payload]) {
+					state = item.Data
+					wg.Done()
+				},
+			})
+			wg.Wait() // initial snapshot
+			waitForPoolConn(t, server, k, 1)
+
+			wg.Add(1)
+			_, err := server.Storage.Set(k, json.RawMessage(`{"value":"set"}`))
+			require.NoError(t, err)
+			wg.Wait() // post-Set broadcast
+
+			require.Equal(t, "set", state.Value)
+		})
+	}
+}
+
+// TestSubscribeListExtendedKeyChars asserts that a glob subscription over a
+// path with hyphenated child keys delivers the inserted item to the client.
+func TestSubscribeListExtendedKeyChars(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	type payload struct {
+		Name string `json:"name"`
+	}
+	server := &Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := client.SubscribeConfig{
+		Ctx:     ctx,
+		Server:  client.Server{Protocol: "ws", Host: server.Address},
+		Silence: true,
+	}
+
+	var seen []string
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go client.SubscribeList(cfg, "users/*", client.SubscribeListEvents[payload]{
+		OnMessage: func(items []client.Meta[payload]) {
+			seen = nil
+			for _, it := range items {
+				seen = append(seen, it.Data.Name)
+			}
+			wg.Done()
+		},
+	})
+	wg.Wait() // initial empty snapshot
+	waitForPoolConn(t, server, "users/*", 1)
+
+	wg.Add(1)
+	_, err := server.Storage.Set("users/john-doe", json.RawMessage(`{"name":"john-doe"}`))
+	require.NoError(t, err)
+	wg.Wait() // post-Set broadcast
+
+	require.Contains(t, seen, "john-doe")
 }
 
 // TestStorageExtendedKeyChars asserts the storage layer accepts keys with

@@ -114,6 +114,8 @@ type Server struct {
 	limitFilters       map[string]*limitFilterReg // tracks limit filter registrations
 	endpoints          []ui.EndpointInfo          // registered custom endpoints
 	proxies            []ui.ProxyInfo             // registered proxy routes
+	routeOracle        *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
+	routeOracleMu      sync.Mutex                 // serializes oracle registrations and matches
 	proxyCleanups      []func()                   // cleanup functions for proxy subscriptions
 	proxyCleanupMu     sync.Mutex                 // protects proxyCleanups
 	NoBroadcastKeys    []string
@@ -578,6 +580,9 @@ func (server *Server) defaults() {
 	if server.Router == nil {
 		server.Router = mux.NewRouter()
 	}
+	if server.routeOracle == nil {
+		server.routeOracle = mux.NewRouter()
+	}
 	if server.Console == nil {
 		server.Console = coat.NewConsole(server.Address, server.Silence)
 	}
@@ -641,15 +646,51 @@ func (server *Server) setupRoutes() {
 			server.Router.Handle("/"+path, explorerHandler).Methods("GET")
 		}
 	}
-	// https://www.calhoun.io/why-cant-i-pass-this-function-as-an-http-handler/
-	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(server.unpublish), server.Deadline, deadlineMsg)).Methods("DELETE")
-	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(server.publish), server.Deadline, deadlineMsg)).Methods("POST")
-	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/]+}", http.TimeoutHandler(
-		http.HandlerFunc(server.patch), server.Deadline, deadlineMsg)).Methods("PATCH")
-	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", server.read).Methods("GET")
-	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/]+}", server.read).Queries("v", "{[\\d]}").Methods("GET")
+	// The data wildcard accepts the same character class as key.IsValid so
+	// that hyphenated/dotted/underscored keys (UUIDs, ISO dates, filenames,
+	// snake_case identifiers) are addressable via REST and ws subscriptions.
+	// Custom Endpoint and Proxy paths registered via server.Endpoint() /
+	// proxy.Register() take precedence: routeOracleSkip checks the oracle
+	// router that mirrors those registrations and tells the wildcard to
+	// step aside when the request matches an explicit route.
+	skip := mux.MatcherFunc(server.routeOracleSkip)
+	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", http.TimeoutHandler(
+		http.HandlerFunc(server.unpublish), server.Deadline, deadlineMsg)).Methods("DELETE").MatcherFunc(skip)
+	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", http.TimeoutHandler(
+		http.HandlerFunc(server.publish), server.Deadline, deadlineMsg)).Methods("POST").MatcherFunc(skip)
+	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", http.TimeoutHandler(
+		http.HandlerFunc(server.patch), server.Deadline, deadlineMsg)).Methods("PATCH").MatcherFunc(skip)
+	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", server.read).Methods("GET").MatcherFunc(skip)
+	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", server.read).Queries("v", "{[\\d]}").Methods("GET").MatcherFunc(skip)
+}
+
+// routeOracleSkip returns true if the request does NOT match any registered
+// Endpoint or Proxy route. It is wired as a MatcherFunc on the data wildcard
+// so explicit routes take precedence regardless of registration order.
+func (server *Server) routeOracleSkip(r *http.Request, _ *mux.RouteMatch) bool {
+	server.routeOracleMu.Lock()
+	defer server.routeOracleMu.Unlock()
+	if server.routeOracle == nil {
+		return true
+	}
+	var m mux.RouteMatch
+	return !server.routeOracle.Match(r, &m)
+}
+
+// RegisterOracleRoute mirrors a path registration onto the oracle router so
+// the data wildcard can defer to it. Method-restricted routes pass methods;
+// pass nil for any-method routes (proxies). Endpoint() and the proxy package
+// call this after registering on Server.Router.
+func (server *Server) RegisterOracleRoute(path string, methods []string) {
+	server.routeOracleMu.Lock()
+	defer server.routeOracleMu.Unlock()
+	if server.routeOracle == nil {
+		server.routeOracle = mux.NewRouter()
+	}
+	route := server.routeOracle.HandleFunc(path, func(http.ResponseWriter, *http.Request) {})
+	if len(methods) > 0 {
+		route.Methods(methods...)
+	}
 }
 
 // StartWithError initializes and starts the http server and database connection.

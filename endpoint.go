@@ -195,8 +195,10 @@ func (server *Server) Endpoint(cfg EndpointConfig) {
 		vars = extractPathVars(cfg.Path)
 	}
 
-	// Register route with router
+	// Register route with router and mirror onto the route oracle so the
+	// data wildcard defers to this Endpoint regardless of registration order.
 	server.Router.HandleFunc(cfg.Path, cfg.Handler).Methods(methods...)
+	server.RegisterOracleRoute(cfg.Path, methods)
 
 	// Track for UI
 	server.endpoints = append(server.endpoints, ui.EndpointInfo{
