@@ -44,6 +44,14 @@ func isGlobKey(key string) bool {
 	return strings.Contains(key, "*")
 }
 
+// isNoopJSONPatch reports whether a marshaled JSON patch contains no
+// operations. json.Marshal renders an empty operations slice as "[]" and a
+// nil slice as "null"; both are valid representations of a no-op patch.
+func isNoopJSONPatch(patch []byte) bool {
+	s := strings.TrimSpace(string(patch))
+	return s == "[]" || s == "null"
+}
+
 // ProcessBroadcast processes a broadcast event and returns the message to send.
 // It updates the cache and generates the appropriate patch or snapshot.
 // noPatch forces snapshot mode (no patches).
@@ -201,6 +209,16 @@ func processObjectBroadcast(cache *Cache, poolKey string, operation string, obj 
 		if snapshot || patch == nil {
 			return BroadcastResult{Data: data, Snapshot: true}
 		}
+		// An empty JSON patch ("[]" or "null") means the new state equals the
+		// cached one and there is nothing for the subscriber to apply. This
+		// happens when a watcher event queued before the subscriber attaches
+		// is dequeued after fetch() already incorporated its state; without
+		// the skip, the subscriber's first post-snapshot message is a no-op
+		// patch instead of the real next update, and tests reading "next
+		// message" see the stale echo.
+		if isNoopJSONPatch(patch) {
+			return BroadcastResult{Skip: true}
+		}
 		return BroadcastResult{Data: patch, Snapshot: false}
 
 	case "del":
@@ -215,6 +233,9 @@ func processObjectBroadcast(cache *Cache, poolKey string, operation string, obj 
 		patch, snapshot := generateObjectPatch(oldObj, &empty)
 		if snapshot || patch == nil {
 			return BroadcastResult{Data: meta.EmptyObject, Snapshot: true}
+		}
+		if isNoopJSONPatch(patch) {
+			return BroadcastResult{Skip: true}
 		}
 		return BroadcastResult{Data: patch, Snapshot: false}
 	}

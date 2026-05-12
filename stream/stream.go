@@ -166,22 +166,70 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data [
 		mutex: sync.Mutex{},
 	}
 
-	// Send initial snapshot BEFORE adding to pool
+	// Send the initial snapshot and add the conn to its pool atomically
+	// under pool.mutex. Holding the pool lock across both steps means any
+	// concurrent broadcast either runs before the snapshot is sent (and
+	// finds 0 conns, so it cannot deliver an event the client hasn't yet
+	// established baseline for) or runs after the conn is registered (and
+	// reaches the conn). Without this, the client could read its snapshot,
+	// trigger a Set, and have the resulting broadcast iterate the pool
+	// before addConnToPool completed — silently losing the event.
+	if err := sm.attachConn(key, client, data, version); err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
+// attachConn locates (or creates) the pool for key, then under pool.mutex
+// sends the initial snapshot (if any) and appends the conn to
+// pool.connections. The combination is the subscribe-side counterpart of
+// Broadcast's per-pool critical section: a broadcast cannot run between
+// "snapshot sent" and "conn registered".
+func (sm *Stream) attachConn(key string, client *Conn, data []byte, version int64) error {
+	pool := sm.getOrCreatePool(key)
+	pool.mutex.Lock()
+	defer pool.mutex.Unlock()
+
 	if data != nil {
 		client.mutex.Lock()
 		client.conn.SetWriteDeadline(time.Now().Add(sm.WriteTimeout))
-		err = client.conn.WriteMessage(websocket.BinaryMessage, buildMessage(data, true, version))
+		err := client.conn.WriteMessage(websocket.BinaryMessage, buildMessage(data, true, version))
 		client.mutex.Unlock()
 		if err != nil {
 			client.conn.Close()
 			// Wrap with ErrHijacked since connection was already upgraded
-			return nil, errors.Join(ErrHijacked, err)
+			return errors.Join(ErrHijacked, err)
 		}
 	}
 
-	// Now add to pool - broadcasts can now reach this client
-	sm.addConnToPool(key, client)
-	return client, nil
+	pool.connections = append(pool.connections, client)
+	if key == "" {
+		sm.Console.Log("stream:connections[clock]: ", len(pool.connections))
+	} else {
+		sm.Console.Log("stream:connections["+key+"]: ", len(pool.connections))
+	}
+	return nil
+}
+
+// getOrCreatePool returns the pool for key, creating it if absent. Used by
+// attachConn so the new pool registration is committed under sm.mutex before
+// pool.mutex is taken in the caller.
+func (sm *Stream) getOrCreatePool(key string) *Pool {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	if key == "" {
+		if sm.clockPool == nil {
+			sm.clockPool = &Pool{Key: ""}
+		}
+		return sm.clockPool
+	}
+	pool := sm.getPool(key)
+	if pool == nil {
+		pool = &Pool{Key: key, connections: []*Conn{}}
+		sm.pools[key] = pool
+		sm.poolIndex.insert(key, pool)
+	}
+	return pool
 }
 
 // addConnToPool adds an existing connection to the appropriate pool

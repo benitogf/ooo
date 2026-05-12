@@ -654,14 +654,15 @@ func (server *Server) setupRoutes() {
 	// router that mirrors those registrations and tells the wildcard to
 	// step aside when the request matches an explicit route.
 	skip := mux.MatcherFunc(server.routeOracleSkip)
-	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", http.TimeoutHandler(
+	keyPath := "/{key:" + key.PathPattern + "}"
+	server.Router.Handle(keyPath, http.TimeoutHandler(
 		http.HandlerFunc(server.unpublish), server.Deadline, deadlineMsg)).Methods("DELETE").MatcherFunc(skip)
-	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", http.TimeoutHandler(
+	server.Router.Handle(keyPath, http.TimeoutHandler(
 		http.HandlerFunc(server.publish), server.Deadline, deadlineMsg)).Methods("POST").MatcherFunc(skip)
-	server.Router.Handle("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", http.TimeoutHandler(
+	server.Router.Handle(keyPath, http.TimeoutHandler(
 		http.HandlerFunc(server.patch), server.Deadline, deadlineMsg)).Methods("PATCH").MatcherFunc(skip)
-	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", server.read).Methods("GET").MatcherFunc(skip)
-	server.Router.HandleFunc("/{key:[a-zA-Z\\*\\d\\/\\-_.]+}", server.read).Queries("v", "{[\\d]}").Methods("GET").MatcherFunc(skip)
+	server.Router.HandleFunc(keyPath, server.read).Methods("GET").MatcherFunc(skip)
+	server.Router.HandleFunc(keyPath, server.read).Queries("v", "{[\\d]}").Methods("GET").MatcherFunc(skip)
 }
 
 // routeOracleSkip returns true if the request does NOT match any registered

@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/client"
@@ -29,24 +28,6 @@ func TestStorage(t *testing.T) {
 	defer app.Close(os.Interrupt)
 	StorageListTest(app, t)
 	StorageObjectTest(app, t)
-}
-
-// waitForPoolConn polls the stream state until the named pool has at least n
-// connections. Bridges a pre-existing race where Stream.New sends the initial
-// snapshot synchronously before addConnToPool, so the client can fire its
-// initial OnMessage callback before the conn is registered for broadcasts.
-func waitForPoolConn(t *testing.T, server *Server, key string, n int) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, p := range server.Stream.GetState() {
-			if p.Key == key && p.Connections >= n {
-				return
-			}
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("pool %q never reached %d connections", key, n)
 }
 
 // TestSubscribeExtendedKeyChars asserts that a client can subscribe to keys
@@ -93,7 +74,6 @@ func TestSubscribeExtendedKeyChars(t *testing.T) {
 				},
 			})
 			wg.Wait() // initial snapshot
-			waitForPoolConn(t, server, k, 1)
 
 			wg.Add(1)
 			_, err := server.Storage.Set(k, json.RawMessage(`{"value":"set"}`))
@@ -142,7 +122,6 @@ func TestSubscribeListExtendedKeyChars(t *testing.T) {
 		},
 	})
 	wg.Wait() // initial empty snapshot
-	waitForPoolConn(t, server, "users/*", 1)
 
 	wg.Add(1)
 	_, err := server.Storage.Set("users/john-doe", json.RawMessage(`{"name":"john-doe"}`))

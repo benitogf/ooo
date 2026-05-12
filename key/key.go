@@ -14,6 +14,17 @@ var (
 	ErrGlobNotAtEnd     = errors.New("key: glob pattern must be at the end of the path")
 )
 
+// PathPattern is the gorilla/mux path-variable regex matching every character
+// IsValid accepts (including the glob marker). Packages registering HTTP
+// routes that key off paths — pivot's sync routes, downstream proxies — should
+// reference this constant instead of duplicating the character class so they
+// stay aligned with the key validator.
+//
+// Example:
+//
+//	router.HandleFunc("/items/{id:"+key.PathPattern+"}", handler)
+const PathPattern = `[a-zA-Z\*\d\/\-_.]+`
+
 // IsGlob returns true if the path ends with a glob pattern (/*).
 func IsGlob(path string) bool {
 	return LastIndex(path) == "*"
