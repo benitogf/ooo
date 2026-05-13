@@ -457,7 +457,7 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 	pm := newProxyManager(silence)
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin:  func(r *http.Request) bool { return true },
+		CheckOrigin:  server.Stream.CheckOrigin,
 		Subprotocols: []string{"bearer"},
 	}
 
@@ -527,7 +527,7 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 	pm := newProxyManager(silence)
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin:  func(r *http.Request) bool { return true },
+		CheckOrigin:  server.Stream.CheckOrigin,
 		Subprotocols: []string{"bearer"},
 	}
 
@@ -789,7 +789,7 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 	pm := newProxyManager(silence)
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin:  func(r *http.Request) bool { return true },
+		CheckOrigin:  server.Stream.CheckOrigin,
 		Subprotocols: []string{"bearer"},
 	}
 

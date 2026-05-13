@@ -615,6 +615,7 @@ func (server *Server) defaults() {
 	}
 	server.Stream.ForcePatch = server.ForcePatch
 	server.Stream.NoPatch = server.NoPatch
+	server.Stream.AllowedOrigins = server.AllowedOrigins
 	if server.Stream.ForcePatch && server.Stream.NoPatch {
 		server.Console.Err("both ForcePatch and NoPatch are enabled, only NoPatch will be used")
 	}
