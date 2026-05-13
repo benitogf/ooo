@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/benitogf/ooo"
 	"github.com/benitogf/go-json"
+	"github.com/benitogf/ooo"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )

@@ -3,6 +3,7 @@ package proxy_test
 import (
 	"bytes"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -52,6 +53,40 @@ func TestGlobToMuxPattern(t *testing.T) {
 			require.Equal(t, tt.expected, result)
 		})
 	}
+}
+
+// TestProxyCheckOriginRejectsCrossOrigin asserts the proxy ws upgrader
+// honors AllowedOrigins. Pre-fix the proxy upgraders returned true
+// unconditionally, so any browser origin could ride a logged-in user's
+// session through the proxy and into the upstream.
+func TestProxyCheckOriginRejectsCrossOrigin(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.AllowedOrigins = []string{"http://allowed.example.com"}
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: proxyServer.Address, Path: "/settings/device1"}
+	hdr := http.Header{}
+	hdr.Set("Origin", "http://evil.example.com")
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), hdr)
+	require.Error(t, err)
+	require.Nil(t, c)
 }
 
 func TestRouteWithGlobPattern(t *testing.T) {

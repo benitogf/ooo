@@ -3,7 +3,9 @@ package stream
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,18 +64,19 @@ const DefaultPongTimeout = 150 * time.Second
 
 // Stream a group of pools
 type Stream struct {
-	mutex         sync.RWMutex
-	OnSubscribe   Subscribe
-	OnUnsubscribe Unsubscribe
-	ForcePatch    bool
-	NoPatch       bool
-	WriteTimeout  time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
-	PingInterval  time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
-	PongTimeout   time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
-	clockPool     *Pool            // dedicated clock pool (was index 0)
-	pools         map[string]*Pool // O(1) lookup by key
-	poolIndex     *poolTrie        // trie for O(k) path matching in Broadcast
-	Console       *coat.Console
+	mutex          sync.RWMutex
+	OnSubscribe    Subscribe
+	OnUnsubscribe  Unsubscribe
+	ForcePatch     bool
+	NoPatch        bool
+	WriteTimeout   time.Duration    // timeout for WebSocket writes, defaults to DefaultWriteTimeout
+	PingInterval   time.Duration    // how often to ping each conn, defaults to DefaultPingInterval
+	PongTimeout    time.Duration    // read deadline reset on each pong, defaults to DefaultPongTimeout
+	AllowedOrigins []string         // ws Origin allow-list. ["*"] (or empty) accepts any; otherwise same-origin + exact match.
+	clockPool      *Pool            // dedicated clock pool (was index 0)
+	pools          map[string]*Pool // O(1) lookup by key
+	poolIndex      *poolTrie        // trie for O(k) path matching in Broadcast
+	Console        *coat.Console
 }
 
 // BroadcastOpt options for broadcasting storage events
@@ -86,11 +89,51 @@ type BroadcastOpt struct {
 	Static       bool
 }
 
-var streamUpgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return r.Header.Get("Upgrade") == "websocket"
-	},
-	Subprotocols: []string{"bearer"},
+// CheckOrigin returns true when the request's Origin is acceptable for a
+// WebSocket upgrade against this Stream.
+//
+//   - No Origin header: accept (non-browser clients, e.g. Go ws dialers, often
+//     omit Origin; rejecting them would regress every existing programmatic
+//     subscriber).
+//   - Same-origin (Origin host == request Host): accept (legitimate browser
+//     case where the page is served from the same host).
+//   - AllowedOrigins contains "*" or is empty: accept any Origin (historical
+//     wide-open default; opt out by setting an explicit allow-list).
+//   - Else: accept only when Origin matches an entry in AllowedOrigins.
+func (sm *Stream) CheckOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	if sameOriginHost(origin, r.Host) {
+		return true
+	}
+	if len(sm.AllowedOrigins) == 0 {
+		return true
+	}
+	for _, allowed := range sm.AllowedOrigins {
+		if allowed == "*" || strings.EqualFold(allowed, origin) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameOriginHost reports whether the Origin URL's host:port equals the
+// request's Host. Comparison is case-insensitive on the host segment.
+func sameOriginHost(origin, host string) bool {
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, host)
+}
+
+func (sm *Stream) upgrader() *websocket.Upgrader {
+	return &websocket.Upgrader{
+		CheckOrigin:  sm.CheckOrigin,
+		Subprotocols: []string{"bearer"},
+	}
 }
 
 func (sm *Stream) getPool(key string) *Pool {
@@ -155,7 +198,7 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data [
 		return nil, err
 	}
 
-	wsClient, err := streamUpgrader.Upgrade(w, r, nil)
+	wsClient, err := sm.upgrader().Upgrade(w, r, nil)
 	if err != nil {
 		sm.Console.Err("stream: socketUpgradeError["+key+"]", err)
 		return nil, err
@@ -173,7 +216,7 @@ func (sm *Stream) New(key string, w http.ResponseWriter, r *http.Request, data [
 	// established baseline for) or runs after the conn is registered (and
 	// reaches the conn). Without this, the client could read its snapshot,
 	// trigger a Set, and have the resulting broadcast iterate the pool
-	// before addConnToPool completed — silently losing the event.
+	// before the conn is registered — silently losing the event.
 	if err := sm.attachConn(key, client, data, version); err != nil {
 		return nil, err
 	}
@@ -230,40 +273,6 @@ func (sm *Stream) getOrCreatePool(key string) *Pool {
 		sm.poolIndex.insert(key, pool)
 	}
 	return pool
-}
-
-// addConnToPool adds an existing connection to the appropriate pool
-func (sm *Stream) addConnToPool(key string, client *Conn) {
-	sm.mutex.Lock()
-	defer sm.mutex.Unlock()
-
-	if key == "" {
-		if sm.clockPool == nil {
-			sm.clockPool = &Pool{Key: ""}
-		}
-		sm.clockPool.mutex.Lock()
-		sm.clockPool.connections = append(sm.clockPool.connections, client)
-		sm.Console.Log("stream:connections[clock]: ", len(sm.clockPool.connections))
-		sm.clockPool.mutex.Unlock()
-		return
-	}
-
-	pool := sm.getPool(key)
-	if pool == nil {
-		pool = &Pool{
-			Key:         key,
-			connections: []*Conn{client},
-		}
-		sm.pools[key] = pool
-		sm.poolIndex.insert(key, pool)
-		sm.Console.Log("stream:connections["+key+"]: ", len(pool.connections))
-		return
-	}
-
-	pool.mutex.Lock()
-	pool.connections = append(pool.connections, client)
-	sm.Console.Log("stream: connections["+key+"]: ", len(pool.connections))
-	pool.mutex.Unlock()
 }
 
 func (sm *Stream) newConn(key string, wsClient *websocket.Conn) *Conn {

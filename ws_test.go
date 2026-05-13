@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"runtime"
@@ -22,7 +23,7 @@ import (
 )
 
 // waitForPoolConnections waits until the pool with the given key has at least n
-// connections, so tests can synchronize ordering of dial → addConnToPool.
+// connections, so tests can synchronize ordering of dial → conn registration.
 func waitForPoolConnections(t *testing.T, sm *stream.Stream, key string, n int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -231,6 +232,119 @@ func TestWebSocketSubscriptionEvents(t *testing.T) {
 
 	unsubscribedWg.Wait()
 	require.Equal(t, "testkey", unsubscribed)
+}
+
+// TestWebSocketCheckOriginRejectsCrossOrigin asserts the WebSocket upgrader
+// rejects connections whose Origin is not in the server's AllowedOrigins.
+// Pre-fix the upgrader's CheckOrigin was a no-op (returned true whenever the
+// Upgrade header was present, which gorilla always sets before the hook), so
+// a browser at evil.example.com could open a session on behalf of a
+// logged-in user (CSWSH). The upgrader now honors AllowedOrigins, same-origin
+// requests, and missing Origin (non-browser clients).
+func TestWebSocketCheckOriginRejectsCrossOrigin(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.AllowedOrigins = []string{"http://allowed.example.com"}
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/test"}
+
+	hdr := http.Header{}
+	hdr.Set("Origin", "http://evil.example.com")
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), hdr)
+	require.Error(t, err)
+	require.Nil(t, c)
+}
+
+// TestWebSocketCheckOriginAcceptsConfigured asserts an origin listed in
+// AllowedOrigins is accepted.
+func TestWebSocketCheckOriginAcceptsConfigured(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.AllowedOrigins = []string{"http://allowed.example.com"}
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/test"}
+
+	hdr := http.Header{}
+	hdr.Set("Origin", "http://allowed.example.com")
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), hdr)
+	require.NoError(t, err)
+	defer c.Close()
+}
+
+// TestWebSocketCheckOriginAcceptsSameOrigin asserts a request whose Origin
+// matches the request Host is accepted regardless of AllowedOrigins. This is
+// the legitimate browser case where the page is served from the same host.
+func TestWebSocketCheckOriginAcceptsSameOrigin(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.AllowedOrigins = []string{"http://allowed.example.com"}
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/test"}
+
+	hdr := http.Header{}
+	hdr.Set("Origin", "http://"+server.Address)
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), hdr)
+	require.NoError(t, err)
+	defer c.Close()
+}
+
+// TestWebSocketCheckOriginAcceptsNoOrigin asserts a request with no Origin
+// header is accepted. Non-browser clients (Go ws dialers, CLIs) do not always
+// send Origin and breaking them would regress every existing programmatic
+// subscriber.
+func TestWebSocketCheckOriginAcceptsNoOrigin(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.AllowedOrigins = []string{"http://allowed.example.com"}
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/test"}
+
+	// gorilla's default dialer omits Origin unless we set it.
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	defer c.Close()
+}
+
+// TestWebSocketCheckOriginWildcardAcceptsAny asserts AllowedOrigins=["*"]
+// (the default after defaultCORS) preserves the historical wide-open behavior
+// so existing deployments are not broken by the upgrade.
+func TestWebSocketCheckOriginWildcardAcceptsAny(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	// AllowedOrigins unset → defaultCORS sets to ["*"]
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/test"}
+
+	hdr := http.Header{}
+	hdr.Set("Origin", "http://any.example.com")
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), hdr)
+	require.NoError(t, err)
+	defer c.Close()
 }
 
 func TestWebSocketSubscriptionDenied(t *testing.T) {

@@ -10,10 +10,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
-	"github.com/benitogf/go-json"
 )
 
 var (
