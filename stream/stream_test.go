@@ -2,6 +2,7 @@ package stream
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -66,9 +67,11 @@ func TestInitCacheObject(t *testing.T) {
 	require.Equal(t, version, cacheVersion)
 
 	stream.Close(testKey, wsConn)
-	require.Equal(t, 1, len(stream.pools))
-	require.Equal(t, testKey, stream.pools[testKey].Key)
-	require.Equal(t, 0, len(stream.pools[testKey].connections))
+	// Non-persistent pool with no remaining conns is pruned from
+	// sm.pools and the poolIndex trie — the empty-pool sweep added
+	// alongside the pruning audit fix.
+	require.Equal(t, 0, len(stream.pools))
+	require.Nil(t, stream.pools[testKey])
 }
 
 func TestConcurrentBroadcast(t *testing.T) {
@@ -158,9 +161,8 @@ func TestConcurrentBroadcast(t *testing.T) {
 	stream.Close("root", wsConn)
 	stream.Close("a", wsConnA)
 	stream.Close("b", wsConnB)
-	require.Equal(t, 3, len(stream.pools))
-	require.Equal(t, 0, len(stream.pools["root"].connections))
-	require.Equal(t, 0, len(stream.pools["a"].connections))
+	// Non-persistent pools are pruned when their last conn closes.
+	require.Equal(t, 0, len(stream.pools))
 }
 
 func TestRemoveConn(t *testing.T) {
@@ -213,6 +215,75 @@ func TestInitClock(t *testing.T) {
 	// Call again to ensure idempotency
 	stream.InitClock()
 	require.NotNil(t, stream.clockPool)
+}
+
+// TestEmptyPoolsPrunedOnClose asserts that after the last connection
+// disconnects, a non-persistent pool is removed from sm.pools AND from
+// the poolIndex trie. Pre-fix `sm.pools[key]` and `poolIndex` grew on
+// every distinct subscribed key with no pruning when the pool
+// emptied, so churned subscription paths leaked one entry per
+// subscribe-then-disconnect cycle.
+func TestEmptyPoolsPrunedOnClose(t *testing.T) {
+	monotonic.Init()
+	stream := Stream{
+		Console:   coat.NewConsole(domain, true),
+		pools:     make(map[string]*Pool),
+		poolIndex: newPoolTrie(),
+		OnSubscribe: func(string) error {
+			return nil
+		},
+		OnUnsubscribe: func(string) {},
+	}
+
+	const subscriptions = 50
+	conns := make([]*Conn, 0, subscriptions)
+	keys := make([]string, 0, subscriptions)
+	for i := range subscriptions {
+		key := fmt.Sprintf("ephemeral/%d", i)
+		req, w := makeStreamRequestMock(domain + "/" + key)
+		c, err := stream.New(key, w, req, nil, 0)
+		require.NoError(t, err)
+		conns = append(conns, c)
+		keys = append(keys, key)
+	}
+	require.Equal(t, subscriptions, stream.PoolCount(),
+		"setup: every subscription must register a pool")
+	require.Equal(t, subscriptions, stream.poolIndex.size(),
+		"setup: every subscription must register in the trie")
+
+	for i, c := range conns {
+		stream.Close(keys[i], c)
+	}
+
+	require.Equal(t, 0, stream.PoolCount(),
+		"every non-persistent pool must be reclaimed once its last conn closes")
+	require.Equal(t, 0, stream.poolIndex.size(),
+		"trie must reclaim the corresponding entries")
+}
+
+// TestPersistentPoolsSurviveCloseSweep asserts that pre-allocated pools
+// (created via PreallocatePools for known filter paths) are NOT pruned
+// even when their connection count drops to zero. Those pools are
+// kept ready for the next subscriber to avoid re-allocation.
+func TestPersistentPoolsSurviveCloseSweep(t *testing.T) {
+	monotonic.Init()
+	stream := Stream{
+		Console:       coat.NewConsole(domain, true),
+		OnSubscribe:   func(string) error { return nil },
+		OnUnsubscribe: func(string) {},
+	}
+
+	stream.PreallocatePools([]string{"items/*", "users/*"})
+	require.Equal(t, 2, stream.PoolCount(), "setup: preallocated pools must register")
+
+	req, w := makeStreamRequestMock(domain + "/items/*")
+	c, err := stream.New("items/*", w, req, nil, 0)
+	require.NoError(t, err)
+
+	stream.Close("items/*", c)
+
+	require.Equal(t, 2, stream.PoolCount(),
+		"persistent pools must survive empty-conn sweep")
 }
 
 func TestPreallocatePools(t *testing.T) {

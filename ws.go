@@ -51,6 +51,11 @@ func (server *Server) ws(w http.ResponseWriter, r *http.Request) error {
 	// This prevents the race condition where broadcasts could arrive before the initial snapshot
 	client, err := server.Stream.New(_key, w, r, initialData, result.Version)
 	if err != nil {
+		// fetch above called InitCache, which creates the pool eagerly.
+		// If the WebSocket upgrade (or post-upgrade snapshot write)
+		// fails, no Close path will run to release that pool — explicit
+		// prune here keeps the empty-pool sweep contract intact.
+		server.Stream.PruneIfEmpty(_key)
 		if errors.Is(err, stream.ErrHijacked) {
 			server.Console.Err("ooo: websocket closed during init", err)
 		} else {

@@ -37,9 +37,14 @@ type Conn struct {
 
 // Pool of key filtered connections
 type Pool struct {
-	mutex       sync.RWMutex
-	Key         string
-	cache       Cache
+	mutex sync.RWMutex
+	Key   string
+	cache Cache
+	// persistent pools (currently those pre-allocated from filter paths)
+	// are never pruned by the empty-pool sweep. Pruning is triggered when
+	// the last conn closes; persistent pools opt out of that so they
+	// stay ready for the next subscriber without an allocation.
+	persistent  bool
 	connections []*Conn
 }
 
@@ -180,12 +185,85 @@ func (sm *Stream) PreallocatePools(paths []string) {
 		if _, exists := sm.pools[path]; !exists {
 			pool := &Pool{
 				Key:         path,
+				persistent:  true,
 				connections: make([]*Conn, 0, 4),
 			}
 			sm.pools[path] = pool
 			sm.poolIndex.insert(path, pool)
 		}
 	}
+}
+
+// PoolCount returns the number of registered pools (excluding the
+// clock pool). Intended for tests and operational introspection — a
+// steady-state value near the count of preallocated paths confirms
+// the empty-pool sweep is reclaiming churned subscription paths.
+func (sm *Stream) PoolCount() int {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+	return len(sm.pools)
+}
+
+// MarkPersistent ensures the pool for key exists and is exempt from
+// the empty-pool sweep. Read-side filter registrations
+// (ReadObjectFilter, ReadListFilter, OpenFilter, LimitFilter) call
+// through to this after Start so a path that documents itself as
+// subscribable keeps its pool ready across transient drops to zero
+// subscribers. Paths without a read filter remain prunable so
+// churned dynamic subscription paths cannot accumulate.
+//
+// The persistent flag is written under pool.mutex so Close's read of
+// the same flag is race-free.
+func (sm *Stream) MarkPersistent(key string) {
+	if key == "" {
+		return
+	}
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	if sm.pools == nil {
+		sm.pools = make(map[string]*Pool)
+	}
+	if sm.poolIndex == nil {
+		sm.poolIndex = newPoolTrie()
+	}
+	if pool, exists := sm.pools[key]; exists {
+		pool.mutex.Lock()
+		pool.persistent = true
+		pool.mutex.Unlock()
+		return
+	}
+	pool := &Pool{
+		Key:         key,
+		persistent:  true,
+		connections: make([]*Conn, 0, 4),
+	}
+	sm.pools[key] = pool
+	sm.poolIndex.insert(key, pool)
+}
+
+// PruneIfEmpty drops a non-persistent pool whose connection list is
+// empty. Used by external cleanup paths (e.g., a WebSocket upgrade
+// that fails after fetch already created the pool via InitCache) so
+// an orphan pool cannot leak when the connection that was supposed
+// to claim it never arrives. Close uses the same predicate inline.
+func (sm *Stream) PruneIfEmpty(key string) {
+	if key == "" {
+		return
+	}
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+	pool, exists := sm.pools[key]
+	if !exists {
+		return
+	}
+	pool.mutex.RLock()
+	disposable := !pool.persistent && len(pool.connections) == 0
+	pool.mutex.RUnlock()
+	if !disposable {
+		return
+	}
+	delete(sm.pools, key)
+	sm.poolIndex.remove(key)
 }
 
 // New creates a WebSocket connection and sends the initial snapshot
@@ -326,7 +404,14 @@ func removeConn(conns []*Conn, client *Conn) []*Conn {
 	return conns
 }
 
-// Close client connection
+// Close client connection.
+//
+// After removing the connection, a non-persistent pool whose
+// connection list has drained to empty is removed from sm.pools and
+// the poolIndex trie so churned subscription paths cannot accumulate
+// forever. Persistent pools (those pre-allocated via
+// PreallocatePools for known filter paths) survive the sweep so the
+// next subscriber can reuse them.
 func (sm *Stream) Close(key string, client *Conn) {
 	sm.mutex.Lock()
 	if key == "" {
@@ -340,7 +425,12 @@ func (sm *Stream) Close(key string, client *Conn) {
 		if pool != nil {
 			pool.mutex.Lock()
 			pool.connections = removeConn(pool.connections, client)
+			emptyAndDisposable := !pool.persistent && len(pool.connections) == 0
 			pool.mutex.Unlock()
+			if emptyAndDisposable {
+				delete(sm.pools, key)
+				sm.poolIndex.remove(key)
+			}
 		}
 	}
 	sm.mutex.Unlock()
