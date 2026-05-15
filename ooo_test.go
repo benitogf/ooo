@@ -458,3 +458,67 @@ func TestOnWatchPanicReceivesOffendingEvent(t *testing.T) {
 
 	require.Equal(t, int64(1), atomic.LoadInt64(&server.WatchPanics))
 }
+
+// TestOnDroppedEventReceivesOffendingEvent asserts the Server-level
+// observability hook fires when the sharded watcher drops an event after its
+// send timeout, and that DroppedEvents counts the drop. Pre-fix a stuck
+// watcher silently lost writes from subscribers' point of view, with only a
+// log line as evidence.
+func TestOnDroppedEventReceivesOffendingEvent(t *testing.T) {
+	dropped := make(chan storage.Event, 4)
+
+	server := &Server{
+		Silence: true,
+		Workers: 1,
+	}
+	// Block the worker so the shard buffer can saturate. `firstSeen` confirms
+	// the worker actually dequeued the first event before the fill loop
+	// starts — without that signal, the buffer math depends on goroutine
+	// scheduling and the test would bump DroppedEvents to 2 or block on the
+	// default 5 s Send timeout when the worker is slow to start.
+	hold := make(chan struct{})
+	firstSeen := make(chan struct{})
+	var firstOnce sync.Once
+	server.OnStorageEvent = func(ev storage.Event) {
+		firstOnce.Do(func() { close(firstSeen) })
+		<-hold
+	}
+	server.OnDroppedEvent = func(ev storage.Event) {
+		select {
+		case dropped <- ev:
+		default:
+		}
+	}
+
+	server.Start("localhost:0")
+	defer func() {
+		close(hold)
+		server.Close(os.Interrupt)
+	}()
+
+	_, err := server.Storage.Set("first", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+	<-firstSeen
+
+	// Saturate the shard buffer: the channel holds 100 events, and the worker
+	// is blocked draining the first.
+	for i := range 100 {
+		_, err := server.Storage.Set(fmt.Sprintf("fill-%d", i), json.RawMessage(`{"v":1}`))
+		require.NoError(t, err)
+	}
+	// Override the default 5 s send timeout via a short-timeout direct send so
+	// the test does not wait that long.
+	shardedWatcher := server.Storage.WatchSharded()
+	require.False(t,
+		shardedWatcher.SendWithTimeout(storage.Event{Key: "dropped", Operation: "set"}, 50*time.Millisecond),
+		"event should have been dropped after timing out on a saturated shard",
+	)
+
+	select {
+	case ev := <-dropped:
+		require.Equal(t, "dropped", ev.Key)
+	case <-time.After(2 * time.Second):
+		t.Fatal("OnDroppedEvent was not invoked")
+	}
+	require.Equal(t, int64(1), atomic.LoadInt64(&server.DroppedEvents))
+}

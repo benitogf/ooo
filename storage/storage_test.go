@@ -1122,6 +1122,57 @@ func TestLayeredDelGlobSerializesWithConcurrentSet(t *testing.T) {
 		"layers diverged: memory has key=%v, embedded has key=%v", memHas, embHas)
 }
 
+// TestShardedChanDropIsObservable asserts that a send-timeout drop exposes
+// both a counter and (when set) an OnDrop callback. Pre-fix the drop only
+// logged — a stuck or recovered watcher silently desynced subscribers from
+// storage with no programmatic signal for operators to monitor.
+func TestShardedChanDropIsObservable(t *testing.T) {
+	t.Parallel()
+
+	sc := NewShardedChan(1)
+	var dropped []Event
+	var mu sync.Mutex
+	sc.SetOnDrop(func(ev Event) {
+		mu.Lock()
+		dropped = append(dropped, ev)
+		mu.Unlock()
+	})
+
+	// Fill the shard buffer (capacity 100 internally).
+	for i := range 100 {
+		require.True(t, sc.SendWithTimeout(Event{Key: fmt.Sprintf("ok-%d", i)}, time.Second))
+	}
+
+	// One more send with a tiny timeout: no consumer is reading, so it drops.
+	sent := sc.SendWithTimeout(Event{Key: "drop-me"}, 10*time.Millisecond)
+	require.False(t, sent, "send must time out when the shard buffer is saturated")
+
+	require.Equal(t, int64(1), sc.Dropped(), "Dropped() must surface the drop")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Len(t, dropped, 1, "OnDrop callback must fire on each drop")
+	require.Equal(t, "drop-me", dropped[0].Key)
+}
+
+// TestShardedChanSetOnDropNilClears asserts SetOnDrop(nil) cleanly clears a
+// previously-set callback.
+func TestShardedChanSetOnDropNilClears(t *testing.T) {
+	t.Parallel()
+
+	sc := NewShardedChan(1)
+	called := false
+	sc.SetOnDrop(func(Event) { called = true })
+	sc.SetOnDrop(nil)
+
+	for i := range 100 {
+		require.True(t, sc.SendWithTimeout(Event{Key: fmt.Sprintf("k-%d", i)}, time.Second))
+	}
+	_ = sc.SendWithTimeout(Event{Key: "drop"}, 10*time.Millisecond)
+	require.False(t, called, "cleared OnDrop must not fire")
+	require.Equal(t, int64(1), sc.Dropped(), "Dropped() still increments after SetOnDrop(nil)")
+}
+
 // TestLayeredPushReturnsEmbeddedError is the Push variant.
 func TestLayeredPushReturnsEmbeddedError(t *testing.T) {
 	t.Parallel()
