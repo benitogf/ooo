@@ -33,8 +33,9 @@ type Layered struct {
 	embeddedOpt LayerOptions
 
 	mutex           sync.RWMutex
-	memMutex        sync.Map
-	writeMutex      sync.RWMutex // serializes glob deletes against individual writes
+	memMutex        map[string]*refMu // refcounted per-key locks
+	memMutexMu      sync.Mutex        // serializes ref++/ref-- + delete sequences on memMutex
+	writeMutex      sync.RWMutex      // serializes glob deletes against individual writes
 	noBroadcastKeys []string
 	watcher         *ShardedChan
 	active          bool
@@ -176,18 +177,78 @@ func (l *Layered) Get(path string) (meta.Object, error) {
 	return meta.Object{}, ErrNotFound
 }
 
-func (l *Layered) _getLock(path string) *sync.Mutex {
-	newLock := sync.Mutex{}
-	lock, _ := l.memMutex.LoadOrStore(path, &newLock)
-	return lock.(*sync.Mutex)
+// refMu pairs a per-key mutex with a refcount so the registry can drop
+// the entry once no caller is holding or waiting on it. Pre-fix the
+// registry was an unbounded sync.Map — Push generates a fresh path per
+// call (key.Build), so a queue-shaped workload leaked one entry per
+// write until restart. Counting waiters + holders and deleting at zero
+// caps steady-state memory.
+type refMu struct {
+	mu  sync.Mutex
+	ref int // protected by Layered.memMutexMu
 }
 
-func (l *Layered) _loadLock(path string) (*sync.Mutex, error) {
-	lock, found := l.memMutex.Load(path)
-	if !found {
+// _acquireLock returns the per-path mutex with its refcount incremented
+// and its mu already locked. Callers MUST pair this with _releaseLock
+// to bring the refcount back down. The ref is bumped under memMutexMu
+// before mu.Lock so a concurrent _releaseLock cannot delete the entry
+// out from under us while we wait on the lock.
+func (l *Layered) _acquireLock(path string) *refMu {
+	l.memMutexMu.Lock()
+	if l.memMutex == nil {
+		l.memMutex = make(map[string]*refMu)
+	}
+	rm, ok := l.memMutex[path]
+	if !ok {
+		rm = &refMu{}
+		l.memMutex[path] = rm
+	}
+	rm.ref++
+	l.memMutexMu.Unlock()
+	rm.mu.Lock()
+	return rm
+}
+
+// _releaseLock unlocks rm.mu and decrements the refcount; when no
+// caller is holding or waiting on the entry, it is removed from the
+// registry. Always pairs with exactly one prior ref bump — either from
+// _acquireLock on the same path, or from a GetAndLock whose
+// corresponding SetAndUnlock/Unlock uses _loadLock to find the entry.
+// _loadLock does NOT bump ref, so calling _loadLock followed by
+// _releaseLock without a matching prior _acquireLock would underflow
+// the refcount and leak the entry — re-introducing this fix's leak.
+func (l *Layered) _releaseLock(path string, rm *refMu) {
+	rm.mu.Unlock()
+	l.memMutexMu.Lock()
+	rm.ref--
+	if rm.ref == 0 {
+		delete(l.memMutex, path)
+	}
+	l.memMutexMu.Unlock()
+}
+
+// _loadLock looks up the existing per-path mutex without changing its
+// refcount. Returns ErrLockNotFound if no caller is currently holding
+// or waiting on the path. Used by SetAndUnlock / Unlock to find the
+// lock established by a prior GetAndLock.
+func (l *Layered) _loadLock(path string) (*refMu, error) {
+	l.memMutexMu.Lock()
+	defer l.memMutexMu.Unlock()
+	rm, ok := l.memMutex[path]
+	if !ok {
 		return nil, ErrLockNotFound
 	}
-	return lock.(*sync.Mutex), nil
+	return rm, nil
+}
+
+// KeyLockCount returns the number of live entries in the per-key lock
+// registry. Intended for tests and operational introspection — a
+// steady-state value near zero confirms the refcounted release is
+// reclaiming entries.
+func (l *Layered) KeyLockCount() int {
+	l.memMutexMu.Lock()
+	defer l.memMutexMu.Unlock()
+	return len(l.memMutex)
 }
 
 // GetAndLock retrieves a single value and locks the key mutex
@@ -198,26 +259,28 @@ func (l *Layered) GetAndLock(path string) (meta.Object, error) {
 	if br := l.getBeforeRead(); br != nil {
 		br(path)
 	}
-	lock := l._getLock(path)
-	lock.Lock()
+	rm := l._acquireLock(path)
 	obj, err := l.Get(path)
 	if err != nil {
-		lock.Unlock()
+		l._releaseLock(path, rm)
 		return meta.Object{}, err
 	}
 	return obj, nil
 }
 
-// SetAndUnlock sets a value and unlocks the key mutex
+// SetAndUnlock sets a value and unlocks the key mutex. The lock and
+// its refcount entry are released even on early error paths so a
+// caller that hit GetAndLock cannot leave a stale entry in the
+// registry.
 func (l *Layered) SetAndUnlock(path string, data json.RawMessage) (string, error) {
 	if key.HasGlob(path) {
 		return "", ErrCantLockGlob
 	}
-	lock, err := l._loadLock(path)
+	rm, err := l._loadLock(path)
 	if err != nil {
 		return "", err
 	}
-	defer lock.Unlock()
+	defer l._releaseLock(path, rm)
 	if !key.IsValid(path) {
 		return path, ErrInvalidPath
 	}
@@ -229,13 +292,14 @@ func (l *Layered) SetAndUnlock(path string, data json.RawMessage) (string, error
 	return l.setLocked(path, data)
 }
 
-// Unlock unlocks a key mutex
+// Unlock unlocks a key mutex and releases its refcount entry. Returns
+// ErrLockNotFound if no caller currently holds the path.
 func (l *Layered) Unlock(path string) error {
-	lock, found := l.memMutex.Load(path)
-	if !found {
-		return ErrLockNotFound
+	rm, err := l._loadLock(path)
+	if err != nil {
+		return err
 	}
-	lock.(*sync.Mutex).Unlock()
+	l._releaseLock(path, rm)
 	return nil
 }
 
@@ -431,13 +495,14 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 
 	l.writeMutex.RLock()
 	defer l.writeMutex.RUnlock()
-	lock := l._getLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	rm := l._acquireLock(path)
+	defer l._releaseLock(path, rm)
 	return l.setLocked(path, data)
 }
 
-// setLocked writes to all layers and broadcasts. Caller must hold _getLock(path).
+// setLocked writes to all layers and broadcasts. Caller must hold the
+// per-path refMu acquired via _acquireLock (or _loadLock for the
+// GetAndLock/SetAndUnlock pattern).
 // Without this serialization, concurrent writers can interleave layer writes
 // (memory ends up at writer A, embedded at writer B), breaking the mirror
 // invariant.
@@ -589,9 +654,8 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 
 	l.writeMutex.RLock()
 	defer l.writeMutex.RUnlock()
-	lock := l._getLock(newPath)
-	lock.Lock()
-	defer lock.Unlock()
+	rm := l._acquireLock(newPath)
+	defer l._releaseLock(newPath, rm)
 
 	if err := l.writeBothLayers(newPath, obj); err != nil {
 		return index, err
@@ -624,9 +688,8 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 
 	l.writeMutex.RLock()
 	defer l.writeMutex.RUnlock()
-	lock := l._getLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	rm := l._acquireLock(path)
+	defer l._releaseLock(path, rm)
 
 	if err := l.writeBothLayers(path, obj); err != nil {
 		return index, err
@@ -650,9 +713,8 @@ func (l *Layered) Del(path string) error {
 
 	l.writeMutex.RLock()
 	defer l.writeMutex.RUnlock()
-	lock := l._getLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	rm := l._acquireLock(path)
+	defer l._releaseLock(path, rm)
 
 	o, err := l.Get(path)
 	if err != nil {
@@ -706,9 +768,8 @@ func (l *Layered) DelSilent(path string) error {
 
 	l.writeMutex.RLock()
 	defer l.writeMutex.RUnlock()
-	lock := l._getLock(path)
-	lock.Lock()
-	defer lock.Unlock()
+	rm := l._acquireLock(path)
+	defer l._releaseLock(path, rm)
 
 	o, err := l.Get(path)
 	if err != nil {
