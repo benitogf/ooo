@@ -1003,13 +1003,15 @@ func TestLayeredDelSilentGlobRollsBackOnEmbeddedFailure(t *testing.T) {
 	require.Len(t, items, 2, "rejected DelSilent glob must leave both keys visible in memory")
 }
 
-// syncEmbedded wraps a MemoryLayer and lets a test pause embedded.Del between
-// "Del started" and "Del executed" so a concurrent Set can race with the
-// in-progress glob delete deterministically.
+// syncEmbedded wraps a MemoryLayer and lets a test pause embedded.Del or
+// embedded.Clear between "started" and "executed" so a concurrent Set can
+// race with the in-progress write barrier deterministically.
 type syncEmbedded struct {
-	inner      *MemoryLayer
-	delStarted chan struct{}
-	delResume  chan struct{}
+	inner        *MemoryLayer
+	delStarted   chan struct{}
+	delResume    chan struct{}
+	clearStarted chan struct{}
+	clearResume  chan struct{}
 }
 
 func (s *syncEmbedded) Active() bool                      { return s.inner.Active() }
@@ -1033,7 +1035,18 @@ func (s *syncEmbedded) Del(k string) error {
 	return s.inner.Del(k)
 }
 func (s *syncEmbedded) Keys() ([]string, error) { return s.inner.Keys() }
-func (s *syncEmbedded) Clear()                  { s.inner.Clear() }
+func (s *syncEmbedded) Clear() {
+	if s.clearStarted != nil {
+		select {
+		case s.clearStarted <- struct{}{}:
+		default:
+		}
+	}
+	if s.clearResume != nil {
+		<-s.clearResume
+	}
+	s.inner.Clear()
+}
 func (s *syncEmbedded) Load() (map[string]*meta.Object, error) {
 	keys, err := s.inner.Keys()
 	if err != nil {
@@ -1120,6 +1133,85 @@ func TestLayeredDelGlobSerializesWithConcurrentSet(t *testing.T) {
 	embHas := len(embKeys) > 0
 	require.Equal(t, memHas, embHas,
 		"layers diverged: memory has key=%v, embedded has key=%v", memHas, embHas)
+}
+
+// TestLayeredClearSerializesWithConcurrentSet asserts Layered.Clear is
+// serialized against concurrent Sets via the same writeMutex that
+// Del(glob) takes. Pre-fix Clear called memory.Clear() then
+// embedded.Clear() with no write barrier — a Set that committed between
+// the two halves left memory holding the new value while embedded
+// remained empty, diverging the layers.
+//
+// Mirrors TestLayeredDelGlobSerializesWithConcurrentSet using the same
+// syncEmbedded hook, just on the Clear path.
+func TestLayeredClearSerializesWithConcurrentSet(t *testing.T) {
+	t.Parallel()
+
+	clearStarted := make(chan struct{}, 1)
+	clearResume := make(chan struct{})
+	embedded := &syncEmbedded{
+		inner:        NewMemoryLayer(),
+		clearStarted: clearStarted,
+		clearResume:  clearResume,
+	}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	// Unlike the Del-glob sibling, Clear emits no watcher event, so the
+	// "items/*" entry that test needs to mute delGlob's broadcast isn't
+	// required here. Set on "items/a" still needs to skip broadcast.
+	require.NoError(t, s.Start(Options{NoBroadcastKeys: []string{"items/a"}}))
+	defer s.Close()
+
+	// Drain watcher events so Set doesn't block on a 5s send timeout.
+	sharded := s.WatchSharded()
+	for i := range sharded.Count() {
+		shard := sharded.Shard(i)
+		go func() {
+			for range shard {
+			}
+		}()
+	}
+
+	// Start Clear. memory.Clear() runs synchronously; embedded.Clear blocks
+	// at the hook so a Set can race the "between halves" window.
+	clearDone := make(chan struct{})
+	go func() {
+		s.Clear()
+		close(clearDone)
+	}()
+	<-clearStarted
+
+	// Attempt a Set while Clear is mid-flight. With the fix, Set takes the
+	// shared writeMutex and must wait for the exclusive lock Clear holds.
+	setStarted := make(chan struct{})
+	setDone := make(chan error, 1)
+	go func() {
+		close(setStarted)
+		_, err := s.Set("items/a", json.RawMessage(`{"v":1}`))
+		setDone <- err
+	}()
+	<-setStarted
+
+	// Set must be blocked: should not finish while Clear is still paused.
+	select {
+	case err := <-setDone:
+		t.Fatalf("Set must wait for Clear: unexpected early completion err=%v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(clearResume)
+	<-clearDone
+	require.NoError(t, <-setDone)
+
+	// After both finish: layers must agree on whether items/a exists.
+	memItems, err := s.GetList("items/*")
+	require.NoError(t, err)
+	embKeys, err := embedded.inner.Keys()
+	require.NoError(t, err)
+
+	memHas := len(memItems) > 0
+	embHas := len(embKeys) > 0
+	require.Equal(t, memHas, embHas,
+		"layers diverged after concurrent Clear+Set: memory has key=%v, embedded has key=%v", memHas, embHas)
 }
 
 // TestShardedChanDropIsObservable asserts that a send-timeout drop exposes
