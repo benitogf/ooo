@@ -82,6 +82,39 @@ func (c *Config) canDelete() bool {
 	return c.Capabilities.Delete
 }
 
+// enforceCapability writes 403 + returns false when the request method
+// is denied by the route's Capabilities. WebSocket upgrade requests are
+// gated by Read (a proxied WS subscription is a read on this codebase).
+// Unknown methods are passed through and rejected as 405 by the
+// downstream handler. The check fires before Resolve and before any
+// upstream contact, so denied requests never reach the target.
+func (c *Config) enforceCapability(w http.ResponseWriter, r *http.Request) bool {
+	if c.Capabilities == nil {
+		return true
+	}
+	if websocket.IsWebSocketUpgrade(r) {
+		if c.canRead() {
+			return true
+		}
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return false
+	}
+	allowed := true
+	switch r.Method {
+	case http.MethodGet:
+		allowed = c.canRead()
+	case http.MethodPost, http.MethodPatch:
+		allowed = c.canWrite()
+	case http.MethodDelete:
+		allowed = c.canDelete()
+	}
+	if !allowed {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // proxyManager manages shared remote subscriptions.
 type proxyManager struct {
 	mu      sync.RWMutex
@@ -461,6 +494,9 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !cfg.enforceCapability(w, r) {
+			return
+		}
 		// Get the actual path from the request
 		actualPath := strings.TrimPrefix(r.URL.Path, "/")
 
@@ -535,6 +571,9 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Handler for the base path (list)
 	listHandler := func(w http.ResponseWriter, r *http.Request) {
+		if !cfg.enforceCapability(w, r) {
+			return
+		}
 		actualPath := strings.TrimPrefix(r.URL.Path, "/")
 
 		address, remotePath, err := cfg.Resolve(actualPath)
@@ -553,6 +592,9 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Handler for specific items
 	itemHandler := func(w http.ResponseWriter, r *http.Request) {
+		if !cfg.enforceCapability(w, r) {
+			return
+		}
 		actualPath := strings.TrimPrefix(r.URL.Path, "/")
 
 		address, remotePath, err := cfg.Resolve(actualPath)
@@ -808,6 +850,9 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 	}
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
+		if !cfg.enforceCapability(w, r) {
+			return
+		}
 		vars := mux.Vars(r)
 		actualPath := strings.TrimPrefix(r.URL.Path, "/")
 

@@ -3,11 +3,13 @@ package proxy_test
 import (
 	"bytes"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -1213,6 +1215,279 @@ func TestProxyPostBodyDisabledLimit(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// TestProxyCapabilitiesWriteDeniedRejectsPost asserts a route declared
+// with Capabilities{Write: false} refuses proxied POST requests with
+// 403 Forbidden instead of forwarding them. Pre-fix Capabilities was
+// reflected in the UI surface only and the handlers did not consult
+// it, so the documented restriction was a no-op.
+func TestProxyCapabilitiesWriteDeniedRejectsPost(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Capabilities: &proxy.Capabilities{Read: true, Write: false, Delete: true},
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader([]byte(`{"x":1}`)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.False(t, upstreamHit, "upstream must not see denied requests")
+}
+
+// TestProxyCapabilitiesWriteDeniedRejectsPatch is the PATCH variant.
+func TestProxyCapabilitiesWriteDeniedRejectsPatch(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Capabilities: &proxy.Capabilities{Read: true, Write: false, Delete: true},
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	req, err := http.NewRequest(http.MethodPatch, "http://"+proxyServer.Address+"/settings/device1", bytes.NewReader([]byte(`{"x":1}`)))
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.False(t, upstreamHit)
+}
+
+// TestProxyCapabilitiesReadDeniedRejectsGet asserts Read: false blocks
+// GET requests through the proxy.
+func TestProxyCapabilitiesReadDeniedRejectsGet(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+		w.Write([]byte(`{}`))
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Capabilities: &proxy.Capabilities{Read: false, Write: true, Delete: true},
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	resp, err := http.Get("http://" + proxyServer.Address + "/settings/device1")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.False(t, upstreamHit)
+}
+
+// TestProxyCapabilitiesDeleteDeniedRejectsDelete asserts Delete: false
+// blocks DELETE requests through the proxy.
+func TestProxyCapabilitiesDeleteDeniedRejectsDelete(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Capabilities: &proxy.Capabilities{Read: true, Write: true, Delete: false},
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	req, err := http.NewRequest(http.MethodDelete, "http://"+proxyServer.Address+"/settings/device1", nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.False(t, upstreamHit)
+}
+
+// TestProxyCapabilitiesReadDeniedRejectsWebSocket asserts Read: false
+// blocks the WebSocket upgrade — a WS subscription is a read operation
+// on this codebase, so it must be gated by canRead.
+func TestProxyCapabilitiesReadDeniedRejectsWebSocket(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Capabilities: &proxy.Capabilities{Read: false, Write: true, Delete: true},
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: proxyServer.Address, Path: "/settings/device1"}
+	c, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.Error(t, err)
+	if c != nil {
+		c.Close()
+	}
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// TestProxyCapabilitiesDefaultAllowsAll asserts nil Capabilities (the
+// default) permits all methods. Pinning this so a future "deny by
+// default" change is an explicit decision and not an accident.
+func TestProxyCapabilitiesDefaultAllowsAll(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	// POST
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader([]byte(`{"name":"x","value":1}`)))
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.NotEqual(t, http.StatusForbidden, resp.StatusCode)
+
+	// GET
+	resp, err = http.Get("http://" + proxyServer.Address + "/settings/device1")
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.NotEqual(t, http.StatusForbidden, resp.StatusCode)
+
+	// DELETE
+	req, err := http.NewRequest(http.MethodDelete, "http://"+proxyServer.Address+"/settings/device1", nil)
+	require.NoError(t, err)
+	resp, err = http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.NotEqual(t, http.StatusForbidden, resp.StatusCode)
+}
+
+// TestProxyCapabilitiesEnforcedViaNodeFilter pins that Capabilities
+// declared on a NodeFilterConfig is enforced by the underlying Route.
+// NodeFilter is a convenience wrapper around Route, so the enforcement
+// flows transitively — this test guards against a future refactor that
+// changes that delegation.
+func TestProxyCapabilitiesEnforcedViaNodeFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit = true
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	host, portStr, err := net.SplitHostPort(upstreamHost)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	directory := &ooo.Server{}
+	directory.Silence = true
+	directory.Start("localhost:0")
+	defer directory.Close(os.Interrupt)
+
+	nodeData, _ := json.Marshal(proxy.Node{IP: host, Port: port})
+	_, err = directory.Storage.Push("nodes/*", nodeData)
+	require.NoError(t, err)
+	nodes, err := ooo.GetList[proxy.Node](directory, "nodes/*")
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	nodeID := nodes[0].Index
+
+	err = proxy.RouteNodeFilter(directory, proxy.NodeFilterConfig{
+		NodesKey:     "nodes/*",
+		LocalKey:     "states/*",
+		RemoteKey:    "state",
+		Capabilities: &proxy.Capabilities{Read: true, Write: false, Delete: true},
+	})
+	require.NoError(t, err)
+
+	resp, err := http.Post("http://"+directory.Address+"/states/"+nodeID, "application/json", bytes.NewReader([]byte(`{"x":1}`)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	require.False(t, upstreamHit, "upstream must not see denied requests via NodeFilter")
 }
 
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
