@@ -812,6 +812,125 @@ func TestLayeredSetReturnsEmbeddedError(t *testing.T) {
 		"Set must return the embedded layer's error")
 }
 
+// TestLayeredSetRollsBackMemoryOnEmbeddedFailure asserts that a Set call which
+// fails at the embedded layer leaves storage state unchanged — the in-memory
+// layer must not retain the rejected write. Pre-fix, memory was updated first
+// and kept the uncommitted value when embedded returned an error: in-process
+// Get returned data the durable store rejected, restart silently rolled back
+// the value, and any caller relying on "Set returned an error → state
+// unchanged" was wrong.
+func TestLayeredSetRollsBackMemoryOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	// Seed an initial committed value so we can verify the rollback restores it.
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	before, err := s.Get("k")
+	require.NoError(t, err)
+	require.Contains(t, string(before.Data), `"v":1`)
+
+	// Make the next Set fail at the embedded layer.
+	embedded.setErr = errors.New("disk full")
+
+	_, err = s.Set("k", json.RawMessage(`{"v":2}`))
+	require.Error(t, err)
+
+	// State must equal the prior committed value, not the rejected v:2.
+	after, err := s.Get("k")
+	require.NoError(t, err)
+	require.Contains(t, string(after.Data), `"v":1`,
+		"failed Set must not leave the rejected value in memory")
+	require.NotContains(t, string(after.Data), `"v":2`,
+		"memory must roll back when the embedded layer rejected the write")
+}
+
+// TestLayeredSetRollsBackOnFirstWriteEmbeddedFailure covers the case where the
+// key did not exist before the failed Set: storage must end up empty, not
+// holding the rejected value in memory.
+func TestLayeredSetRollsBackOnFirstWriteEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer(), setErr: errors.New("disk full")}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("k", json.RawMessage(`{"v":1}`))
+	require.Error(t, err)
+
+	_, err = s.Get("k")
+	require.Error(t, err, "Get must fail for a key whose Set was rejected by embedded")
+}
+
+// TestLayeredPushRollsBackOnEmbeddedFailure asserts a Push rejected by the
+// embedded layer does not leave the newly-generated key visible in memory.
+func TestLayeredPushRollsBackOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer(), setErr: errors.New("disk full")}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Push("things/*", json.RawMessage(`{"v":1}`))
+	require.Error(t, err)
+
+	items, err := s.GetList("things/*")
+	require.NoError(t, err)
+	require.Empty(t, items, "rejected Push must not leave the key in memory")
+}
+
+// TestLayeredSetWithMetaRollsBackOnEmbeddedFailure asserts SetWithMeta restores
+// the prior committed value when embedded rejects the new one.
+func TestLayeredSetWithMetaRollsBackOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.SetWithMeta("k", json.RawMessage(`{"v":1}`), 1, 2)
+	require.NoError(t, err)
+
+	embedded.setErr = errors.New("disk full")
+	_, err = s.SetWithMeta("k", json.RawMessage(`{"v":2}`), 1, 3)
+	require.Error(t, err)
+
+	got, err := s.Get("k")
+	require.NoError(t, err)
+	require.Contains(t, string(got.Data), `"v":1`,
+		"failed SetWithMeta must not leave the rejected value in memory")
+}
+
+// TestLayeredDelRollsBackOnEmbeddedFailure asserts Del restores the prior
+// value in memory when embedded refuses the delete.
+func TestLayeredDelRollsBackOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	embedded.delErr = errors.New("disk locked")
+	err = s.Del("k")
+	require.Error(t, err)
+
+	got, err := s.Get("k")
+	require.NoError(t, err, "rejected Del must leave the key visible in memory")
+	require.Contains(t, string(got.Data), `"v":1`)
+}
+
 // TestLayeredPushReturnsEmbeddedError is the Push variant.
 func TestLayeredPushReturnsEmbeddedError(t *testing.T) {
 	t.Parallel()
