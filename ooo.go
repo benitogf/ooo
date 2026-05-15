@@ -130,7 +130,7 @@ type Server struct {
 	endpoints          []ui.EndpointInfo          // registered custom endpoints
 	proxies            []ui.ProxyInfo             // registered proxy routes
 	routeOracle        *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
-	routeOracleMu      sync.Mutex                 // serializes oracle registrations and matches
+	routeOracleMu      sync.RWMutex               // protects routeOracle; readers (routeOracleSkip) take RLock on the data-wildcard hot path, registrations take Lock
 	proxyCleanups      []func()                   // cleanup functions for proxy subscriptions
 	proxyCleanupMu     sync.Mutex                 // protects proxyCleanups
 	NoBroadcastKeys    []string
@@ -718,9 +718,14 @@ func (server *Server) setupRoutes() {
 // routeOracleSkip returns true if the request does NOT match any registered
 // Endpoint or Proxy route. It is wired as a MatcherFunc on the data wildcard
 // so explicit routes take precedence regardless of registration order.
+//
+// Takes RLock on the routeOracle so concurrent data-wildcard requests can
+// run their oracle check in parallel; RegisterOracleRoute takes the
+// write Lock. The mux.Router's Match method is documented as safe for
+// concurrent read use once the route set is established.
 func (server *Server) routeOracleSkip(r *http.Request, _ *mux.RouteMatch) bool {
-	server.routeOracleMu.Lock()
-	defer server.routeOracleMu.Unlock()
+	server.routeOracleMu.RLock()
+	defer server.routeOracleMu.RUnlock()
 	if server.routeOracle == nil {
 		return true
 	}
