@@ -29,6 +29,16 @@ import (
 
 const deadlineMsg = "ooo: server deadline reached"
 
+// Server.active state machine. The intermediate serverStarting value
+// is what makes Active() return false during the listen-bind window
+// while still keeping concurrent StartWithError callers off the
+// reallocation path via the CAS in StartWithError.
+const (
+	serverInactive int64 = 0
+	serverActive   int64 = 1
+	serverStarting int64 = 2
+)
+
 // DefaultMaxRequestBodyBytes is the default cap on REST request body size
 // (POST / PATCH). Override via Server.MaxRequestBodyBytes. Set the field to a
 // negative value to disable the cap.
@@ -106,42 +116,46 @@ type audit func(r *http.Request) bool
 //
 // BeforeRead: callback function triggered before read operations
 type Server struct {
-	wg                  sync.WaitGroup
-	watchWg             sync.WaitGroup
-	listenWg            sync.WaitGroup
-	handlerWg           sync.WaitGroup
-	clockWg             sync.WaitGroup
-	server              *http.Server
-	Name                string
-	Router              *mux.Router
-	Stream              stream.Stream
-	filters             filters.Filters
-	limitFilters        map[string]*limitFilterReg // tracks limit filter registrations
-	endpoints           []ui.EndpointInfo          // registered custom endpoints
-	proxies             []ui.ProxyInfo             // registered proxy routes
-	routeOracle         *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
-	routeOracleMu       sync.Mutex                 // serializes oracle registrations and matches
-	proxyCleanups       []func()                   // cleanup functions for proxy subscriptions
-	proxyCleanupMu      sync.Mutex                 // protects proxyCleanups
-	NoBroadcastKeys     []string
-	Audit               audit
-	Workers             int
-	ForcePatch          bool
-	NoPatch             bool
-	OnSubscribe         stream.Subscribe
-	OnUnsubscribe       stream.Unsubscribe
-	OnStart             func()
-	OnClose             func()
-	preCloseCleanups    []func() // cleanup functions called before stream/storage close
-	preCloseCleanupsMu  sync.Mutex
-	Deadline            time.Duration
-	AllowedOrigins      []string
-	AllowedMethods      []string
-	AllowedHeaders      []string
-	ExposedHeaders      []string
-	Storage             storage.Database
-	Address             string
-	closing             int64
+	wg                 sync.WaitGroup
+	watchWg            sync.WaitGroup
+	listenWg           sync.WaitGroup
+	handlerWg          sync.WaitGroup
+	clockWg            sync.WaitGroup
+	server             *http.Server
+	Name               string
+	Router             *mux.Router
+	Stream             stream.Stream
+	filters            filters.Filters
+	limitFilters       map[string]*limitFilterReg // tracks limit filter registrations
+	endpoints          []ui.EndpointInfo          // registered custom endpoints
+	proxies            []ui.ProxyInfo             // registered proxy routes
+	routeOracle        *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
+	routeOracleMu      sync.Mutex                 // serializes oracle registrations and matches
+	proxyCleanups      []func()                   // cleanup functions for proxy subscriptions
+	proxyCleanupMu     sync.Mutex                 // protects proxyCleanups
+	NoBroadcastKeys    []string
+	Audit              audit
+	Workers            int
+	ForcePatch         bool
+	NoPatch            bool
+	OnSubscribe        stream.Subscribe
+	OnUnsubscribe      stream.Unsubscribe
+	OnStart            func()
+	OnClose            func()
+	preCloseCleanups   []func() // cleanup functions called before stream/storage close
+	preCloseCleanupsMu sync.Mutex
+	Deadline           time.Duration
+	AllowedOrigins     []string
+	AllowedMethods     []string
+	AllowedHeaders     []string
+	ExposedHeaders     []string
+	Storage            storage.Database
+	Address            string
+	closing            int64
+	// active follows the serverInactive/serverStarting/serverActive
+	// state machine so Active() can distinguish "Start has been called
+	// but the listener has not yet bound" from "listener bound and
+	// serving". See StartWithError for the CAS that claims the slot.
 	active              int64
 	Silence             bool
 	Static              bool
@@ -350,12 +364,17 @@ func (server *Server) waitListen() {
 		}).Handler(handler)}
 	ln, err := net.Listen("tcp4", server.Address)
 	if err != nil {
+		// Roll the CAS claim back so a retry (or Start-after-Close)
+		// sees the slot free. Must happen before wg.Done() so the
+		// parent observing wg.Wait() never sees the intermediate
+		// serverStarting value.
+		atomic.StoreInt64(&server.active, serverInactive)
 		server.startErr <- fmt.Errorf("ooo: failed to start tcp: %w", err)
 		server.wg.Done()
 		return
 	}
 	server.Address = ln.Addr().String()
-	atomic.StoreInt64(&server.active, 1)
+	atomic.StoreInt64(&server.active, serverActive)
 	server.wg.Done()
 	err = server.server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
 	if atomic.LoadInt64(&server.closing) != 1 && err != nil {
@@ -363,9 +382,12 @@ func (server *Server) waitListen() {
 	}
 }
 
-// Active check if the server is active
+// Active reports whether the server is fully running — listener bound,
+// not yet shutting down. Returns false during the listen-bind window
+// (Start has been called but the listener has not yet been accepted
+// by waitListen) and false once Close has been called.
 func (server *Server) Active() bool {
-	return atomic.LoadInt64(&server.active) == 1 && atomic.LoadInt64(&server.closing) == 0
+	return atomic.LoadInt64(&server.active) == serverActive && atomic.LoadInt64(&server.closing) == 0
 }
 
 func (server *Server) waitStart() error {
@@ -376,7 +398,7 @@ func (server *Server) waitStart() error {
 	default:
 	}
 
-	if atomic.LoadInt64(&server.active) == 0 || !server.Storage.Active() {
+	if atomic.LoadInt64(&server.active) != serverActive || !server.Storage.Active() {
 		return ErrServerStartFailed
 	}
 
@@ -724,12 +746,20 @@ func (server *Server) RegisterOracleRoute(path string, methods []string) {
 
 // StartWithError initializes and starts the http server and database connection.
 // Returns an error if startup fails instead of calling log.Fatal.
+//
+// Safe to call from multiple goroutines: an atomic CompareAndSwap
+// claims the startup slot via the `serverStarting` sentinel so only
+// the first caller proceeds; concurrent callers return
+// ErrServerAlreadyActive immediately. The sentinel keeps `Active()`
+// returning false through the listen-bind window — the field flips
+// to `serverActive` only once waitListen has bound, and rolls back
+// to `serverInactive` if the bind fails. Mirrors the Close-side CAS
+// fix (PR #89) without shifting Active() semantics.
 func (server *Server) StartWithError(address string) error {
-	server.Address = address
-	if atomic.LoadInt64(&server.active) == 1 {
+	if !atomic.CompareAndSwapInt64(&server.active, serverInactive, serverStarting) {
 		return ErrServerAlreadyActive
 	}
-	atomic.StoreInt64(&server.active, 0)
+	server.Address = address
 	atomic.StoreInt64(&server.closing, 0)
 	server.startErr = make(chan error, 1)
 	monotonic.Init()
@@ -772,7 +802,7 @@ func (server *Server) Start(address string) {
 // pass and both `close(server.clockStop)`, panicking the second.
 func (server *Server) Close(sig os.Signal) {
 	if atomic.CompareAndSwapInt64(&server.closing, 0, 1) {
-		atomic.StoreInt64(&server.active, 0)
+		atomic.StoreInt64(&server.active, serverInactive)
 		// Call pre-close cleanups first, before any stream/storage cleanup
 		server.preCloseCleanupsMu.Lock()
 		for _, cleanup := range server.preCloseCleanups {
