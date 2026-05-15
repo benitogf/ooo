@@ -234,6 +234,36 @@ func TestWebSocketSubscriptionEvents(t *testing.T) {
 	require.Equal(t, "testkey", unsubscribed)
 }
 
+// TestFetchUpgradeFailDoesNotLeakPool asserts that when a subscription
+// request reaches the ws handler — populating the stream pool's cache
+// via fetch — and the subsequent WebSocket upgrade fails, the pool is
+// pruned so an orphan entry cannot linger in sm.pools / poolIndex.
+// Pre-fix InitCache eagerly registered the pool and a failed upgrade
+// never invoked Close, so the entry leaked forever for any
+// non-persistent (filter-less) subscription path.
+func TestFetchUpgradeFailDoesNotLeakPool(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := Server{}
+	server.Silence = true
+	server.AllowedOrigins = []string{"http://allowed.example.com"}
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	require.Zero(t, server.Stream.PoolCount(), "fixture: no filters registered, no pools expected")
+
+	u := url.URL{Scheme: "ws", Host: server.Address, Path: "/ephemeral"}
+	hdr := http.Header{}
+	hdr.Set("Origin", "http://evil.example.com")
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), hdr)
+	require.Error(t, err, "cross-origin upgrade must be rejected")
+	require.Nil(t, c)
+
+	require.Zero(t, server.Stream.PoolCount(),
+		"the orphan pool from a failed upgrade must be pruned by PruneIfEmpty")
+}
+
 // TestWebSocketCheckOriginRejectsCrossOrigin asserts the WebSocket upgrader
 // rejects connections whose Origin is not in the server's AllowedOrigins.
 // Pre-fix the upgrader's CheckOrigin was a no-op (returned true whenever the

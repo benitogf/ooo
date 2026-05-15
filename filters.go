@@ -83,10 +83,20 @@ func (server *Server) AfterWriteFilter(path string, apply Notify, cfg ...FilterC
 	server.filters.AddAfterWrite(path, apply, cfg...)
 }
 
+// markPoolPersistent tags the stream pool for path as persistent so
+// the empty-pool sweep cannot prune it when the last subscriber
+// disconnects. Read-side filter registrations after Start use this;
+// for registrations before Start the bulk PreallocatePools call
+// inside StartWithError covers them.
+func (server *Server) markPoolPersistent(path string) {
+	server.Stream.MarkPersistent(path)
+}
+
 // ReadObjectFilter add a filter for single meta.Object reads
 func (server *Server) ReadObjectFilter(path string, apply ApplyObject, cfg ...FilterConfig) {
 	checkReservedPath(path)
 	server.filters.AddReadObject(path, apply, cfg...)
+	server.markPoolPersistent(path)
 }
 
 // ReadListFilter add a filter for []meta.Object reads.
@@ -95,6 +105,7 @@ func (server *Server) ReadObjectFilter(path string, apply ApplyObject, cfg ...Fi
 func (server *Server) ReadListFilter(path string, apply ApplyList, cfg ...FilterConfig) {
 	checkReservedPath(path)
 	server.filters.AddReadList(path, apply, cfg...)
+	server.markPoolPersistent(path)
 }
 
 // OpenFilter open noop read and write filters
@@ -110,6 +121,7 @@ func (server *Server) OpenFilter(name string, cfg ...FilterConfig) {
 	} else {
 		server.filters.AddReadObject(name, NoopObjectFilter, cfg...)
 	}
+	server.markPoolPersistent(name)
 }
 
 // LimitFilter creates a limit filter for a glob pattern path that maintains
@@ -137,6 +149,7 @@ func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter, 
 
 	// ReadListFilter ensures clients never see more than the configured constraints
 	server.filters.AddReadList(path, lf.ReadListFilter, cfg...)
+	server.markPoolPersistent(path)
 
 	// Also allow reading individual items that match the glob pattern
 	server.filters.AddReadObject(path, NoopObjectFilter, cfg...)
