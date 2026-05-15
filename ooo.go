@@ -150,10 +150,12 @@ type Server struct {
 	IdleTimeout        time.Duration
 	OnStorageEvent     storage.EventCallback
 	OnWatchPanic       func(ev storage.Event, r any) // optional: invoked on each recovered watch-goroutine panic with the offending event
+	OnDroppedEvent     func(ev storage.Event)        // optional: invoked when the sharded watcher channel drops an event after timing out
 	BeforeRead         func(key string)
 	GetPivotInfo       func() *ui.PivotInfo // Optional: returns pivot status for UI
 	NoCompress         bool                 // Disable gzip compression (useful for tests)
 	WatchPanics        int64                // Atomic counter of panics recovered in watch goroutines
+	DroppedEvents      int64                // Atomic counter of events dropped by the sharded watcher on send timeout
 	startErr           chan error           // channel for startup errors
 	clockStop          chan struct{}        // channel to signal clock goroutine to stop
 }
@@ -190,6 +192,7 @@ func (server *Server) getServerInfo() ui.ServerInfo {
 		Workers:           server.Workers,
 		Tick:              server.Tick,
 		WatchPanics:       atomic.LoadInt64(&server.WatchPanics),
+		DroppedEvents:     atomic.LoadInt64(&server.DroppedEvents),
 	}
 }
 
@@ -373,7 +376,8 @@ func (server *Server) waitStart() error {
 
 	// Start workers for sharded watcher (per-key ordering)
 	shardedWatcher := server.Storage.WatchSharded()
-	for i := 0; i < shardedWatcher.Count(); i++ {
+	shardedWatcher.SetOnDrop(server.handleDroppedEvent)
+	for i := range shardedWatcher.Count() {
 		server.watchWg.Add(1)
 		go server.watch(shardedWatcher.Shard(i))
 	}
@@ -456,6 +460,20 @@ func (server *Server) watch(sc storage.StorageChan) {
 		if !server.Storage.Active() {
 			break
 		}
+	}
+}
+
+// handleDroppedEvent runs on the storage layer's sender goroutine each time
+// the sharded watcher channel drops an event after exhausting its send
+// timeout. The dropped event has been durably committed but no subscriber
+// will ever see it — operators monitor DroppedEvents to detect a stuck or
+// slow watcher consumer.
+func (server *Server) handleDroppedEvent(ev storage.Event) {
+	atomic.AddInt64(&server.DroppedEvents, 1)
+	server.Console.Err(fmt.Sprintf("watch:dropped key=%q op=%q total=%d (consumer stuck or slow; subscribers will not see this event)",
+		ev.Key, ev.Operation, atomic.LoadInt64(&server.DroppedEvents)))
+	if server.OnDroppedEvent != nil {
+		server.OnDroppedEvent(ev)
 	}
 }
 

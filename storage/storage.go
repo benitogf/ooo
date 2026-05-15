@@ -4,6 +4,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"log"
+	"sync/atomic"
 	"time"
 
 	"github.com/benitogf/go-json"
@@ -48,8 +49,10 @@ type Options struct {
 
 // ShardedChan manages multiple channels for per-key ordering.
 type ShardedChan struct {
-	shards []StorageChan
-	count  int
+	shards  []StorageChan
+	count   int
+	dropped atomic.Int64
+	onDrop  atomic.Pointer[func(Event)]
 }
 
 // NewShardedChan creates a new sharded storage channel with the given number of shards.
@@ -67,6 +70,24 @@ func NewShardedChan(shardCount int) *ShardedChan {
 	}
 }
 
+// Dropped returns the total number of events the sharded channel has dropped
+// after exhausting its send timeout. Operators monitor this to detect a stuck
+// or slow watcher consumer that's silently desyncing subscribers from storage.
+func (s *ShardedChan) Dropped() int64 {
+	return s.dropped.Load()
+}
+
+// SetOnDrop installs (or clears) a callback invoked for each event that
+// SendWithTimeout drops on timeout. The callback runs synchronously on the
+// sender's goroutine — keep it cheap. Pass nil to unset.
+func (s *ShardedChan) SetOnDrop(fn func(Event)) {
+	if fn == nil {
+		s.onDrop.Store(nil)
+		return
+	}
+	s.onDrop.Store(&fn)
+}
+
 // SEND_TIMEOUT is the maximum time to wait when sending an event to a shard channel.
 // If the consumer goroutine is stuck or dead, the send will time out and the event
 // will be dropped with a log warning, preventing permanent write hangs.
@@ -74,12 +95,21 @@ const SEND_TIMEOUT = 5 * time.Second
 
 // SendWithTimeout attempts to send an event to the appropriate shard channel
 // within the given timeout. Returns true if sent, false if timed out.
+//
+// On timeout the event is dropped, the dropped counter is incremented, and
+// any installed OnDrop callback is invoked synchronously. The drop is now
+// programmatically observable instead of leaving only a log line for
+// operators to grep.
 func (s *ShardedChan) SendWithTimeout(event Event, timeout time.Duration) bool {
 	shard := s.ShardFor(event.Key)
 	select {
 	case s.shards[shard] <- event:
 		return true
 	case <-time.After(timeout):
+		s.dropped.Add(1)
+		if ptr := s.onDrop.Load(); ptr != nil {
+			(*ptr)(event)
+		}
 		log.Printf("storage: send timeout on shard %d for key %q (consumer stuck or dead), event dropped", shard, event.Key)
 		return false
 	}
