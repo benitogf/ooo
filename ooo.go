@@ -29,6 +29,11 @@ import (
 
 const deadlineMsg = "ooo: server deadline reached"
 
+// DefaultMaxRequestBodyBytes is the default cap on REST request body size
+// (POST / PATCH). Override via Server.MaxRequestBodyBytes. Set the field to a
+// negative value to disable the cap.
+const DefaultMaxRequestBodyBytes = 10 * 1024 * 1024 // 10 MiB
+
 // audit requests function
 // will define approval or denial by the return value
 // r: the request to be audited
@@ -101,63 +106,64 @@ type audit func(r *http.Request) bool
 //
 // BeforeRead: callback function triggered before read operations
 type Server struct {
-	wg                 sync.WaitGroup
-	watchWg            sync.WaitGroup
-	listenWg           sync.WaitGroup
-	handlerWg          sync.WaitGroup
-	clockWg            sync.WaitGroup
-	server             *http.Server
-	Name               string
-	Router             *mux.Router
-	Stream             stream.Stream
-	filters            filters.Filters
-	limitFilters       map[string]*limitFilterReg // tracks limit filter registrations
-	endpoints          []ui.EndpointInfo          // registered custom endpoints
-	proxies            []ui.ProxyInfo             // registered proxy routes
-	routeOracle        *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
-	routeOracleMu      sync.Mutex                 // serializes oracle registrations and matches
-	proxyCleanups      []func()                   // cleanup functions for proxy subscriptions
-	proxyCleanupMu     sync.Mutex                 // protects proxyCleanups
-	NoBroadcastKeys    []string
-	Audit              audit
-	Workers            int
-	ForcePatch         bool
-	NoPatch            bool
-	OnSubscribe        stream.Subscribe
-	OnUnsubscribe      stream.Unsubscribe
-	OnStart            func()
-	OnClose            func()
-	preCloseCleanups   []func() // cleanup functions called before stream/storage close
-	preCloseCleanupsMu sync.Mutex
-	Deadline           time.Duration
-	AllowedOrigins     []string
-	AllowedMethods     []string
-	AllowedHeaders     []string
-	ExposedHeaders     []string
-	Storage            storage.Database
-	Address            string
-	closing            int64
-	active             int64
-	Silence            bool
-	Static             bool
-	Tick               time.Duration
-	Console            *coat.Console
-	Signal             chan os.Signal
-	Client             *http.Client
-	ReadTimeout        time.Duration
-	WriteTimeout       time.Duration
-	ReadHeaderTimeout  time.Duration
-	IdleTimeout        time.Duration
-	OnStorageEvent     storage.EventCallback
-	OnWatchPanic       func(ev storage.Event, r any) // optional: invoked on each recovered watch-goroutine panic with the offending event
-	OnDroppedEvent     func(ev storage.Event)        // optional: invoked when the sharded watcher channel drops an event after timing out
-	BeforeRead         func(key string)
-	GetPivotInfo       func() *ui.PivotInfo // Optional: returns pivot status for UI
-	NoCompress         bool                 // Disable gzip compression (useful for tests)
-	WatchPanics        int64                // Atomic counter of panics recovered in watch goroutines
-	DroppedEvents      int64                // Atomic counter of events dropped by the sharded watcher on send timeout
-	startErr           chan error           // channel for startup errors
-	clockStop          chan struct{}        // channel to signal clock goroutine to stop
+	wg                  sync.WaitGroup
+	watchWg             sync.WaitGroup
+	listenWg            sync.WaitGroup
+	handlerWg           sync.WaitGroup
+	clockWg             sync.WaitGroup
+	server              *http.Server
+	Name                string
+	Router              *mux.Router
+	Stream              stream.Stream
+	filters             filters.Filters
+	limitFilters        map[string]*limitFilterReg // tracks limit filter registrations
+	endpoints           []ui.EndpointInfo          // registered custom endpoints
+	proxies             []ui.ProxyInfo             // registered proxy routes
+	routeOracle         *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
+	routeOracleMu       sync.Mutex                 // serializes oracle registrations and matches
+	proxyCleanups       []func()                   // cleanup functions for proxy subscriptions
+	proxyCleanupMu      sync.Mutex                 // protects proxyCleanups
+	NoBroadcastKeys     []string
+	Audit               audit
+	Workers             int
+	ForcePatch          bool
+	NoPatch             bool
+	OnSubscribe         stream.Subscribe
+	OnUnsubscribe       stream.Unsubscribe
+	OnStart             func()
+	OnClose             func()
+	preCloseCleanups    []func() // cleanup functions called before stream/storage close
+	preCloseCleanupsMu  sync.Mutex
+	Deadline            time.Duration
+	AllowedOrigins      []string
+	AllowedMethods      []string
+	AllowedHeaders      []string
+	ExposedHeaders      []string
+	Storage             storage.Database
+	Address             string
+	closing             int64
+	active              int64
+	Silence             bool
+	Static              bool
+	Tick                time.Duration
+	Console             *coat.Console
+	Signal              chan os.Signal
+	Client              *http.Client
+	ReadTimeout         time.Duration
+	WriteTimeout        time.Duration
+	ReadHeaderTimeout   time.Duration
+	IdleTimeout         time.Duration
+	MaxRequestBodyBytes int64 // cap on REST request body size; defaults to DefaultMaxRequestBodyBytes (10 MiB). Set to a negative value to disable.
+	OnStorageEvent      storage.EventCallback
+	OnWatchPanic        func(ev storage.Event, r any) // optional: invoked on each recovered watch-goroutine panic with the offending event
+	OnDroppedEvent      func(ev storage.Event)        // optional: invoked when the sharded watcher channel drops an event after timing out
+	BeforeRead          func(key string)
+	GetPivotInfo        func() *ui.PivotInfo // Optional: returns pivot status for UI
+	NoCompress          bool                 // Disable gzip compression (useful for tests)
+	WatchPanics         int64                // Atomic counter of panics recovered in watch goroutines
+	DroppedEvents       int64                // Atomic counter of events dropped by the sharded watcher on send timeout
+	startErr            chan error           // channel for startup errors
+	clockStop           chan struct{}        // channel to signal clock goroutine to stop
 }
 
 // Validate checks the server configuration for common issues.
@@ -547,6 +553,9 @@ func (server *Server) defaultTimeouts() {
 	}
 	if server.IdleTimeout == 0 {
 		server.IdleTimeout = 10 * time.Second
+	}
+	if server.MaxRequestBodyBytes == 0 {
+		server.MaxRequestBodyBytes = DefaultMaxRequestBodyBytes
 	}
 }
 
