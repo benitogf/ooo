@@ -931,6 +931,78 @@ func TestLayeredDelRollsBackOnEmbeddedFailure(t *testing.T) {
 	require.Contains(t, string(got.Data), `"v":1`)
 }
 
+// TestLayeredDelSilentRollsBackOnEmbeddedFailure asserts DelSilent (non-glob)
+// restores memory when embedded refuses the delete. The LimitFilter retention
+// path uses DelSilent and silent rollback there would mid-evict-some-keys
+// leaving memory ahead of embedded.
+func TestLayeredDelSilentRollsBackOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("k", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+
+	embedded.delErr = errors.New("disk locked")
+	err = s.DelSilent("k")
+	require.Error(t, err)
+
+	got, err := s.Get("k")
+	require.NoError(t, err, "rejected DelSilent must leave the key visible in memory")
+	require.Contains(t, string(got.Data), `"v":1`)
+}
+
+// TestLayeredDelGlobRollsBackOnEmbeddedFailure asserts the glob-delete path
+// restores every removed item to memory when embedded refuses the delete.
+func TestLayeredDelGlobRollsBackOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("items/a", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+	_, err = s.Set("items/b", json.RawMessage(`{"v":2}`))
+	require.NoError(t, err)
+
+	embedded.delErr = errors.New("disk locked")
+	err = s.Del("items/*")
+	require.Error(t, err)
+
+	items, err := s.GetList("items/*")
+	require.NoError(t, err)
+	require.Len(t, items, 2, "rejected glob Del must leave both keys visible in memory")
+}
+
+// TestLayeredDelSilentGlobRollsBackOnEmbeddedFailure is the DelSilent variant
+// of the glob rollback.
+func TestLayeredDelSilentGlobRollsBackOnEmbeddedFailure(t *testing.T) {
+	t.Parallel()
+
+	embedded := &faultyEmbeddedLayer{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{}))
+	defer s.Close()
+
+	_, err := s.Set("items/a", json.RawMessage(`{"v":1}`))
+	require.NoError(t, err)
+	_, err = s.Set("items/b", json.RawMessage(`{"v":2}`))
+	require.NoError(t, err)
+
+	embedded.delErr = errors.New("disk locked")
+	err = s.DelSilent("items/*")
+	require.Error(t, err)
+
+	items, err := s.GetList("items/*")
+	require.NoError(t, err)
+	require.Len(t, items, 2, "rejected DelSilent glob must leave both keys visible in memory")
+}
+
 // TestLayeredPushReturnsEmbeddedError is the Push variant.
 func TestLayeredPushReturnsEmbeddedError(t *testing.T) {
 	t.Parallel()
