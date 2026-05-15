@@ -437,11 +437,12 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 // (memory ends up at writer A, embedded at writer B), breaking the mirror
 // invariant.
 //
-// If the embedded layer rejects the write, the error is returned to the
-// caller and the broadcast / afterWrite hooks are suppressed: callers and
-// subscribers must not be told a write succeeded when it did not durably
-// commit. The memory layer keeps the new value (Layered is memory-first by
-// design); on restart embedded reseeds memory from the prior committed value.
+// If the embedded layer rejects the write, the memory layer is rolled back
+// to its prior value (or deleted if the key did not exist), the error is
+// returned to the caller, and the broadcast / afterWrite hooks are
+// suppressed. Callers and subscribers must not be told a write succeeded
+// when it did not durably commit, and in-process Get must not return data
+// the durable store rejected.
 func (l *Layered) setLocked(path string, data json.RawMessage) (string, error) {
 	now := monotonic.Now()
 	index := key.LastIndex(path)
@@ -455,15 +456,8 @@ func (l *Layered) setLocked(path string, data json.RawMessage) (string, error) {
 		Data:    data,
 	}
 
-	if l.memory != nil {
-		if err := l.memory.Set(path, obj); err != nil {
-			return index, err
-		}
-	}
-	if l.embedded != nil {
-		if err := l.embedded.Set(path, obj); err != nil {
-			return index, err
-		}
+	if err := l.writeBothLayers(path, obj); err != nil {
+		return index, err
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -474,6 +468,94 @@ func (l *Layered) setLocked(path string, data json.RawMessage) (string, error) {
 	}
 
 	return index, nil
+}
+
+// writeBothLayers writes obj to memory then embedded. If embedded rejects,
+// memory is rolled back to its prior committed value (or deleted if the key
+// did not exist), so a failed write leaves no trace in memory and Get does
+// not return data the durable store rejected.
+func (l *Layered) writeBothLayers(path string, obj *meta.Object) error {
+	if l.memory != nil {
+		var prior *meta.Object
+		if existed, getErr := l.memory.Get(path); getErr == nil {
+			priorCopy := existed
+			prior = &priorCopy
+		}
+		if err := l.memory.Set(path, obj); err != nil {
+			return err
+		}
+		if l.embedded != nil {
+			if err := l.embedded.Set(path, obj); err != nil {
+				if prior != nil {
+					_ = l.memory.Set(path, prior)
+				} else {
+					_ = l.memory.Del(path)
+				}
+				return err
+			}
+		}
+		return nil
+	}
+	if l.embedded != nil {
+		return l.embedded.Set(path, obj)
+	}
+	return nil
+}
+
+// deleteBothLayers deletes path from memory then embedded. If embedded
+// rejects, memory is rolled back by restoring the prior value, so a failed
+// Del leaves the key visible exactly as before the call. Callers must
+// provide the prior value (read under the same per-key lock).
+func (l *Layered) deleteBothLayers(path string, prior *meta.Object) error {
+	if l.memory != nil {
+		if err := l.memory.Del(path); err != nil {
+			return err
+		}
+		if l.embedded != nil {
+			if err := l.embedded.Del(path); err != nil {
+				if prior != nil {
+					_ = l.memory.Set(path, prior)
+				}
+				return err
+			}
+		}
+		return nil
+	}
+	if l.embedded != nil {
+		return l.embedded.Del(path)
+	}
+	return nil
+}
+
+// deleteGlobBothLayers deletes every key matching a glob from memory then
+// embedded. The pre-delete memory snapshot of the matching keys is held so
+// that, if embedded rejects the delete, every removed item is restored to
+// memory — keeping the layers in sync exactly as deleteBothLayers does for
+// a single key.
+func (l *Layered) deleteGlobBothLayers(path string) error {
+	if l.memory != nil {
+		snapshot, listErr := l.memory.GetList(path)
+		if listErr != nil {
+			return listErr
+		}
+		if err := l.memory.Del(path); err != nil {
+			return err
+		}
+		if l.embedded != nil {
+			if err := l.embedded.Del(path); err != nil {
+				for i := range snapshot {
+					item := snapshot[i]
+					_ = l.memory.Set(item.Path, &item)
+				}
+				return err
+			}
+		}
+		return nil
+	}
+	if l.embedded != nil {
+		return l.embedded.Del(path)
+	}
+	return nil
 }
 
 // Push stores data under a new key generated from a glob pattern path
@@ -504,15 +586,8 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 	lock.Lock()
 	defer lock.Unlock()
 
-	if l.memory != nil {
-		if err := l.memory.Set(newPath, obj); err != nil {
-			return index, err
-		}
-	}
-	if l.embedded != nil {
-		if err := l.embedded.Set(newPath, obj); err != nil {
-			return index, err
-		}
+	if err := l.writeBothLayers(newPath, obj); err != nil {
+		return index, err
 	}
 
 	if !key.Contains(l.noBroadcastKeys, newPath) && l.Active() {
@@ -544,15 +619,8 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 	lock.Lock()
 	defer lock.Unlock()
 
-	if l.memory != nil {
-		if err := l.memory.Set(path, obj); err != nil {
-			return index, err
-		}
-	}
-	if l.embedded != nil {
-		if err := l.embedded.Set(path, obj); err != nil {
-			return index, err
-		}
+	if err := l.writeBothLayers(path, obj); err != nil {
+		return index, err
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -581,15 +649,8 @@ func (l *Layered) Del(path string) error {
 	}
 	obj := &o
 
-	if l.memory != nil {
-		if err := l.memory.Del(path); err != nil {
-			return err
-		}
-	}
-	if l.embedded != nil {
-		if err := l.embedded.Del(path); err != nil {
-			return err
-		}
+	if err := l.deleteBothLayers(path, obj); err != nil {
+		return err
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -606,15 +667,8 @@ func (l *Layered) Del(path string) error {
 // Per-key locking is not applied because the glob doesn't resolve to a single
 // key; the underlying layers handle their own internal locking for glob deletes.
 func (l *Layered) delGlob(path string) error {
-	if l.memory != nil {
-		if err := l.memory.Del(path); err != nil {
-			return err
-		}
-	}
-	if l.embedded != nil {
-		if err := l.embedded.Del(path); err != nil {
-			return err
-		}
+	if err := l.deleteGlobBothLayers(path); err != nil {
+		return err
 	}
 
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
@@ -630,39 +684,18 @@ func (l *Layered) delGlob(path string) error {
 // DelSilent deletes a key from all layers without broadcasting
 func (l *Layered) DelSilent(path string) error {
 	if key.HasGlob(path) {
-		if l.memory != nil {
-			if err := l.memory.Del(path); err != nil {
-				return err
-			}
-		}
-		if l.embedded != nil {
-			if err := l.embedded.Del(path); err != nil {
-				return err
-			}
-		}
-		return nil
+		return l.deleteGlobBothLayers(path)
 	}
 
 	lock := l._getLock(path)
 	lock.Lock()
 	defer lock.Unlock()
 
-	if _, err := l.Get(path); err != nil {
+	o, err := l.Get(path)
+	if err != nil {
 		return ErrNotFound
 	}
-
-	if l.memory != nil {
-		if err := l.memory.Del(path); err != nil {
-			return err
-		}
-	}
-	if l.embedded != nil {
-		if err := l.embedded.Del(path); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return l.deleteBothLayers(path, &o)
 }
 
 // Clear removes all data from all layers
