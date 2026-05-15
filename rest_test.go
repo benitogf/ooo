@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/benitogf/go-json"
@@ -78,6 +79,82 @@ func TestRestPostKey(t *testing.T) {
 	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
 	require.Equal(t, http.StatusMovedPermanently, resp.StatusCode)
+}
+
+// TestRestPostBodyTooLarge asserts a POST whose body exceeds
+// Server.MaxRequestBodyBytes is rejected with 413 Request Entity Too Large
+// instead of being buffered into memory. Pre-fix the handler called
+// messages.DecodeReader(r.Body) directly with no cap.
+func TestRestPostBodyTooLarge(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.MaxRequestBodyBytes = 64
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	body := []byte(`{"data":"` + strings.Repeat("x", 256) + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/k", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Result().StatusCode)
+}
+
+// TestRestPatchBodyTooLarge is the PATCH variant.
+func TestRestPatchBodyTooLarge(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.MaxRequestBodyBytes = 64
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	body := []byte(`{"data":"` + strings.Repeat("x", 256) + `"}`)
+	req := httptest.NewRequest(http.MethodPatch, "/k", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusRequestEntityTooLarge, w.Result().StatusCode)
+}
+
+// TestRestPostBodyUnderLimit asserts a POST under the cap still succeeds.
+func TestRestPostBodyUnderLimit(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.MaxRequestBodyBytes = 4096
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	body := []byte(`{"data":"small"}`)
+	req := httptest.NewRequest(http.MethodPost, "/k", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
+}
+
+// TestRestPostBodyDisabledLimit asserts a negative MaxRequestBodyBytes opts
+// out of the cap entirely (escape hatch for trusted internal callers).
+func TestRestPostBodyDisabledLimit(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.MaxRequestBodyBytes = -1
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	body := []byte(`{"data":"` + strings.Repeat("x", 1024) + `"}`)
+	req := httptest.NewRequest(http.MethodPost, "/k", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Result().StatusCode)
 }
 
 func TestRestDel(t *testing.T) {

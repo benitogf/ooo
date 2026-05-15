@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -36,8 +37,14 @@ func (server *Server) publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	event, err := messages.DecodeReader(r.Body)
+	body, probe := server.limitBody(w, r)
+	event, err := messages.DecodeReader(body)
 	if err != nil {
+		if isRequestBodyTooLargeErr(err) || (probe != nil && isRequestBodyTooLargeErr(probe.last)) {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			fmt.Fprintf(w, "%s", http.StatusText(http.StatusRequestEntityTooLarge))
+			return
+		}
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
@@ -89,8 +96,14 @@ func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	patchData, err := messages.DecodeReader(r.Body)
+	body, probe := server.limitBody(w, r)
+	patchData, err := messages.DecodeReader(body)
 	if err != nil {
+		if isRequestBodyTooLargeErr(err) || (probe != nil && isRequestBodyTooLargeErr(probe.last)) {
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			fmt.Fprintf(w, "%s", http.StatusText(http.StatusRequestEntityTooLarge))
+			return
+		}
 		w.WriteHeader(http.StatusBadRequest)
 		fmt.Fprintf(w, "%s", err)
 		return
@@ -222,4 +235,60 @@ func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusNoContent)
 	w.Write([]byte(`"unpublish "+_key`))
+}
+
+// limitBody wraps r.Body with http.MaxBytesReader so a runaway POST/PATCH
+// cannot buffer arbitrary bytes into memory. A non-positive
+// MaxRequestBodyBytes disables the cap and returns r.Body unchanged so
+// operators can opt out (test harnesses, trusted internal callers).
+//
+// IMPORTANT: must be called before any write to w. http.MaxBytesReader
+// signals the response writer side-channel to suppress connection keep-alive
+// once the cap trips, and that side-channel is a no-op after the header has
+// been committed. Today both callers (publish, patch) short-circuit on auth
+// and key checks without writing to w first, so the invariant holds — refactor
+// that path with care.
+//
+// The returned readErrorProbe (non-nil only when the cap is active) records
+// the most recent error returned by Read. benitogf/go-json swallows
+// underlying reader errors as a plain io.EOF when it sees the truncated
+// payload, so callers must consult the probe to distinguish "client sent too
+// many bytes" (413) from "client sent invalid JSON" (400).
+func (server *Server) limitBody(w http.ResponseWriter, r *http.Request) (io.Reader, *readErrorProbe) {
+	if server.MaxRequestBodyBytes <= 0 {
+		return r.Body, nil
+	}
+	probe := &readErrorProbe{inner: http.MaxBytesReader(w, r.Body, server.MaxRequestBodyBytes)}
+	return probe, probe
+}
+
+// readErrorProbe wraps an io.Reader and remembers the most recent non-nil
+// error returned by Read, so callers can recover the underlying cause even
+// when an upstream decoder turns it into a less-specific error like EOF.
+type readErrorProbe struct {
+	inner io.Reader
+	last  error
+}
+
+func (p *readErrorProbe) Read(b []byte) (int, error) {
+	n, err := p.inner.Read(b)
+	if err != nil {
+		p.last = err
+	}
+	return n, err
+}
+
+// isRequestBodyTooLargeErr reports whether err originated in a
+// MaxBytesReader exhausting its quota. It matches both modern
+// *http.MaxBytesError and the legacy "http: request body too large"
+// sentinel that older stdlib paths still return.
+func isRequestBodyTooLargeErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "http: request body too large")
 }
