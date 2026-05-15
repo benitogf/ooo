@@ -717,8 +717,16 @@ func (l *Layered) DelSilent(path string) error {
 	return l.deleteBothLayers(path, &o)
 }
 
-// Clear removes all data from all layers
+// Clear removes all data from all layers.
+//
+// Takes the exclusive writeMutex so a concurrent Set cannot interleave
+// between the memory and embedded halves. Without that barrier, a Set
+// landing in the gap leaves the new value committed to memory while
+// embedded.Clear wipes embedded, diverging the two layers — same race
+// class as the glob-delete bug fixed in PR #79.
 func (l *Layered) Clear() {
+	l.writeMutex.Lock()
+	defer l.writeMutex.Unlock()
 	if l.memory != nil {
 		l.memory.Clear()
 	}
