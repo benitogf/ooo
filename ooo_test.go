@@ -15,6 +15,7 @@ import (
 
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/storage"
+	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 )
 
@@ -76,6 +77,74 @@ func TestConcurrentCloseDoesNotPanic(t *testing.T) {
 		require.Zero(t, panics.Load(), "concurrent Server.Close must not panic")
 		require.False(t, server.Active(), "server must be inactive after Close")
 	}
+}
+
+// TestRouteOracleSkipAllowsConcurrentMatches asserts the data
+// wildcard's oracle-check is parallelizable across concurrent
+// requests. Pre-fix routeOracleMu was a plain sync.Mutex held
+// around every call to routeOracle.Match, so a single oracle hit
+// queue-blocked every other in-flight request through the same
+// matcher. The fix switches to sync.RWMutex with RLock on the hot
+// path; registrations still hold the write lock.
+//
+// The test injects a custom MatcherFunc on the oracle that records
+// the maximum number of concurrent entries to the matcher. Pre-fix
+// the maximum is 1 (full serialization). Post-fix it climbs above 1
+// when multiple goroutines call routeOracleSkip simultaneously.
+func TestRouteOracleSkipAllowsConcurrentMatches(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	server := &Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	var (
+		concurrent atomic.Int64
+		maxSeen    atomic.Int64
+	)
+	probe := mux.MatcherFunc(func(_ *http.Request, _ *mux.RouteMatch) bool {
+		cur := concurrent.Add(1)
+		defer concurrent.Add(-1)
+		for {
+			prev := maxSeen.Load()
+			if cur <= prev || maxSeen.CompareAndSwap(prev, cur) {
+				break
+			}
+		}
+		// Brief pause widens the contention window so concurrent
+		// callers can overlap inside the matcher without flaking on
+		// fast schedulers.
+		time.Sleep(2 * time.Millisecond)
+		return false // not a match — let the data wildcard take over
+	})
+	server.routeOracleMu.Lock()
+	if server.routeOracle == nil {
+		server.routeOracle = mux.NewRouter()
+	}
+	server.routeOracle.HandleFunc("/{key}", func(http.ResponseWriter, *http.Request) {}).MatcherFunc(probe)
+	server.routeOracleMu.Unlock()
+
+	const callers = 16
+	barrier := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			req := httptest.NewRequest(http.MethodGet, "/anykey", nil)
+			var m mux.RouteMatch
+			<-barrier
+			_ = server.routeOracleSkip(req, &m)
+		}()
+	}
+	close(barrier)
+	wg.Wait()
+
+	require.Greater(t, maxSeen.Load(), int64(1),
+		"routeOracle matching must allow concurrent readers; max concurrent observed = %d", maxSeen.Load())
 }
 
 func TestDoubleStart(t *testing.T) {
