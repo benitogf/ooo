@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -478,7 +477,7 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 		}
 
 		// Handle HTTP requests
-		handleHTTPProxy(w, r, address, remotePath, cfg.Subscribe)
+		handleHTTPProxy(server, w, r, address, remotePath, cfg.Subscribe)
 	}
 
 	// Convert glob pattern to mux pattern
@@ -549,7 +548,7 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 			return
 		}
 
-		handleHTTPProxy(w, r, address, remotePath, cfg.Subscribe)
+		handleHTTPProxy(server, w, r, address, remotePath, cfg.Subscribe)
 	}
 
 	// Handler for specific items
@@ -567,7 +566,7 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 			return
 		}
 
-		handleHTTPProxy(w, r, address, remotePath, cfg.Subscribe)
+		handleHTTPProxy(server, w, r, address, remotePath, cfg.Subscribe)
 	}
 
 	// Convert glob pattern to mux pattern
@@ -644,7 +643,67 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, pm *proxyManag
 	}
 }
 
-func handleHTTPProxy(w http.ResponseWriter, r *http.Request, address, remotePath string, subCfg *client.SubscribeConfig) {
+// proxyWrite streams a POST/PATCH body to upstream under the server's
+// MaxRequestBodyBytes cap. The body is passed directly to the upstream
+// request instead of buffered into memory, so a runaway client cannot
+// force the proxy to allocate arbitrary bytes. If the cap trips during
+// upstream transport, the client gets 413 instead of a generic 502.
+//
+// Wire framing is preserved from the client: req.ContentLength is forwarded
+// so upstreams that reject chunked POST/PATCH (older non-Go servers, some
+// content-inspection middleware) continue to receive Content-Length when
+// the client sent one. MaxBytesReader is stateful and cannot be replayed,
+// so req.GetBody is set to a sentinel error rather than left nil — that
+// turns a 307/308 redirect into an unambiguous failure instead of the
+// stdlib's "http: cannot redirect with body" message.
+func proxyWrite(server *ooo.Server, w http.ResponseWriter, r *http.Request, method, targetURL string, header http.Header, httpClient *http.Client) {
+	body, probe := server.LimitBody(w, r)
+
+	req, err := http.NewRequestWithContext(r.Context(), method, targetURL, body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	req.ContentLength = r.ContentLength
+	req.GetBody = func() (io.ReadCloser, error) {
+		return nil, errors.New("proxy: request body not replayable after streaming")
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range header {
+		req.Header[k] = v
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		// MaxBytesReader trips during upstream transport. Distinguish
+		// "client sent too many bytes" (413) from "client hung up mid
+		// body" (400) and from generic transport failures (502).
+		// The probe holds the underlying Read error when transport
+		// surfaces a less-specific one.
+		if ooo.IsRequestBodyTooLargeErr(err) || (probe != nil && ooo.IsRequestBodyTooLargeErr(probe.Last())) {
+			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+			return
+		}
+		// probe.Last() captures io.EOF on a clean read of the full body,
+		// so only treat non-EOF read errors as a client-side fault.
+		// ErrUnexpectedEOF and friends fall into this branch.
+		if probe != nil && probe.Last() != nil && !errors.Is(probe.Last(), io.EOF) {
+			http.Error(w, probe.Last().Error(), http.StatusBadRequest)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	for k, v := range resp.Header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
+func handleHTTPProxy(server *ooo.Server, w http.ResponseWriter, r *http.Request, address, remotePath string, subCfg *client.SubscribeConfig) {
 	scheme := "http"
 	if subCfg != nil && subCfg.Server.Protocol == "wss" {
 		scheme = "https"
@@ -685,34 +744,7 @@ func handleHTTPProxy(w http.ResponseWriter, r *http.Request, address, remotePath
 		io.Copy(w, resp.Body)
 
 	case http.MethodPost:
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, targetURL, bytes.NewReader(body))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		for k, v := range header {
-			req.Header[k] = v
-		}
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-
-		for k, v := range resp.Header {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		proxyWrite(server, w, r, http.MethodPost, targetURL, header, httpClient)
 
 	case http.MethodDelete:
 		req, err := http.NewRequestWithContext(r.Context(), http.MethodDelete, targetURL, nil)
@@ -738,34 +770,7 @@ func handleHTTPProxy(w http.ResponseWriter, r *http.Request, address, remotePath
 		io.Copy(w, resp.Body)
 
 	case http.MethodPatch:
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodPatch, targetURL, bytes.NewReader(body))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		for k, v := range header {
-			req.Header[k] = v
-		}
-
-		resp, err := httpClient.Do(req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
-			return
-		}
-		defer resp.Body.Close()
-
-		for k, v := range resp.Header {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(resp.StatusCode)
-		io.Copy(w, resp.Body)
+		proxyWrite(server, w, r, http.MethodPatch, targetURL, header, httpClient)
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -811,7 +816,7 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 			return
 		}
 
-		handleHTTPProxy(w, r, address, remotePath, cfg.Subscribe)
+		handleHTTPProxy(server, w, r, address, remotePath, cfg.Subscribe)
 	}
 
 	server.Router.HandleFunc("/"+localPath, handler)

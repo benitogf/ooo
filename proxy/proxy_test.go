@@ -3,6 +3,7 @@ package proxy_test
 import (
 	"bytes"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"runtime"
@@ -929,6 +930,190 @@ func TestProxyWebSocketWithBearerTokenAuthRequired(t *testing.T) {
 	require.NoError(t, err, "should receive message from authenticated remote")
 	require.NotEmpty(t, message)
 	require.Contains(t, string(message), "protected", "should receive protected data after successful auth")
+}
+
+// TestProxyPostBodyTooLarge asserts a proxied POST whose body exceeds
+// the proxy server's MaxRequestBodyBytes is rejected with 413 instead of
+// being buffered into memory. Pre-fix handleHTTPProxy did io.ReadAll on
+// r.Body with no cap, so a runaway client could force the proxy to
+// allocate arbitrary bytes per request.
+func TestProxyPostBodyTooLarge(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.MaxRequestBodyBytes = 64
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	body := []byte(`{"data":"` + strings.Repeat("x", 256) + `"}`)
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
+// TestProxyPatchBodyTooLarge is the PATCH variant of body-cap enforcement.
+func TestProxyPatchBodyTooLarge(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	// Seed remote so the upstream path is reachable; the 413 should fire
+	// before the upstream ever sees the body.
+	_, err := remote.Storage.Set("settings", []byte(`{"name":"seed","value":1}`))
+	require.NoError(t, err)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.MaxRequestBodyBytes = 64
+
+	err = proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	body := []byte(`{"data":"` + strings.Repeat("x", 256) + `"}`)
+	req, err := http.NewRequest(http.MethodPatch, "http://"+proxyServer.Address+"/settings/device1", bytes.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusRequestEntityTooLarge, resp.StatusCode)
+}
+
+// TestProxyPostBodyUnderLimit asserts a POST whose body fits under the
+// proxy cap is forwarded successfully to the upstream.
+func TestProxyPostBodyUnderLimit(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.MaxRequestBodyBytes = 4096
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	body := []byte(`{"name":"small","value":1}`)
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// TestProxyForwardsContentLength asserts the streamed-body proxy path
+// preserves the client's Content-Length on the upstream request instead
+// of switching to chunked Transfer-Encoding. Upstreams that reject
+// chunked POST/PATCH (older non-Go servers, certain content-inspection
+// middleware) rely on Content-Length being set; pre-fix the buffered
+// path produced this for free via bytes.NewReader.
+func TestProxyForwardsContentLength(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var (
+		mu                sync.Mutex
+		seenContentLength int64
+		seenTransferEnc   []string
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seenContentLength = r.ContentLength
+		seenTransferEnc = append([]string(nil), r.TransferEncoding...)
+		mu.Unlock()
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.MaxRequestBodyBytes = 4096
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	body := []byte(`{"name":"small","value":1}`)
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, int64(len(body)), seenContentLength, "upstream should see Content-Length matching client body")
+	require.Empty(t, seenTransferEnc, "upstream should not see Transfer-Encoding: chunked")
+}
+
+// TestProxyPostBodyDisabledLimit asserts MaxRequestBodyBytes <= 0 opts the
+// proxy out of body capping entirely (escape hatch for trusted callers).
+func TestProxyPostBodyDisabledLimit(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.MaxRequestBodyBytes = -1
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	body := []byte(`{"data":"` + strings.Repeat("x", 1024) + `"}`)
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
 }
 
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
