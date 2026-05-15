@@ -15,6 +15,42 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestAuditGatesEndpoint asserts that a custom Endpoint registered
+// via Server.Endpoint honors Server.Audit. Pre-fix the endpoint
+// handler was registered directly on Router with no Audit wrapping,
+// so a deny-everything Audit had no effect — custom endpoint paths
+// silently bypassed auth/rate-limiting/observability gates that
+// every REST handler already respects.
+func TestAuditGatesEndpoint(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.Audit = func(r *http.Request) bool { return false }
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	var handlerRan bool
+	server.Endpoint(ooo.EndpointConfig{
+		Path: "/custom",
+		Methods: ooo.Methods{
+			http.MethodGet: {Response: nil},
+		},
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			handlerRan = true
+			w.WriteHeader(http.StatusOK)
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/custom", nil)
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusUnauthorized, w.Result().StatusCode,
+		"Audit returning false must reject custom Endpoint requests")
+	require.False(t, handlerRan, "Endpoint handler must not run when Audit denies")
+}
+
 func TestAudit(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
