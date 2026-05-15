@@ -1003,6 +1003,125 @@ func TestLayeredDelSilentGlobRollsBackOnEmbeddedFailure(t *testing.T) {
 	require.Len(t, items, 2, "rejected DelSilent glob must leave both keys visible in memory")
 }
 
+// syncEmbedded wraps a MemoryLayer and lets a test pause embedded.Del between
+// "Del started" and "Del executed" so a concurrent Set can race with the
+// in-progress glob delete deterministically.
+type syncEmbedded struct {
+	inner      *MemoryLayer
+	delStarted chan struct{}
+	delResume  chan struct{}
+}
+
+func (s *syncEmbedded) Active() bool                      { return s.inner.Active() }
+func (s *syncEmbedded) Start(o LayerOptions) error        { return s.inner.Start(o) }
+func (s *syncEmbedded) Close()                            { s.inner.Close() }
+func (s *syncEmbedded) Get(k string) (meta.Object, error) { return s.inner.Get(k) }
+func (s *syncEmbedded) GetList(p string) ([]meta.Object, error) {
+	return s.inner.GetList(p)
+}
+func (s *syncEmbedded) Set(k string, o *meta.Object) error { return s.inner.Set(k, o) }
+func (s *syncEmbedded) Del(k string) error {
+	if s.delStarted != nil {
+		select {
+		case s.delStarted <- struct{}{}:
+		default:
+		}
+	}
+	if s.delResume != nil {
+		<-s.delResume
+	}
+	return s.inner.Del(k)
+}
+func (s *syncEmbedded) Keys() ([]string, error) { return s.inner.Keys() }
+func (s *syncEmbedded) Clear()                  { s.inner.Clear() }
+func (s *syncEmbedded) Load() (map[string]*meta.Object, error) {
+	keys, err := s.inner.Keys()
+	if err != nil {
+		return nil, err
+	}
+	data := make(map[string]*meta.Object, len(keys))
+	for _, k := range keys {
+		obj, err := s.inner.Get(k)
+		if err != nil {
+			continue
+		}
+		data[k] = &obj
+	}
+	return data, nil
+}
+
+// TestLayeredDelGlobSerializesWithConcurrentSet reproduces the race the audit
+// flagged: a Set that commits between the memory and embedded halves of a
+// glob delete used to leave the layers diverged. The fix serializes
+// individual writes against glob deletes via a write-side RWMutex — Del(glob)
+// takes the exclusive lock, Set takes the shared one — so the Set can no
+// longer interleave with the in-progress delete and both layers end up
+// agreeing on whether the key exists.
+func TestLayeredDelGlobSerializesWithConcurrentSet(t *testing.T) {
+	t.Parallel()
+
+	delStarted := make(chan struct{}, 1)
+	delResume := make(chan struct{})
+	embedded := &syncEmbedded{
+		inner:      NewMemoryLayer(),
+		delStarted: delStarted,
+		delResume:  delResume,
+	}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{NoBroadcastKeys: []string{"items/a", "items/*"}}))
+	defer s.Close()
+
+	// Drain watcher events so Set/Del don't block on a 5s send timeout.
+	sharded := s.WatchSharded()
+	for i := range sharded.Count() {
+		shard := sharded.Shard(i)
+		go func() {
+			for range shard {
+			}
+		}()
+	}
+
+	// Start a glob delete. It enters embedded.Del and blocks.
+	delDone := make(chan error, 1)
+	go func() {
+		delDone <- s.Del("items/*")
+	}()
+	<-delStarted
+
+	// Attempt a Set while the delete is mid-flight. With the fix, Set must
+	// not commit until the glob delete releases its exclusive lock.
+	setStarted := make(chan struct{})
+	setDone := make(chan error, 1)
+	go func() {
+		close(setStarted)
+		_, err := s.Set("items/a", json.RawMessage(`{"v":1}`))
+		setDone <- err
+	}()
+	<-setStarted
+
+	// Set must be blocked: it should not finish while Del is still paused.
+	select {
+	case err := <-setDone:
+		t.Fatalf("Set must wait for Del(glob): unexpected early completion err=%v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(delResume)
+	require.NoError(t, <-delDone)
+	require.NoError(t, <-setDone)
+
+	// After both finish: layers must agree.
+	memItems, err := s.GetList("items/*")
+	require.NoError(t, err)
+	embKeys, err := embedded.inner.Keys()
+	require.NoError(t, err)
+
+	memHas := len(memItems) > 0
+	embHas := len(embKeys) > 0
+	require.Equal(t, memHas, embHas,
+		"layers diverged: memory has key=%v, embedded has key=%v", memHas, embHas)
+}
+
 // TestLayeredPushReturnsEmbeddedError is the Push variant.
 func TestLayeredPushReturnsEmbeddedError(t *testing.T) {
 	t.Parallel()
