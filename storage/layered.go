@@ -34,6 +34,7 @@ type Layered struct {
 
 	mutex           sync.RWMutex
 	memMutex        sync.Map
+	writeMutex      sync.RWMutex // serializes glob deletes against individual writes
 	noBroadcastKeys []string
 	watcher         *ShardedChan
 	active          bool
@@ -223,6 +224,8 @@ func (l *Layered) SetAndUnlock(path string, data json.RawMessage) (string, error
 	if len(data) == 0 {
 		return path, ErrInvalidStorageData
 	}
+	l.writeMutex.RLock()
+	defer l.writeMutex.RUnlock()
 	return l.setLocked(path, data)
 }
 
@@ -426,6 +429,8 @@ func (l *Layered) Set(path string, data json.RawMessage) (string, error) {
 		return path, ErrGlobNotAllowed
 	}
 
+	l.writeMutex.RLock()
+	defer l.writeMutex.RUnlock()
 	lock := l._getLock(path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -582,6 +587,8 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 		Data:    data,
 	}
 
+	l.writeMutex.RLock()
+	defer l.writeMutex.RUnlock()
 	lock := l._getLock(newPath)
 	lock.Lock()
 	defer lock.Unlock()
@@ -615,6 +622,8 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 		Data:    data,
 	}
 
+	l.writeMutex.RLock()
+	defer l.writeMutex.RUnlock()
 	lock := l._getLock(path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -639,6 +648,8 @@ func (l *Layered) Del(path string) error {
 		return l.delGlob(path)
 	}
 
+	l.writeMutex.RLock()
+	defer l.writeMutex.RUnlock()
 	lock := l._getLock(path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -664,9 +675,13 @@ func (l *Layered) Del(path string) error {
 }
 
 // delGlob deletes all keys matching a glob pattern across all layers.
-// Per-key locking is not applied because the glob doesn't resolve to a single
-// key; the underlying layers handle their own internal locking for glob deletes.
+// Takes writeMutex.Lock exclusively so no Set/Push/SetWithMeta/Del can
+// commit between the memory and embedded halves of the delete — a per-key
+// mutex cannot protect this, because the glob may match keys that don't
+// exist at snapshot time and could be created concurrently.
 func (l *Layered) delGlob(path string) error {
+	l.writeMutex.Lock()
+	defer l.writeMutex.Unlock()
 	if err := l.deleteGlobBothLayers(path); err != nil {
 		return err
 	}
@@ -684,9 +699,13 @@ func (l *Layered) delGlob(path string) error {
 // DelSilent deletes a key from all layers without broadcasting
 func (l *Layered) DelSilent(path string) error {
 	if key.HasGlob(path) {
+		l.writeMutex.Lock()
+		defer l.writeMutex.Unlock()
 		return l.deleteGlobBothLayers(path)
 	}
 
+	l.writeMutex.RLock()
+	defer l.writeMutex.RUnlock()
 	lock := l._getLock(path)
 	lock.Lock()
 	defer lock.Unlock()
