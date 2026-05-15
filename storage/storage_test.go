@@ -1135,6 +1135,80 @@ func TestLayeredDelGlobSerializesWithConcurrentSet(t *testing.T) {
 		"layers diverged: memory has key=%v, embedded has key=%v", memHas, embHas)
 }
 
+// TestLayeredPushDoesNotLeakKeyLocks asserts the per-key mutex registry
+// does not grow unboundedly across many Pushes. Pre-fix _getLock added
+// one *sync.Mutex to memMutex per distinct path, and Push generates a
+// fresh path on every call (key.Build), so a queue-shaped workload
+// leaked one map entry per write until process restart. The fix
+// reference-counts entries and removes them when the last waiter
+// releases.
+func TestLayeredPushDoesNotLeakKeyLocks(t *testing.T) {
+	t.Parallel()
+
+	embedded := &syncEmbedded{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{NoBroadcastKeys: []string{"q/*"}}))
+	defer s.Close()
+
+	// Drain watcher events so Push doesn't stall on the send timeout.
+	sharded := s.WatchSharded()
+	for i := range sharded.Count() {
+		shard := sharded.Shard(i)
+		go func() {
+			for range shard {
+			}
+		}()
+	}
+
+	const pushes = 500
+	for range pushes {
+		_, err := s.Push("q/*", json.RawMessage(`{"v":1}`))
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, 0, s.KeyLockCount(),
+		"per-key lock registry must reclaim every entry; got %d after %d sequential pushes",
+		s.KeyLockCount(), pushes)
+}
+
+// TestLayeredKeyLockReclaimedUnderContention asserts the refcounted
+// release returns the registry to empty after many concurrent writers
+// hit the same key. Pre-fix the entry would have stayed forever; the
+// fix must drop it once the last waiter releases, not "after the first
+// release" (which would race with a still-pending waiter).
+func TestLayeredKeyLockReclaimedUnderContention(t *testing.T) {
+	t.Parallel()
+
+	embedded := &syncEmbedded{inner: NewMemoryLayer()}
+	s := New(LayeredConfig{Memory: NewMemoryLayer(), Embedded: embedded})
+	require.NoError(t, s.Start(Options{NoBroadcastKeys: []string{"k/contended"}}))
+	defer s.Close()
+
+	sharded := s.WatchSharded()
+	for i := range sharded.Count() {
+		shard := sharded.Shard(i)
+		go func() {
+			for range shard {
+			}
+		}()
+	}
+
+	const writers = 64
+	var wg sync.WaitGroup
+	wg.Add(writers)
+	for range writers {
+		go func() {
+			defer wg.Done()
+			_, err := s.Set("k/contended", json.RawMessage(`{"v":1}`))
+			require.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, 0, s.KeyLockCount(),
+		"all key-lock entries must be reclaimed once writers are done")
+}
+
 // TestLayeredClearSerializesWithConcurrentSet asserts Layered.Clear is
 // serialized against concurrent Sets via the same writeMutex that
 // Del(glob) takes. Pre-fix Clear called memory.Clear() then
