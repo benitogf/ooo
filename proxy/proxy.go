@@ -657,6 +657,15 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, pm *proxyManag
 // turns a 307/308 redirect into an unambiguous failure instead of the
 // stdlib's "http: cannot redirect with body" message.
 func proxyWrite(server *ooo.Server, w http.ResponseWriter, r *http.Request, method, targetURL string, header http.Header, httpClient *http.Client) {
+	// Honest clients that declare an oversize Content-Length can be
+	// rejected before we open the upstream TCP connection. A dishonest
+	// client that lies about its length still trips the cap mid-stream
+	// via the LimitBody wrap below, so this guard is an optimization,
+	// not the correctness boundary.
+	if server.MaxRequestBodyBytes > 0 && r.ContentLength > server.MaxRequestBodyBytes {
+		http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+		return
+	}
 	body, probe := server.LimitBody(w, r)
 
 	req, err := http.NewRequestWithContext(r.Context(), method, targetURL, body)
