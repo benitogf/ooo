@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -83,6 +84,59 @@ func TestDoubleStart(t *testing.T) {
 	server.Start("localhost:0")
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
+}
+
+// TestConcurrentStartReturnsExactlyOnce asserts StartWithError is safe to
+// call from many goroutines simultaneously: exactly one succeeds and
+// the rest return ErrServerAlreadyActive. Pre-fix the guard was a
+// non-atomic Load + Store of `active`, so multiple callers all passed
+// the check, all called setupRoutes / wg.Add / waitListen, and
+// corrupted server state (multiple listeners on different :0 ports,
+// startErr channel pointer overwritten between allocation and read,
+// double-spawned waitListen goroutines). The fix is the same CAS
+// pattern used for Server.Close in PR #89.
+func TestConcurrentStartReturnsExactlyOnce(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	const callers = 32
+
+	server := &Server{}
+	server.Silence = true
+	defer server.Close(os.Interrupt)
+
+	barrier := make(chan struct{})
+	var (
+		wg        sync.WaitGroup
+		successes atomic.Int64
+		alreadyOn atomic.Int64
+		other     atomic.Int64
+	)
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			<-barrier
+			err := server.StartWithError("localhost:0")
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, ErrServerAlreadyActive):
+				alreadyOn.Add(1)
+			default:
+				other.Add(1)
+			}
+		}()
+	}
+	close(barrier)
+	wg.Wait()
+
+	require.Equal(t, int64(1), successes.Load(),
+		"exactly one StartWithError must succeed; got %d successes", successes.Load())
+	require.Equal(t, int64(callers-1), alreadyOn.Load(),
+		"all other callers must observe ErrServerAlreadyActive; got %d", alreadyOn.Load())
+	require.Zero(t, other.Load(), "no other error class expected")
+	require.True(t, server.Active(), "server must be active after one Start wins")
 }
 
 func TestRestart(t *testing.T) {
