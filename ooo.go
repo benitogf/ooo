@@ -763,10 +763,15 @@ func (server *Server) Start(address string) {
 	}
 }
 
-// Close : shutdown the http server and database connection
+// Close : shutdown the http server and database connection.
+//
+// Safe to call from multiple goroutines: an atomic CompareAndSwap on
+// `closing` lets only the first caller through; concurrent callers
+// observe the in-progress shutdown and return immediately. The CAS is
+// load-bearing — a plain Load + Store guard would let two callers both
+// pass and both `close(server.clockStop)`, panicking the second.
 func (server *Server) Close(sig os.Signal) {
-	if atomic.LoadInt64(&server.closing) != 1 {
-		atomic.StoreInt64(&server.closing, 1)
+	if atomic.CompareAndSwapInt64(&server.closing, 0, 1) {
 		atomic.StoreInt64(&server.active, 0)
 		// Call pre-close cleanups first, before any stream/storage cleanup
 		server.preCloseCleanupsMu.Lock()

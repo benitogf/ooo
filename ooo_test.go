@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -22,6 +23,58 @@ func TestDoubleShutdown(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 	server.Close(os.Interrupt)
+}
+
+// TestConcurrentCloseDoesNotPanic asserts Server.Close is safe to call
+// from multiple goroutines simultaneously. Pre-fix the guard was a
+// non-atomic Load + Store of `closing`, so two concurrent callers both
+// observed the field == 0, both transitioned it to 1, and both
+// proceeded to `close(server.clockStop)` — the second close-of-closed
+// channel call panics. The fix is an atomic CompareAndSwap that lets
+// only the first caller in.
+//
+// This is a race-detector regression test. The Load+Store window
+// between the buggy guard and the close-of-channel is single-digit
+// nanoseconds, narrow enough that scheduling without -race
+// instrumentation rarely puts two goroutines in it on a fast CPU. The
+// fan-out + iteration loop maximizes the odds, but the reliable signal
+// is `go test -race`, which CI runs.
+func TestConcurrentCloseDoesNotPanic(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	const (
+		iterations = 100
+		callers    = 32
+	)
+	for range iterations {
+		server := &Server{}
+		server.Silence = true
+		server.Start("localhost:0")
+
+		barrier := make(chan struct{})
+		var (
+			wg     sync.WaitGroup
+			panics atomic.Int64
+		)
+		wg.Add(callers)
+		for range callers {
+			go func() {
+				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						panics.Add(1)
+					}
+				}()
+				<-barrier
+				server.Close(os.Interrupt)
+			}()
+		}
+		close(barrier)
+		wg.Wait()
+		require.Zero(t, panics.Load(), "concurrent Server.Close must not panic")
+		require.False(t, server.Active(), "server must be inactive after Close")
+	}
 }
 
 func TestDoubleStart(t *testing.T) {
