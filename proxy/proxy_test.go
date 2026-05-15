@@ -1490,6 +1490,108 @@ func TestProxyCapabilitiesEnforcedViaNodeFilter(t *testing.T) {
 	require.False(t, upstreamHit, "upstream must not see denied requests via NodeFilter")
 }
 
+// TestProxyCapabilitiesEnforcedViaRouteWithVars pins that Capabilities
+// declared on a Config passed to RouteWithVars is enforced — this
+// registrar uses mux path variables and a separate handler closure
+// from Route/RouteList, so it gets its own regression test.
+func TestProxyCapabilitiesEnforcedViaRouteWithVars(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var (
+		mu          sync.Mutex
+		upstreamHit bool
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		upstreamHit = true
+		mu.Unlock()
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+
+	// RouteWithVars assumes Router is already initialized. Use Start
+	// first to populate it (Start no-ops the listen on :0 closure
+	// timing, so we register routes after Start in this path).
+	proxyServer.Start("localhost:0")
+	err := proxy.RouteWithVars(proxyServer, "settings/{deviceID}", proxy.Config{
+		Capabilities: &proxy.Capabilities{Read: true, Write: false, Delete: true},
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	defer proxyServer.Close(os.Interrupt)
+
+	resp, err := http.Post("http://"+proxyServer.Address+"/settings/device1", "application/json", bytes.NewReader([]byte(`{"x":1}`)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	mu.Lock()
+	defer mu.Unlock()
+	require.False(t, upstreamHit, "upstream must not see denied requests via RouteWithVars")
+}
+
+// TestProxyCapabilitiesEnforcedViaNodeListFilter pins that Capabilities
+// declared on a NodeListFilterConfig is enforced by the underlying
+// RouteList. Mirrors TestProxyCapabilitiesEnforcedViaNodeFilter for
+// the list-shaped wrapper.
+func TestProxyCapabilitiesEnforcedViaNodeListFilter(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var (
+		mu          sync.Mutex
+		upstreamHit bool
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		upstreamHit = true
+		mu.Unlock()
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	host, portStr, err := net.SplitHostPort(upstreamHost)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(portStr)
+	require.NoError(t, err)
+
+	directory := &ooo.Server{}
+	directory.Silence = true
+	directory.Start("localhost:0")
+	defer directory.Close(os.Interrupt)
+
+	nodeData, _ := json.Marshal(proxy.Node{IP: host, Port: port})
+	_, err = directory.Storage.Push("nodes/*", nodeData)
+	require.NoError(t, err)
+	nodes, err := ooo.GetList[proxy.Node](directory, "nodes/*")
+	require.NoError(t, err)
+	require.Len(t, nodes, 1)
+	nodeID := nodes[0].Index
+
+	err = proxy.RouteNodeListFilter(directory, proxy.NodeListFilterConfig{
+		NodesKey:     "nodes/*",
+		LocalKey:     "device/logs/*/*",
+		RemoteKey:    "logs/*",
+		Capabilities: &proxy.Capabilities{Read: true, Write: false, Delete: true},
+	})
+	require.NoError(t, err)
+
+	resp, err := http.Post("http://"+directory.Address+"/device/logs/"+nodeID+"/item1", "application/json", bytes.NewReader([]byte(`{"x":1}`)))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusForbidden, resp.StatusCode)
+	mu.Lock()
+	defer mu.Unlock()
+	require.False(t, upstreamHit, "upstream must not see denied requests via NodeListFilter")
+}
+
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
 	var clientWg sync.WaitGroup
 	var mu sync.Mutex
