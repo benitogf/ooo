@@ -2,18 +2,102 @@ package ooo_test
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo"
+	"github.com/benitogf/ooo/ui"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+// TestRegisterProxyConcurrentWithRead asserts that RegisterProxy
+// can run concurrently with the explorer UI's GetProxies callback
+// (and the equivalent Endpoint-slice read via GetEndpoints). Pre-fix
+// the endpoints + proxies slices were appended without any lock and
+// read without any lock, so under -race a parallel registration + UI
+// fetch fired a data race. Sibling registrars RegisterProxyCleanup /
+// RegisterPreClose already used mutexes for the same pattern; this
+// test pins that the endpoint + proxy registries do too.
+//
+// The test exercises RegisterProxy specifically (no mux.Router
+// mutation) so the assertion isolates the registry-slice race the
+// audit item flagged. Concurrent Endpoint() registrations have a
+// separate race in gorilla/mux's Router.HandleFunc vs Router.Match
+// — tracked as its own audit-list item.
+func TestRegisterProxyConcurrentWithRead(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Register one Endpoint up front so the UI read path also iterates
+	// over a non-empty endpoints slice during the concurrent section.
+	server.Endpoint(ooo.EndpointConfig{
+		Path: "/seed",
+		Methods: ooo.Methods{
+			http.MethodGet: {Response: nil},
+		},
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		},
+	})
+
+	const writers = 8
+	const readers = 8
+	const iterations = 25
+
+	barrier := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(writers + readers)
+
+	for w := range writers {
+		go func() {
+			defer wg.Done()
+			<-barrier
+			for i := range iterations {
+				server.RegisterProxy(ui.ProxyInfo{
+					LocalPath: fmt.Sprintf("dyn-proxy-%d-%d", w, i),
+				})
+			}
+		}()
+	}
+
+	// The explorer UI's read paths are GET /?api=endpoints and
+	// /?api=proxies (see ui/ui.go: `switch r.URL.Query().Get("api")`).
+	// A bare GET / serves the static index and never enters
+	// getEndpoints/getProxies, so the readers must explicitly request
+	// each API to exercise both halves of the fix.
+	for r := range readers {
+		api := "endpoints"
+		if r%2 == 1 {
+			api = "proxies"
+		}
+		go func(api string) {
+			defer wg.Done()
+			<-barrier
+			for range iterations {
+				req := httptest.NewRequest(http.MethodGet, "/?api="+api, nil)
+				rec := httptest.NewRecorder()
+				server.Router.ServeHTTP(rec, req)
+				_ = rec.Result()
+			}
+		}(api)
+	}
+
+	close(barrier)
+	wg.Wait()
+}
 
 // TestAuditGatesEndpoint asserts that a custom Endpoint registered
 // via Server.Endpoint honors Server.Audit. Pre-fix the endpoint
