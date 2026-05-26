@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1590,6 +1591,173 @@ func TestProxyCapabilitiesEnforcedViaNodeListFilter(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	require.False(t, upstreamHit, "upstream must not see denied requests via NodeListFilter")
+}
+
+// TestProxyAuditGatesRoute asserts that a proxied request through
+// Route honors Server.Audit. Pre-fix proxy handlers were registered
+// directly on Router with no Audit wrapping, so a deny-everything
+// Audit had no effect — custom proxy paths silently bypassed
+// auth/rate-limiting/observability gates.
+func TestProxyAuditGatesRoute(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.Audit = func(r *http.Request) bool { return false }
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	resp, err := http.Get("http://" + proxyServer.Address + "/settings/device1")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"Audit returning false must reject proxied Route requests")
+	require.False(t, upstreamHit.Load(), "upstream must not be contacted when Audit denies")
+}
+
+// TestProxyAuditGatesRouteList asserts the same for the list-shaped
+// registrar — exercises BOTH closures it installs: itemHandler at the
+// glob-expanded path and listHandler at the trimmed base path. A
+// glob-suffix localPath ("items/*") is required so basePath strips to
+// "items" and the request to /items actually matches the listHandler
+// route instead of falling through to the data wildcard.
+func TestProxyAuditGatesRouteList(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.Audit = func(r *http.Request) bool { return false }
+
+	err := proxy.RouteList(proxyServer, "items/*", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	// itemHandler — registered at /items/{path1:.*}.
+	resp, err := http.Get("http://" + proxyServer.Address + "/items/i1")
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"itemHandler must be gated by Audit")
+
+	// listHandler — registered at /items (basePath). This request
+	// matches the registered route directly (not the data wildcard),
+	// so the 401 must come from the listHandler's AuditHandler wrap.
+	resp, err = http.Get("http://" + proxyServer.Address + "/items")
+	require.NoError(t, err)
+	resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"listHandler must be gated by Audit")
+
+	require.False(t, upstreamHit.Load(), "upstream must not be contacted when Audit denies")
+}
+
+// TestProxyAuditGatesWebSocketUpgrade asserts that the AuditHandler
+// wrap runs BEFORE the proxy closure's websocket.IsWebSocketUpgrade
+// branch. A WebSocket dial against a deny-everything Audit must
+// receive a clean HTTP 401 before any upgrade is attempted, so the
+// client never enters a half-upgraded state. The structural
+// guarantee comes from AuditHandler being the outer wrapper; this
+// test locks that ordering against future refactors that might move
+// the gate inside the inner closure.
+func TestProxyAuditGatesWebSocketUpgrade(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.Audit = func(r *http.Request) bool { return false }
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: proxyServer.Address, Path: "/settings/device1"}
+	c, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.Error(t, err, "deny-everything Audit must reject the upgrade")
+	if c != nil {
+		c.Close()
+	}
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"client must see HTTP 401, not a half-upgraded WS connection")
+	require.False(t, upstreamHit.Load())
+}
+
+// TestProxyAuditGatesRouteWithVars asserts the same for RouteWithVars.
+func TestProxyAuditGatesRouteWithVars(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.Audit = func(r *http.Request) bool { return false }
+	// RouteWithVars assumes Router is initialized.
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	err := proxy.RouteWithVars(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+
+	resp, err := http.Get("http://" + proxyServer.Address + "/settings/device1")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.False(t, upstreamHit.Load())
 }
 
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {

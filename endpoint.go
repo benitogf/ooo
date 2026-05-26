@@ -1,6 +1,7 @@
 package ooo
 
 import (
+	"fmt"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -171,6 +172,26 @@ func defaultValue(t reflect.Type) any {
 	}
 }
 
+// AuditHandler wraps next so the configured Server.Audit gate runs
+// before the handler. Returns 401 Unauthorized when Audit denies the
+// request. Used by Endpoint registration and the proxy package so
+// custom routes participate in the same auth/rate-limit/observability
+// path as the built-in REST handlers.
+//
+// The nil-Audit branch is defensive for direct-Router test paths
+// (ServeHTTP bypassing Start). Production callers reach this wrapper
+// only after Start has populated the default Audit via defaults().
+func (server *Server) AuditHandler(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if server.Audit != nil && !server.Audit(r) {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintf(w, "%s", ErrNotAuthorized)
+			return
+		}
+		next(w, r)
+	}
+}
+
 // Endpoint registers a custom HTTP endpoint with metadata for UI visibility
 func (server *Server) Endpoint(cfg EndpointConfig) {
 	methods := make([]string, 0, len(cfg.Methods))
@@ -196,8 +217,10 @@ func (server *Server) Endpoint(cfg EndpointConfig) {
 	}
 
 	// Register route with router and mirror onto the route oracle so the
-	// data wildcard defers to this Endpoint regardless of registration order.
-	server.Router.HandleFunc(cfg.Path, cfg.Handler).Methods(methods...)
+	// data wildcard defers to this Endpoint regardless of registration
+	// order. Wrap the handler in AuditHandler so Server.Audit gates the
+	// custom path the same way it gates the built-in REST handlers.
+	server.Router.HandleFunc(cfg.Path, server.AuditHandler(cfg.Handler)).Methods(methods...)
 	server.RegisterOracleRoute(cfg.Path, methods)
 
 	// Track for UI
