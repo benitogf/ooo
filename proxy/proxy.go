@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/benitogf/coat"
@@ -25,6 +26,48 @@ var (
 	ErrLocalPathEmpty   = errors.New("proxy: LocalPath is required")
 	ErrResolveFailed    = errors.New("proxy: failed to resolve target")
 )
+
+// teardownPauseHook is a test seam invoked inside the WS handler's
+// teardown between stopRemoteSubscription and removeState. afterTeardownHook
+// fires immediately after removeState returns. Production callers leave
+// both nil so the calls are zero-cost branches. Tests set them to
+// barrier-based callbacks so the lifecycle race window between "state
+// is being torn down" and "new subscriber arrives for the same path"
+// can be exercised — and verified to have settled — deterministically.
+//
+// Wrapped in atomic.Pointer so the WS handler can read them racelessly
+// while a test goroutine concurrently installs or clears via the
+// SetTeardown*ForTest setters.
+var (
+	teardownPauseHook atomic.Pointer[func()]
+	afterTeardownHook atomic.Pointer[func()]
+)
+
+// SetTeardownPauseHookForTest installs a callback invoked inside the
+// WS handler's teardown between stopRemoteSubscription and removeState.
+// Tests only — production callers leave the hook nil. Pass nil to
+// clear. Single-shot: tests must not assume the hook fires more than
+// once per install. Not safe for concurrent test execution; tests
+// using this hook must not run with t.Parallel.
+func SetTeardownPauseHookForTest(fn func()) {
+	if fn == nil {
+		teardownPauseHook.Store(nil)
+		return
+	}
+	teardownPauseHook.Store(&fn)
+}
+
+// SetAfterTeardownHookForTest installs a callback invoked inside the
+// WS handler's teardown after removeState returns. Tests use this to
+// know when a subscriber teardown has fully settled before introducing
+// the next subscriber. Same constraints as SetTeardownPauseHookForTest.
+func SetAfterTeardownHookForTest(fn func()) {
+	if fn == nil {
+		afterTeardownHook.Store(nil)
+		return
+	}
+	afterTeardownHook.Store(&fn)
+}
 
 // Resolver maps local path to remote server address and path.
 // localPath example: "settings/device123"
@@ -129,8 +172,14 @@ type wsMessage struct {
 }
 
 type proxyState struct {
-	mu              sync.Mutex
-	wg              sync.WaitGroup // tracks remote subscription goroutine
+	mu sync.Mutex
+	wg sync.WaitGroup // tracks remote subscription goroutine
+	// dying flips to true under mu as soon as the last subscriber
+	// leaves, so a concurrent addSubscriber on the same state pointer
+	// can detect the in-progress teardown and ask the caller to
+	// refetch from the manager. getOrCreateState also consults it so
+	// the registry hands out a fresh state instead of the dying one.
+	dying           bool
 	address         string
 	remotePath      string
 	localSubs       map[*websocket.Conn]chan wsMessage
@@ -157,6 +206,24 @@ func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client
 	defer pm.mu.Unlock()
 
 	state, exists := pm.states[key]
+	if exists {
+		state.mu.Lock()
+		if state.dying {
+			// A teardown for this state is mid-flight and has not yet
+			// reached removeState. Replace it in the registry with a
+			// fresh state so this new subscriber starts its own
+			// remote subscription instead of attaching to the
+			// half-torn-down one. The dying state's removeState will
+			// see the pointer mismatch and skip its delete.
+			state.mu.Unlock()
+			exists = false
+		} else {
+			// Reusable state: update protocol for the new client
+			// (auth credentials may differ from the previous client).
+			state.clientProtocol = clientProtocol
+			state.mu.Unlock()
+		}
+	}
 	if !exists {
 		state = &proxyState{
 			address:        address,
@@ -168,20 +235,22 @@ func (pm *proxyManager) getOrCreateState(address, remotePath string, cfg *client
 			clientProtocol: clientProtocol,
 		}
 		pm.states[key] = state
-	} else {
-		// Update protocol for reused state — a new client may have
-		// different auth credentials than the previous one.
-		state.mu.Lock()
-		state.clientProtocol = clientProtocol
-		state.mu.Unlock()
 	}
 	return state
 }
 
-func (pm *proxyManager) removeState(address, remotePath string) {
+// removeState deletes the state for (address, remotePath) from the
+// registry, but only if the registered pointer still matches the one
+// the caller observed. After a teardown stops the remote subscription,
+// a concurrent getOrCreateState may have already replaced the dying
+// state with a fresh one; compare-and-delete prevents the teardown
+// from evicting that fresh state.
+func (pm *proxyManager) removeState(address, remotePath string, expected *proxyState) {
 	key := address + "/" + remotePath
 	pm.mu.Lock()
-	delete(pm.states, key)
+	if pm.states[key] == expected {
+		delete(pm.states, key)
+	}
 	pm.mu.Unlock()
 }
 
@@ -205,9 +274,17 @@ func (ps *proxyState) logPrefix() string {
 	return "proxy[" + ps.address + "/" + ps.remotePath + "]"
 }
 
+// addSubscriber registers conn with the state and returns the
+// per-subscriber outbox. Returns nil if the state is being torn down
+// — the caller must refetch a fresh state from the manager and try
+// again.
 func (ps *proxyState) addSubscriber(conn *websocket.Conn) chan wsMessage {
 	msgChan := make(chan wsMessage, 10)
 	ps.mu.Lock()
+	if ps.dying {
+		ps.mu.Unlock()
+		return nil
+	}
 	wasEmpty := len(ps.localSubs) == 0
 	remoteAlreadyConnected := ps.remoteConnected
 	ps.localSubs[conn] = msgChan
@@ -324,8 +401,16 @@ func (ps *proxyState) removeSubscriber(conn *websocket.Conn) bool {
 		delete(ps.localSubs, conn)
 	}
 
-	// Return true if no more subscribers
-	return len(ps.localSubs) == 0
+	// Flip dying as soon as the state empties so a concurrent
+	// addSubscriber on the same pointer (one that observed the state
+	// before getOrCreateState had a chance to replace it) can detect
+	// the in-progress teardown. Pairs with the dying check in
+	// addSubscriber and the registry replacement in getOrCreateState.
+	if len(ps.localSubs) == 0 {
+		ps.dying = true
+		return true
+	}
+	return false
 }
 
 func (ps *proxyState) broadcastRaw(msgType int, data []byte) {
@@ -660,15 +745,35 @@ func handleWebSocketProxy(w http.ResponseWriter, r *http.Request, pm *proxyManag
 		return
 	}
 
-	state := pm.getOrCreateState(address, remotePath, subCfg, isList, clientProtocol)
-	msgChan := state.addSubscriber(localConn)
+	// Retry loop: if getOrCreateState returned a state that flipped to
+	// dying between the registry lookup and the addSubscriber call,
+	// fetch again. The dying state will have been replaced by then
+	// (either by our retry triggering replacement, or by the teardown
+	// completing). The retry is bounded — each iteration either
+	// attaches or hands back to the manager for a fresh state — so
+	// it cannot livelock.
+	var state *proxyState
+	var msgChan chan wsMessage
+	for {
+		state = pm.getOrCreateState(address, remotePath, subCfg, isList, clientProtocol)
+		msgChan = state.addSubscriber(localConn)
+		if msgChan != nil {
+			break
+		}
+	}
 
 	// Forward messages to local subscriber
 	go func() {
 		defer func() {
 			if state.removeSubscriber(localConn) {
 				state.stopRemoteSubscription()
-				pm.removeState(address, remotePath)
+				if hook := teardownPauseHook.Load(); hook != nil {
+					(*hook)()
+				}
+				pm.removeState(address, remotePath, state)
+				if hook := afterTeardownHook.Load(); hook != nil {
+					(*hook)()
+				}
 			}
 			localConn.Close()
 		}()

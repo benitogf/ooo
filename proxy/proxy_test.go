@@ -2,6 +2,7 @@ package proxy_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -1758,6 +1759,162 @@ func TestProxyAuditGatesRouteWithVars(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
 	require.False(t, upstreamHit.Load())
+}
+
+// TestProxySubscriberTeardownRaceDoesNotOrphanNewSubscriber
+// reproduces the race the audit flagged: between the last subscriber
+// emptying a proxyState and removeState deleting it from the
+// registry, a new subscriber for the same path could observe the
+// dying state, attach to it, and lose its upstream subscription.
+// The fix flips a dying flag inside removeSubscriber, makes
+// getOrCreateState replace dying states, and lets addSubscriber
+// refuse a dying state so the WS handler retries. removeState then
+// compare-and-deletes so it cannot evict the fresh state that took
+// the dying one's place.
+//
+// The test uses the package-level teardownPauseHook to deterministic-
+// ally hold A's teardown in the race window while B opens. Pre-fix
+// B's state has no remote subscription (A's was stopped while B's
+// was building on the same pointer) so the subsequent remote Set
+// never reaches B. Post-fix B gets a fresh state with its own
+// remote subscription and receives the update.
+func TestProxySubscriberTeardownRaceDoesNotOrphanNewSubscriber(t *testing.T) {
+	// Don't run in parallel — teardownPauseHook is package-level and
+	// parallel tests would clobber each other.
+
+	resume := make(chan struct{})
+	hookFired := make(chan struct{}, 1)
+	teardownDone := make(chan struct{}, 1)
+	proxy.SetTeardownPauseHookForTest(func() {
+		select {
+		case hookFired <- struct{}{}:
+		default:
+		}
+		<-resume
+	})
+	defer proxy.SetTeardownPauseHookForTest(nil)
+	proxy.SetAfterTeardownHookForTest(func() {
+		select {
+		case teardownDone <- struct{}{}:
+		default:
+		}
+	})
+	defer proxy.SetAfterTeardownHookForTest(nil)
+
+	remote := &ooo.Server{}
+	remote.Silence = true
+	remote.OpenFilter("settings")
+	remote.Start("localhost:0")
+	defer remote.Close(os.Interrupt)
+	_, err := remote.Storage.Set("settings", []byte(`{"name":"seed","value":0}`))
+	require.NoError(t, err)
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	err = proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return remote.Address, "settings", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: proxyServer.Address, Path: "/settings/device1"}
+
+	// Subscriber A: connects, reads initial snapshot, then forces the
+	// TCP socket closed so the proxy's forwarder fails on its next
+	// WriteMessage and triggers the teardown defer. cA.Close() sends a
+	// graceful WS close which gorilla may absorb without failing the
+	// next write; UnderlyingConn().Close() is the deterministic
+	// hammer.
+	cA, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	_, _, err = cA.ReadMessage()
+	require.NoError(t, err)
+	require.NoError(t, cA.UnderlyingConn().Close())
+
+	// Fan a few Sets at the upstream — each one broadcasts through
+	// the proxy and pushes a wsMessage onto A's msgChan, eventually
+	// driving A's forwarder into a failed WriteMessage that fires
+	// the teardown defer.
+	fired := false
+	for i := range 20 {
+		_, err = remote.Storage.Set("settings", []byte(fmt.Sprintf(`{"name":"wake-A","value":%d}`, i)))
+		require.NoError(t, err)
+		select {
+		case <-hookFired:
+			fired = true
+		case <-time.After(100 * time.Millisecond):
+		}
+		if fired {
+			break
+		}
+	}
+	if !fired {
+		close(resume)
+		t.Fatal("teardown hook did not fire after fanning 20 Sets")
+	}
+
+	// Subscriber B: opens while A's state is still in the registry.
+	// Pre-fix B attaches to the dying state — its addSubscriber sees
+	// wasEmpty (A removed) and kicks off a fresh remote sub on the
+	// SAME state pointer that A's teardown is about to evict from
+	// the registry. Result: B's state survives but is orphaned.
+	cB, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	defer cB.Close()
+	_, _, err = cB.ReadMessage() // initial snapshot
+	require.NoError(t, err)
+
+	// Release A's teardown so removeState runs.
+	close(resume)
+
+	// Wait for A's afterTeardownHook to fire, signalling removeState
+	// has returned. Pre-fix it evicts state1 (the one B is attached
+	// to) from the registry; post-fix the compare-and-delete sees a
+	// fresh state in the slot and skips the eviction. Either way,
+	// C's subsequent dial must happen after A's removeState has
+	// fully settled or the test races with the teardown.
+	select {
+	case <-teardownDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("A's teardown did not settle (afterTeardownHook never fired)")
+	}
+
+	// Subscriber C: opens for the SAME path. Pre-fix B's state was
+	// evicted by A's removeState, so C creates a brand-new state3
+	// with its own upstream connection — and the proxy now holds
+	// TWO upstream subs to remote for the same path. Post-fix B's
+	// state was preserved (either via dying-flag replacement at
+	// add time or via compare-and-delete in removeState), and C
+	// reuses it — proxy holds ONE upstream sub.
+	cC, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.NoError(t, err)
+	defer cC.Close()
+	_, _, err = cC.ReadMessage() // initial snapshot
+	require.NoError(t, err)
+
+	// The remote sees the proxy's upstream subscriptions. With the
+	// audit-flagged race, two parallel states each hold their own
+	// upstream — connection count = 2. With the fix, B and C share
+	// one state and one upstream — connection count = 1.
+	deadline := time.Now().Add(1 * time.Second)
+	var connCount int
+	for time.Now().Before(deadline) {
+		connCount = 0
+		for _, pool := range remote.Stream.GetState() {
+			connCount += pool.Connections
+		}
+		if connCount == 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	require.Equal(t, 1, connCount,
+		"proxy must share one upstream subscription across B and C; "+
+			"pre-fix the teardown race leaves B on a stranded state with its own upstream "+
+			"while C creates a fresh state with another, doubling the upstream conn count")
 }
 
 func TestProxyServerCloseTearsDownSubscriptions(t *testing.T) {
