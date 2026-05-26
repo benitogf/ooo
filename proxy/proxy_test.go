@@ -1632,7 +1632,11 @@ func TestProxyAuditGatesRoute(t *testing.T) {
 }
 
 // TestProxyAuditGatesRouteList asserts the same for the list-shaped
-// registrar (covers both base and item handler closures).
+// registrar — exercises BOTH closures it installs: itemHandler at the
+// glob-expanded path and listHandler at the trimmed base path. A
+// glob-suffix localPath ("items/*") is required so basePath strips to
+// "items" and the request to /items actually matches the listHandler
+// route instead of falling through to the data wildcard.
 func TestProxyAuditGatesRouteList(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
@@ -1649,7 +1653,7 @@ func TestProxyAuditGatesRouteList(t *testing.T) {
 	proxyServer.Silence = true
 	proxyServer.Audit = func(r *http.Request) bool { return false }
 
-	err := proxy.RouteList(proxyServer, "devices/{deviceID}/things/{itemID}", proxy.Config{
+	err := proxy.RouteList(proxyServer, "items/*", proxy.Config{
 		Resolve: func(_ string) (string, string, error) {
 			return upstreamHost, "", nil
 		},
@@ -1658,19 +1662,68 @@ func TestProxyAuditGatesRouteList(t *testing.T) {
 	proxyServer.Start("localhost:0")
 	defer proxyServer.Close(os.Interrupt)
 
-	// Item path.
-	resp, err := http.Get("http://" + proxyServer.Address + "/devices/d1/things/i1")
+	// itemHandler — registered at /items/{path1:.*}.
+	resp, err := http.Get("http://" + proxyServer.Address + "/items/i1")
 	require.NoError(t, err)
 	resp.Body.Close()
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"itemHandler must be gated by Audit")
 
-	// Base path.
-	resp, err = http.Get("http://" + proxyServer.Address + "/devices/d1/things")
+	// listHandler — registered at /items (basePath). This request
+	// matches the registered route directly (not the data wildcard),
+	// so the 401 must come from the listHandler's AuditHandler wrap.
+	resp, err = http.Get("http://" + proxyServer.Address + "/items")
 	require.NoError(t, err)
 	resp.Body.Close()
-	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"listHandler must be gated by Audit")
 
 	require.False(t, upstreamHit.Load(), "upstream must not be contacted when Audit denies")
+}
+
+// TestProxyAuditGatesWebSocketUpgrade asserts that the AuditHandler
+// wrap runs BEFORE the proxy closure's websocket.IsWebSocketUpgrade
+// branch. A WebSocket dial against a deny-everything Audit must
+// receive a clean HTTP 401 before any upgrade is attempted, so the
+// client never enters a half-upgraded state. The structural
+// guarantee comes from AuditHandler being the outer wrapper; this
+// test locks that ordering against future refactors that might move
+// the gate inside the inner closure.
+func TestProxyAuditGatesWebSocketUpgrade(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+
+	var upstreamHit atomic.Bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		upstreamHit.Store(true)
+	}))
+	defer upstream.Close()
+	upstreamHost := strings.TrimPrefix(upstream.URL, "http://")
+
+	proxyServer := &ooo.Server{}
+	proxyServer.Silence = true
+	proxyServer.Audit = func(r *http.Request) bool { return false }
+
+	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
+		Resolve: func(_ string) (string, string, error) {
+			return upstreamHost, "", nil
+		},
+	})
+	require.NoError(t, err)
+	proxyServer.Start("localhost:0")
+	defer proxyServer.Close(os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: proxyServer.Address, Path: "/settings/device1"}
+	c, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	require.Error(t, err, "deny-everything Audit must reject the upgrade")
+	if c != nil {
+		c.Close()
+	}
+	require.NotNil(t, resp)
+	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
+		"client must see HTTP 401, not a half-upgraded WS connection")
+	require.False(t, upstreamHit.Load())
 }
 
 // TestProxyAuditGatesRouteWithVars asserts the same for RouteWithVars.
