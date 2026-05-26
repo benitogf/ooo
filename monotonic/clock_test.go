@@ -97,11 +97,47 @@ func BenchmarkMonotonicNowParallel(b *testing.B) {
 	})
 }
 
+// TestResetRaceWithConcurrentNow asserts the package-level
+// globalClock pointer is safe to swap (via Reset) while other
+// goroutines are calling Now(). Pre-fix Reset assigned globalClock
+// as a bare *Clock field while Now() read the same field without
+// synchronization — the race detector fires on any concurrent
+// Reset + Now. The fix wraps globalClock in atomic.Pointer so the
+// swap is atomic and stale readers continue safely on the old
+// clock until they finish their call.
+func TestResetRaceWithConcurrentNow(t *testing.T) {
+	Init()
+	const readers = 8
+	const iterations = 200
+
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(readers)
+	for range readers {
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+					Now()
+				}
+			}
+		}()
+	}
+
+	for range iterations {
+		Reset()
+	}
+	close(stop)
+	wg.Wait()
+}
+
 func TestNowPanicWithoutInit(t *testing.T) {
 	// Save current globalClock and restore after test
-	original := globalClock
-	globalClock = nil
-	defer func() { globalClock = original }()
+	original := globalClock.Swap(nil)
+	defer globalClock.Store(original)
 
 	require.Panics(t, func() {
 		Now()
@@ -110,9 +146,8 @@ func TestNowPanicWithoutInit(t *testing.T) {
 
 func TestStopPanicWithoutInit(t *testing.T) {
 	// Save current globalClock and restore after test
-	original := globalClock
-	globalClock = nil
-	defer func() { globalClock = original }()
+	original := globalClock.Swap(nil)
+	defer globalClock.Store(original)
 
 	require.Panics(t, func() {
 		Stop()

@@ -1,7 +1,6 @@
 package monotonic
 
 import (
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -26,18 +25,23 @@ type Clock struct {
 	stopCh    chan struct{}
 }
 
-// globalClock is the package-level singleton
-var globalClock *Clock
-
-// initOnce ensures Init() only creates the clock once
-var initOnce sync.Once
+// globalClock is the package-level singleton, accessed via atomic
+// load/store so a concurrent Reset cannot race with in-flight Now /
+// Stop callers. Init uses CAS so repeated calls are no-ops.
+var globalClock atomic.Pointer[Clock]
 
 // Init initializes the global monotonic clock instance.
 // Safe to call multiple times; only the first call has effect.
+// Safe to call concurrently with Now / Stop / Reset.
 func Init() {
-	initOnce.Do(func() {
-		globalClock = New()
-	})
+	if globalClock.Load() != nil {
+		return
+	}
+	fresh := New()
+	if !globalClock.CompareAndSwap(nil, fresh) {
+		// Lost the race; another goroutine initialized first.
+		fresh.Stop()
+	}
 }
 
 // New creates and starts a new monotonic clock
@@ -131,28 +135,31 @@ func (c *Clock) Stop() {
 // Now returns a monotonically increasing timestamp using the global clock.
 // Panics if Init() has not been called.
 func Now() int64 {
-	if globalClock == nil {
+	c := globalClock.Load()
+	if c == nil {
 		panic("monotonic: clock not initialized, call monotonic.Init() first")
 	}
-	return globalClock.Now()
+	return c.Now()
 }
 
 // Stop stops the global clock's correction loop.
 // Panics if Init() has not been called.
 func Stop() {
-	if globalClock == nil {
+	c := globalClock.Load()
+	if c == nil {
 		panic("monotonic: clock not initialized, call monotonic.Init() first")
 	}
-	globalClock.Stop()
+	c.Stop()
 }
 
-// Reset reinitializes the global clock (useful for testing).
-// This bypasses sync.Once to allow reinitialization.
+// Reset reinitializes the global clock (useful for testing). The
+// swap is atomic, so concurrent Now / Stop callers observe either
+// the old clock (and complete safely against it) or the new one,
+// never a torn pointer. The old clock is stopped after the swap so
+// no in-flight call references it as the current global.
 func Reset() {
-	if globalClock != nil {
-		globalClock.Stop()
+	old := globalClock.Swap(New())
+	if old != nil {
+		old.Stop()
 	}
-	globalClock = New()
-	// Reset initOnce so Init() can be called again if needed
-	initOnce = sync.Once{}
 }
