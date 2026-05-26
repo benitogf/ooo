@@ -29,6 +29,68 @@ import (
 
 const deadlineMsg = "ooo: server deadline reached"
 
+// syncRouter wraps Server.Router so the gorilla/mux internal routes
+// slice (mutated by HandleFunc/Handle, read by Match) cannot race
+// with concurrent request dispatch. ServeHTTP takes the routerMu
+// read lock around Match only — the dispatched handler runs WITHOUT
+// the lock so long-running handlers (WebSocket forwarders, hijacked
+// connections) do not block subsequent registrations.
+//
+// mux.SetURLVars propagates the matched vars into the request
+// context so handlers continue to read them via mux.Vars(r). This
+// covers every consumer in the tree (REST, WS, proxy); none of them
+// use mux.CurrentRoute, which gorilla/mux does not expose a public
+// setter for.
+//
+// Known deviations from mux.Router.ServeHTTP:
+//   - No path cleaning + 301 redirect for non-canonical paths
+//     (mux does this when SkipClean(true) has NOT been set). The
+//     codebase does not depend on it. Add a port of mux's cleanPath
+//     here if a future consumer needs it.
+//   - mux Router.Use() middlewares are not fanned out. The codebase
+//     does not register any. If middleware support is added later,
+//     this wrapper must chain them onto the matched handler.
+type syncRouter struct {
+	router *mux.Router
+	mu     *sync.RWMutex
+}
+
+func (s *syncRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	var match mux.RouteMatch
+	matched := s.router.Match(r, &match)
+	s.mu.RUnlock()
+
+	var handler http.Handler
+	if matched {
+		handler = match.Handler
+		// Match mux's unconditional vars propagation — handlers
+		// distinguish "no vars" from "vars never set" by reading
+		// the context, so don't gate on len.
+		r = mux.SetURLVars(r, match.Vars)
+	}
+	if handler == nil && match.MatchErr == mux.ErrMethodMismatch {
+		http.Error(w, http.StatusText(http.StatusMethodNotAllowed), http.StatusMethodNotAllowed)
+		return
+	}
+	if handler == nil {
+		http.NotFound(w, r)
+		return
+	}
+	handler.ServeHTTP(w, r)
+}
+
+// RouterMutate runs fn while holding the routerMu write lock so
+// Server.Router mutations (HandleFunc, Handle, MatcherFunc chaining)
+// serialize with the syncRouter wrapper's Match. Used by Endpoint,
+// setupRoutes, and the proxy package's Route/RouteList/RouteWithVars
+// registrars.
+func (server *Server) RouterMutate(fn func()) {
+	server.routerMu.Lock()
+	defer server.routerMu.Unlock()
+	fn()
+}
+
 // Server.active state machine. The intermediate serverStarting value
 // is what makes Active() return false during the listen-bind window
 // while still keeping concurrent StartWithError callers off the
@@ -133,7 +195,16 @@ type Server struct {
 	// registrars (RegisterProxyCleanup, RegisterPreClose) already
 	// lock; these used to mutate without one and raced against
 	// getEndpoints/getProxies from the explorer UI hot path.
-	registryMu         sync.RWMutex
+	registryMu sync.RWMutex
+	// routerMu protects Server.Router. gorilla/mux.Router mutates an
+	// internal routes slice on HandleFunc/Handle and reads it on
+	// Match; without serialization a registration concurrent with
+	// request dispatch races on those internals. Mutators take Lock
+	// via RouterMutate; the syncRouter wrapper installed in
+	// waitListen takes RLock around Match, then dispatches the
+	// matched handler without the lock so long-running handlers do
+	// not block subsequent registrations.
+	routerMu           sync.RWMutex
 	routeOracle        *mux.Router  // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
 	routeOracleMu      sync.RWMutex // protects routeOracle; readers (routeOracleSkip) take RLock on the data-wildcard hot path, registrations take Lock
 	proxyCleanups      []func()     // cleanup functions for proxy subscriptions
@@ -349,7 +420,11 @@ func (server *Server) waitListen() {
 		server.wg.Done()
 		return
 	}
-	var handler http.Handler = server.Router
+	// Wrap server.Router so concurrent Endpoint/Proxy registrations
+	// cannot race with the request-dispatch Match. The wrapper takes
+	// the routerMu read lock around Match and dispatches the matched
+	// handler without holding the lock.
+	var handler http.Handler = &syncRouter{router: server.Router, mu: &server.routerMu}
 	if !server.NoCompress {
 		handler = handlers.CompressHandler(handler)
 	}
@@ -677,7 +752,15 @@ func (server *Server) defaults() {
 }
 
 // setupRoutes configures the HTTP routes for the server.
+//
+// Runs from defaults() inside StartWithError, which is CAS-gated and
+// runs before any traffic reaches the wrapper, so this code is not
+// racing with ServeHTTP. The routerMu.Lock is defensive — it keeps
+// the "mutators take Lock" invariant uniform across every router
+// registration site, including the boot-time ones.
 func (server *Server) setupRoutes() {
+	server.routerMu.Lock()
+	defer server.routerMu.Unlock()
 	// https://ieftimov.com/post/make-resilient-golang-net-http-servers-using-timeouts-deadlines-context-cancellation/
 	explorerHandler := &ui.Handler{
 		GetKeys:        server.Storage.Keys,

@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo"
@@ -17,6 +18,73 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
+
+// TestServerRouterConcurrentEndpointAndServeHTTP asserts that
+// Server.Endpoint can run concurrently with request dispatch through
+// the server's main Router. Pre-fix gorilla/mux.Router has internal
+// state (its `routes` slice and per-route regex caches) that mutates
+// inside HandleFunc and is read inside Match; with no external
+// synchronization, parallel registration + ServeHTTP fires a data
+// race. The route-oracle Router was fixed in PR #99 to take
+// sync.RWMutex; the main server.Router needs the same discipline.
+func TestServerRouterConcurrentEndpointAndServeHTTP(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	const writers = 6
+	const readers = 6
+	const iterations = 20
+
+	barrier := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(writers + readers)
+
+	for w := range writers {
+		go func() {
+			defer wg.Done()
+			<-barrier
+			for i := range iterations {
+				path := fmt.Sprintf("/dyn-route-%d-%d", w, i)
+				server.Endpoint(ooo.EndpointConfig{
+					Path: path,
+					Methods: ooo.Methods{
+						http.MethodGet: {Response: nil},
+					},
+					Handler: func(rw http.ResponseWriter, _ *http.Request) {
+						rw.WriteHeader(http.StatusOK)
+					},
+				})
+			}
+		}()
+	}
+
+	addr := "http://" + server.Address
+	client := &http.Client{Timeout: 5 * time.Second}
+	for range readers {
+		go func() {
+			defer wg.Done()
+			<-barrier
+			for range iterations {
+				// Use the real HTTP server so requests go through the
+				// production handler chain — syncRouter wraps the mux
+				// router only at server.server.Handler. Direct calls
+				// to server.Router.ServeHTTP would bypass the wrapper.
+				resp, err := client.Get(addr + "/some-key")
+				if err == nil {
+					resp.Body.Close()
+				}
+			}
+		}()
+	}
+
+	close(barrier)
+	wg.Wait()
+}
 
 // TestRegisterProxyConcurrentWithRead asserts that RegisterProxy
 // can run concurrently with the explorer UI's GetProxies callback

@@ -220,7 +220,11 @@ func (server *Server) Endpoint(cfg EndpointConfig) {
 	// data wildcard defers to this Endpoint regardless of registration
 	// order. Wrap the handler in AuditHandler so Server.Audit gates the
 	// custom path the same way it gates the built-in REST handlers.
-	server.Router.HandleFunc(cfg.Path, server.AuditHandler(cfg.Handler)).Methods(methods...)
+	// RouterMutate serializes this with the syncRouter wrapper's Match
+	// so concurrent request dispatch is race-free.
+	server.RouterMutate(func() {
+		server.Router.HandleFunc(cfg.Path, server.AuditHandler(cfg.Handler)).Methods(methods...)
+	})
 	server.RegisterOracleRoute(cfg.Path, methods)
 
 	// Track for UI. The append needs to serialize with getEndpoints

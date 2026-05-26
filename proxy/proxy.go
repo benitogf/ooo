@@ -608,8 +608,11 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 	// wildcard defers to this proxy regardless of registration order.
 	// AuditHandler runs Server.Audit before the proxy handler so
 	// proxied paths participate in the same auth gate as built-in
-	// REST handlers.
-	server.Router.HandleFunc("/"+muxPattern, server.AuditHandler(handler))
+	// REST handlers. RouterMutate serializes this with the
+	// syncRouter wrapper's Match.
+	server.RouterMutate(func() {
+		server.Router.HandleFunc("/"+muxPattern, server.AuditHandler(handler))
+	})
 	server.RegisterOracleRoute("/"+muxPattern, nil)
 
 	// Register for UI visibility
@@ -706,8 +709,12 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 	// the route oracle so the data wildcard defers to them regardless of
 	// registration order. AuditHandler wraps each so Server.Audit gates
 	// proxied requests the same way it gates built-in REST handlers.
-	server.Router.HandleFunc("/"+muxPattern, server.AuditHandler(itemHandler))
-	server.Router.HandleFunc("/"+basePath, server.AuditHandler(listHandler))
+	// RouterMutate serializes both mutations with the syncRouter
+	// wrapper's Match.
+	server.RouterMutate(func() {
+		server.Router.HandleFunc("/"+muxPattern, server.AuditHandler(itemHandler))
+		server.Router.HandleFunc("/"+basePath, server.AuditHandler(listHandler))
+	})
 	server.RegisterOracleRoute("/"+muxPattern, nil)
 	server.RegisterOracleRoute("/"+basePath, nil)
 
@@ -982,7 +989,9 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 		handleHTTPProxy(server, w, r, address, remotePath, cfg.Subscribe)
 	}
 
-	server.Router.HandleFunc("/"+localPath, server.AuditHandler(handler))
+	server.RouterMutate(func() {
+		server.Router.HandleFunc("/"+localPath, server.AuditHandler(handler))
+	})
 	server.RegisterOracleRoute("/"+localPath, nil)
 
 	// Register for UI visibility
