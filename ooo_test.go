@@ -147,6 +147,39 @@ func TestRouteOracleSkipAllowsConcurrentMatches(t *testing.T) {
 		"routeOracle matching must allow concurrent readers; max concurrent observed = %d", maxSeen.Load())
 }
 
+// TestServerAfterWriteFiresOnSet asserts that Server.AfterWrite —
+// mirroring the existing Server.BeforeRead field — is wired into the
+// storage layer at Start so a successful Set invokes the callback
+// with the written key. Pre-feature there was no Server-level
+// AfterWrite, only storage.Options.AfterWrite; pivot's sync-on-write
+// integration needs the Server entry point.
+func TestServerAfterWriteFiresOnSet(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	var (
+		mu      sync.Mutex
+		written []string
+	)
+	server := Server{}
+	server.Silence = true
+	server.AfterWrite = func(key string) {
+		mu.Lock()
+		written = append(written, key)
+		mu.Unlock()
+	}
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	_, err := server.Storage.Set("k1", []byte(`{"v":1}`))
+	require.NoError(t, err)
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"k1"}, written,
+		"Server.AfterWrite must fire with the written key once Set commits")
+}
+
 func TestDoubleStart(t *testing.T) {
 	server := Server{}
 	server.Silence = true
