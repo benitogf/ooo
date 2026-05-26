@@ -223,18 +223,24 @@ func (server *Server) Endpoint(cfg EndpointConfig) {
 	server.Router.HandleFunc(cfg.Path, server.AuditHandler(cfg.Handler)).Methods(methods...)
 	server.RegisterOracleRoute(cfg.Path, methods)
 
-	// Track for UI
+	// Track for UI. The append needs to serialize with getEndpoints
+	// (the explorer UI hot path), so take the registry write lock.
+	server.registryMu.Lock()
 	server.endpoints = append(server.endpoints, ui.EndpointInfo{
 		Path:        cfg.Path,
 		Methods:     methodInfos,
 		Description: cfg.Description,
 		Vars:        vars,
 	})
+	server.registryMu.Unlock()
 }
 
-// RegisterProxy registers a proxy route for UI visibility
+// RegisterProxy registers a proxy route for UI visibility. The append
+// serializes with getProxies via the shared registry write lock.
 func (server *Server) RegisterProxy(info ui.ProxyInfo) {
+	server.registryMu.Lock()
 	server.proxies = append(server.proxies, info)
+	server.registryMu.Unlock()
 }
 
 // RegisterProxyCleanup registers a cleanup function to be called when the server closes.
@@ -255,20 +261,42 @@ func (server *Server) RegisterPreClose(cleanup func()) {
 	server.preCloseCleanupsMu.Unlock()
 }
 
-// getEndpoints returns registered endpoints for UI
+// getEndpoints returns a snapshot of the registered endpoints. Takes
+// the registry read lock and returns a copy of the slice header so
+// the caller can iterate without contending with concurrent Endpoint
+// registrations.
+//
+// The copy is shallow: an EndpointInfo's Methods slice and Vars map
+// share backing memory with the registered entry. This is safe
+// because already-registered EndpointInfo values are treated as
+// immutable — Endpoint() only ever appends, nothing post-registration
+// mutates an existing entry. Callers must preserve that invariant
+// and not mutate the returned entries.
 func (server *Server) getEndpoints() []ui.EndpointInfo {
-	if server.endpoints == nil {
+	server.registryMu.RLock()
+	defer server.registryMu.RUnlock()
+	if len(server.endpoints) == 0 {
 		return []ui.EndpointInfo{}
 	}
-	return server.endpoints
+	snapshot := make([]ui.EndpointInfo, len(server.endpoints))
+	copy(snapshot, server.endpoints)
+	return snapshot
 }
 
-// getProxies returns registered proxies for UI
+// getProxies returns a snapshot of the registered proxies. Takes the
+// registry read lock and returns a copy of the slice header so the
+// caller can iterate without contending with concurrent RegisterProxy
+// calls. ProxyInfo carries only scalars; the shallow snapshot is
+// fully independent of the registry.
 func (server *Server) getProxies() []ui.ProxyInfo {
-	if server.proxies == nil {
+	server.registryMu.RLock()
+	defer server.registryMu.RUnlock()
+	if len(server.proxies) == 0 {
 		return []ui.ProxyInfo{}
 	}
-	return server.proxies
+	snapshot := make([]ui.ProxyInfo, len(server.proxies))
+	copy(snapshot, server.proxies)
+	return snapshot
 }
 
 // getOrphanKeys returns keys that don't match any filter

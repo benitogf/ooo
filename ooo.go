@@ -116,23 +116,28 @@ type audit func(r *http.Request) bool
 //
 // BeforeRead: callback function triggered before read operations
 type Server struct {
-	wg                 sync.WaitGroup
-	watchWg            sync.WaitGroup
-	listenWg           sync.WaitGroup
-	handlerWg          sync.WaitGroup
-	clockWg            sync.WaitGroup
-	server             *http.Server
-	Name               string
-	Router             *mux.Router
-	Stream             stream.Stream
-	filters            filters.Filters
-	limitFilters       map[string]*limitFilterReg // tracks limit filter registrations
-	endpoints          []ui.EndpointInfo          // registered custom endpoints
-	proxies            []ui.ProxyInfo             // registered proxy routes
-	routeOracle        *mux.Router                // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
-	routeOracleMu      sync.RWMutex               // protects routeOracle; readers (routeOracleSkip) take RLock on the data-wildcard hot path, registrations take Lock
-	proxyCleanups      []func()                   // cleanup functions for proxy subscriptions
-	proxyCleanupMu     sync.Mutex                 // protects proxyCleanups
+	wg           sync.WaitGroup
+	watchWg      sync.WaitGroup
+	listenWg     sync.WaitGroup
+	handlerWg    sync.WaitGroup
+	clockWg      sync.WaitGroup
+	server       *http.Server
+	Name         string
+	Router       *mux.Router
+	Stream       stream.Stream
+	filters      filters.Filters
+	limitFilters map[string]*limitFilterReg // tracks limit filter registrations
+	endpoints    []ui.EndpointInfo          // registered custom endpoints
+	proxies      []ui.ProxyInfo             // registered proxy routes
+	// registryMu protects endpoints + proxies. Sibling cleanup-slice
+	// registrars (RegisterProxyCleanup, RegisterPreClose) already
+	// lock; these used to mutate without one and raced against
+	// getEndpoints/getProxies from the explorer UI hot path.
+	registryMu         sync.RWMutex
+	routeOracle        *mux.Router  // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
+	routeOracleMu      sync.RWMutex // protects routeOracle; readers (routeOracleSkip) take RLock on the data-wildcard hot path, registrations take Lock
+	proxyCleanups      []func()     // cleanup functions for proxy subscriptions
+	proxyCleanupMu     sync.Mutex   // protects proxyCleanups
 	NoBroadcastKeys    []string
 	Audit              audit
 	Workers            int
