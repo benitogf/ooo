@@ -234,7 +234,6 @@ func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-	w.Write([]byte(`"unpublish "+_key`))
 }
 
 // LimitBody wraps r.Body with http.MaxBytesReader so a runaway POST/PATCH

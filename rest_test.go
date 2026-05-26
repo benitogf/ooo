@@ -176,6 +176,15 @@ func TestRestDel(t *testing.T) {
 	resp := w.Result()
 	data, _ := server.Storage.Get("test")
 	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+	// 204 No Content forbids a response body per RFC 7230 §3.3.2.
+	// Pre-fix the handler wrote the literal Go-source string
+	// `"unpublish "+_key` after WriteHeader(204) — a real
+	// http.Server stripped it on the wire so users never saw it,
+	// but the handler-level invariant was broken. Co-locate this
+	// body assertion with the status check so the next regression
+	// in the same handler is caught here.
+	body, _ := io.ReadAll(resp.Body)
+	require.Empty(t, body, "204 No Content response must have an empty body; got %q", body)
 	require.Empty(t, data)
 
 	req = httptest.NewRequest("DELETE", "/test", nil)
