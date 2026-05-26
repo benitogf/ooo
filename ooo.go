@@ -177,6 +177,10 @@ type audit func(r *http.Request) bool
 // OnStorageEvent: callback function triggered on storage events
 //
 // BeforeRead: callback function triggered before read operations
+//
+// AfterWrite: callback function triggered after a successful write
+// (Set / Push / Patch / Del). Wired once at Start; further changes
+// have no effect.
 type Server struct {
 	wg           sync.WaitGroup
 	watchWg      sync.WaitGroup
@@ -248,6 +252,7 @@ type Server struct {
 	OnWatchPanic        func(ev storage.Event, r any) // optional: invoked on each recovered watch-goroutine panic with the offending event
 	OnDroppedEvent      func(ev storage.Event)        // optional: invoked when the sharded watcher channel drops an event after timing out
 	BeforeRead          func(key string)
+	AfterWrite          func(key string)
 	GetPivotInfo        func() *ui.PivotInfo // Optional: returns pivot status for UI
 	NoCompress          bool                 // Disable gzip compression (useful for tests)
 	WatchPanics         int64                // Atomic counter of panics recovered in watch goroutines
@@ -413,6 +418,9 @@ func (server *Server) waitListen() {
 
 	if server.BeforeRead != nil {
 		storageOpt.BeforeRead = server.BeforeRead
+	}
+	if server.AfterWrite != nil {
+		storageOpt.AfterWrite = server.AfterWrite
 	}
 	err = server.Storage.Start(storageOpt)
 	if err != nil {
