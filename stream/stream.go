@@ -434,7 +434,11 @@ func (sm *Stream) Close(key string, client *Conn) {
 		}
 	}
 	sm.mutex.Unlock()
-	go sm.OnUnsubscribe(key)
+	// Called inline: Close holds no locks here and the following client.conn.Close()
+	// is itself synchronous I/O, so a user callback that takes the same order of
+	// magnitude does not regress the path. Avoids spawning one goroutine per
+	// connection on bulk shutdown (thousands of conns → thousands of goroutines).
+	sm.OnUnsubscribe(key)
 	client.conn.Close()
 }
 
@@ -525,7 +529,10 @@ func (sm *Stream) broadcastPool(pool *Pool, data []byte, snapshot bool, version 
 	}
 	wg.Wait()
 
-	// Remove failed connections from pool while we still hold the pool lock
+	// Remove failed connections from pool while we still hold the pool lock.
+	// OnUnsubscribe is dispatched in a goroutine here (unlike Close) because the
+	// caller still holds pool.mutex; a slow callback would stall every broadcast
+	// reader on this pool.
 	for _, client := range failedConns {
 		pool.connections = removeConn(pool.connections, client)
 		go sm.OnUnsubscribe(pool.Key)
