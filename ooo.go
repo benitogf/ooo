@@ -259,6 +259,7 @@ type Server struct {
 	DroppedEvents       int64                // Atomic counter of events dropped by the sharded watcher on send timeout
 	startErr            chan error           // channel for startup errors
 	clockStop           chan struct{}        // channel to signal clock goroutine to stop
+	consoleAutoBuilt    bool                 // true when defaults() built Console (so post-Listen rebuild can swap address without clobbering a user-supplied Console)
 }
 
 // Validate checks the server configuration for common issues.
@@ -722,6 +723,7 @@ func (server *Server) defaults() {
 	}
 	if server.Console == nil {
 		server.Console = coat.NewConsole(server.Address, server.Silence)
+		server.consoleAutoBuilt = true
 	}
 	if server.Stream.Console == nil {
 		server.Stream.Console = server.Console
@@ -876,7 +878,12 @@ func (server *Server) StartWithError(address string) error {
 	if err != nil {
 		return err
 	}
-	server.Console = coat.NewConsole(server.Address, server.Silence)
+	// Rebuild the auto-built Console with the resolved listen address; only
+	// when defaults() built it, so a user-supplied Console is preserved.
+	if server.consoleAutoBuilt {
+		server.Console = coat.NewConsole(server.Address, server.Silence)
+		server.Stream.Console = server.Console
+	}
 	server.clockStop = make(chan struct{})
 	server.clockWg.Add(1)
 	go server.startClock()

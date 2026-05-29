@@ -13,11 +13,37 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benitogf/coat"
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/storage"
 	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 )
+
+// TestServerStartPreservesUserSuppliedConsole asserts that a Console
+// provided by the caller is not replaced during Start. Pre-fix the
+// post-Listen rebuild at the end of StartWithError overwrote the field
+// unconditionally, dropping any custom Console the caller had attached.
+func TestServerStartPreservesUserSuppliedConsole(t *testing.T) {
+	custom := coat.NewConsole("custom-console-marker", true)
+	server := Server{Console: custom}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+	require.Same(t, custom, server.Console, "user-supplied Console must survive Start")
+}
+
+// TestServerStartConsoleBuiltOnceWithResolvedAddress asserts that when
+// no Console is supplied, the auto-built Console exists exactly once
+// using the resolved listen address (not the placeholder ":0" form).
+func TestServerStartConsoleBuiltOnceWithResolvedAddress(t *testing.T) {
+	server := Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+	require.NotNil(t, server.Console)
+	require.NotContains(t, server.Address, ":0", "Address should be resolved post-Listen")
+}
 
 func TestDoubleShutdown(t *testing.T) {
 	server := Server{}
