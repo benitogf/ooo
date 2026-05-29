@@ -466,3 +466,40 @@ ooo includes a built-in web-based ui to manage and monitor your data. The ui is 
 - **Static Mode** - Traditional CRUD operations with JSON editor
 - **State Monitor** - View active WebSocket connections and subscriptions
 - **Filter Management** - Visual representation of filter types (open, read-only, write-only, custom, limit)
+
+
+## Shutdown & durability
+
+`server.Close(sig)` runs a bounded graceful shutdown: it drains in-flight HTTP requests up to `Server.Deadline`, closes WebSocket connections, closes the storage backend, and runs any user-supplied teardown callbacks. `server.WaitClose()` is the convenience wrapper that blocks on SIGINT / SIGTERM / SIGHUP and then calls `Close` with the received signal.
+
+### SIGKILL is uncatchable
+
+POSIX requires SIGKILL (and SIGSTOP) to be delivered by the kernel with no opportunity for user code to run. When SIGKILL arrives:
+
+- No deferred functions execute. `Close` does not run. `OnClose` does not run.
+- Any queued broadcasts, watcher events, and writes that the storage backend has not yet flushed to durable media are lost.
+- Connected subscribers receive a TCP RST and re-fetch state on reconnect.
+
+Durability across hard kill is the responsibility of the storage backend, not of `Server.Close`. Pick a backend whose contract you trust and budget your shutdown window so SIGKILL never has to fire under normal operation.
+
+### Orchestrator configuration
+
+The orchestrator should send SIGTERM first and grant a grace window at least as long as `Server.Deadline` plus the worst-case runtime of every user-supplied callback (preClose, proxy, OnClose). SIGKILL should be the orchestrator's stuck-teardown fallback, not the primary shutdown path.
+
+On Kubernetes, set `terminationGracePeriodSeconds` accordingly. The default of 30s is enough for most configurations; raise it if you've increased `Server.Deadline` or if your callbacks flush sizable state.
+
+### Teardown callbacks
+
+`Server` exposes three places to register teardown code, each running at a different point in `Close`:
+
+| Hook | When it runs | Storage / stream / HTTP state | Typical use |
+|---|---|---|---|
+| `AddPreCloseCleanup(fn)` | First, before any tear-down | All up | Flush in-memory state to storage, broadcast a "shutting down" message |
+| `AddProxyCleanup(fn)` | After preClose, before the stream closes | Stream still up | Unsubscribe from upstream proxy servers |
+| `OnClose` (field) | Last, after everything else is closed | All torn down | Close user-owned resources (DB pools, log handles) |
+
+Callbacks run synchronously and `Close` blocks until each returns. Today there is **no aggregate timeout** on user callbacks — a callback that hangs hangs `Close`, which can push the orchestrator past `terminationGracePeriodSeconds` and trigger SIGKILL. Keep callbacks short, or make them respect their own timeouts.
+
+### Custom Endpoint handlers
+
+HTTP handlers registered via `server.Endpoint` are not wrapped in a request timeout. During shutdown they receive a cancellation through `r.Context().Done()` once `Server.Deadline` elapses, but a handler that ignores its context will keep running and Go cannot kill it. Always check `r.Context().Done()` in long-running custom handlers if you want them to exit cleanly during shutdown.

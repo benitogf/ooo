@@ -901,7 +901,52 @@ func (server *Server) Start(address string) {
 	}
 }
 
-// Close : shutdown the http server and database connection.
+// Close runs the graceful shutdown sequence: drains in-flight HTTP
+// requests up to Server.Deadline, closes all WebSocket connections,
+// closes the storage backend, and invokes user-supplied callbacks at
+// well-defined points.
+//
+// Teardown sequence (in order):
+//
+//  1. Mark the server as closing (atomic, idempotent — second concurrent
+//     call returns immediately).
+//  2. Run preClose cleanups (registered via Server.AddPreCloseCleanup).
+//     Storage, stream, and HTTP are still up — callbacks may broadcast,
+//     read, or write.
+//  3. Stop the internal clock goroutine (bounded — clock selects on a
+//     stop channel).
+//  4. Run proxy cleanups (registered via Server.AddProxyCleanup).
+//  5. Close all WebSocket connections (bounded — per-connection TCP close).
+//  6. Stop the HTTP server: graceful shutdown with a context bounded by
+//     Server.Deadline (default 10s), then force-close to cancel any
+//     still-running request contexts. Handlers that honour
+//     r.Context().Done() exit then; handlers that ignore the context
+//     leak (Go cannot kill them).
+//  7. Wait for HTTP handlers and the listen goroutine to exit.
+//  8. Close the storage backend.
+//  9. Wait for storage-watcher goroutines (bounded — they exit when
+//     storage closes their channels).
+//  10. Run Server.OnClose. Storage, stream, and HTTP are all torn down —
+//     use this for closing user-owned resources only.
+//
+// Bound:
+//
+//   - HTTP request drain: bounded by Server.Deadline.
+//   - Internal waitgroups (clock, listen, watch, handler-for-cooperative-handlers):
+//     bounded by their own stop signals.
+//   - Storage.Close: bounded for in-tree layers; depends on the bottom-layer
+//     contract for embedded storages (e.g. ko, nopog).
+//   - preClose cleanups, proxy cleanups, and OnClose: NOT bounded. They
+//     run synchronously and Close blocks until each returns. Keep them
+//     short — the orchestrator's SIGTERM-to-SIGKILL window has to cover
+//     Deadline plus the worst case across all of them.
+//   - HTTP handlers that ignore r.Context().Done(): NOT bounded. They
+//     can outlive Close. Custom Endpoint handlers in particular must
+//     check the context.
+//
+// Hard-kill: SIGKILL is uncatchable; nothing in this sequence runs.
+// See WaitClose for the SIGTERM/SIGKILL contract operators should
+// configure for.
 //
 // Safe to call from multiple goroutines: an atomic CompareAndSwap on
 // `closing` lets only the first caller through; concurrent callers
@@ -959,7 +1004,24 @@ func (server *Server) Close(sig os.Signal) {
 	}
 }
 
-// WaitClose : Blocks waiting for SIGINT, SIGTERM, SIGKILL, SIGHUP
+// WaitClose blocks until the process receives SIGINT, SIGTERM, or SIGHUP
+// and then runs the graceful Close sequence with the received signal.
+//
+// SIGKILL is intentionally not listed. POSIX requires SIGKILL (and
+// SIGSTOP) to be uncatchable: the kernel terminates the process with
+// no opportunity for user code to run, so no defers, no Close, no
+// OnClose, and no user callbacks execute. Anything sitting in
+// in-process buffers (queued broadcasts, watcher events, writes that
+// the storage backend has not yet flushed to durable media) is lost
+// when SIGKILL is delivered. Durability across hard kill is the
+// responsibility of the storage backend, not Server.Close.
+//
+// Operators should configure their orchestrator to send SIGTERM first
+// and grant a grace window at least as long as Server.Deadline plus
+// the worst-case runtime of any user-supplied preClose / proxy /
+// OnClose callback. On Kubernetes this is `terminationGracePeriodSeconds`.
+// SIGKILL should be the orchestrator's fallback for a stuck
+// SIGTERM teardown, not the primary shutdown path.
 func (server *Server) WaitClose() {
 	server.Signal = make(chan os.Signal, 1)
 	done := make(chan bool, 1)
