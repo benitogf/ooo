@@ -14,8 +14,33 @@ import (
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
+
+// maskedNotFound wraps storage.ErrNotFound but its Error() text omits
+// the literal "not found" substring. Used to exercise unpublish's
+// not-found detection path independently of message formatting.
+type maskedNotFound struct{ inner error }
+
+func (m maskedNotFound) Error() string { return "backend rejected delete" }
+func (m maskedNotFound) Unwrap() error { return m.inner }
+
+// wrapNotFoundStorage decorates a real Database so Del returns
+// maskedNotFound when the underlying layer reports ErrNotFound.
+// All other operations pass through unchanged.
+type wrapNotFoundStorage struct{ storage.Database }
+
+func (w *wrapNotFoundStorage) Del(key string) error {
+	err := w.Database.Del(key)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, storage.ErrNotFound) {
+		return maskedNotFound{inner: storage.ErrNotFound}
+	}
+	return err
+}
 
 func TestRestPostNonObject(t *testing.T) {
 	if runtime.GOOS != "windows" {
@@ -210,6 +235,30 @@ func TestRestDel(t *testing.T) {
 	require.Error(t, err)
 	_, err = server.Storage.Get("test/2")
 	require.Error(t, err)
+}
+
+func TestRestDelNotFoundWrappedError(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{
+		Storage: &wrapNotFoundStorage{
+			Database: storage.New(storage.LayeredConfig{Memory: storage.NewMemoryLayer()}),
+		},
+	}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Deleting a missing key surfaces storage.ErrNotFound wrapped in a
+	// custom error type whose message no longer contains "not found".
+	// The handler must still return 404 — detection has to use
+	// errors.Is against storage.ErrNotFound, not a substring match.
+	req := httptest.NewRequest("DELETE", "/missing", nil)
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
 func TestRestGet(t *testing.T) {

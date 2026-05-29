@@ -13,6 +13,7 @@ import (
 	"github.com/benitogf/ooo/merge"
 	"github.com/benitogf/ooo/messages"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/storage"
 	"github.com/benitogf/ooo/stream"
 	"github.com/gorilla/mux"
 )
@@ -224,7 +225,7 @@ func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		server.Console.Err(err.Error())
-		if err == ErrNotFound || strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, storage.ErrNotFound) {
 			w.WriteHeader(http.StatusNotFound)
 		} else {
 			w.WriteHeader(http.StatusInternalServerError)
