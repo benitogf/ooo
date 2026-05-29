@@ -833,3 +833,81 @@ func TestRestGlobPatternEdgeCases(t *testing.T) {
 	resp = w.Result()
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
+
+// quoteInjectingStorage wraps a Database and returns an index containing
+// a JSON-significant character (") from Set and Push. The handler's
+// {"index":"..."} response must encode via json.Marshal so the body
+// stays valid JSON even when the index is hostile to string concatenation.
+type quoteInjectingStorage struct{ storage.Database }
+
+func (q *quoteInjectingStorage) Set(k string, data json.RawMessage) (string, error) {
+	if _, err := q.Database.Set(k, data); err != nil {
+		return "", err
+	}
+	return `te"st`, nil
+}
+
+func (q *quoteInjectingStorage) Push(path string, data json.RawMessage) (string, error) {
+	if _, err := q.Database.Push(path, data); err != nil {
+		return "", err
+	}
+	return `te"st`, nil
+}
+
+func TestRestPublishResponseEncodesIndexAsJSON(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{
+		Storage: &quoteInjectingStorage{
+			Database: storage.New(storage.LayeredConfig{Memory: storage.NewMemoryLayer()}),
+		},
+	}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	body := []byte(`{"data":"test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/k", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	respBody, _ := io.ReadAll(resp.Body)
+	var parsed struct {
+		Index string `json:"index"`
+	}
+	require.NoError(t, json.Unmarshal(respBody, &parsed), "response must be valid JSON, got: %s", respBody)
+	require.Equal(t, `te"st`, parsed.Index)
+}
+
+func TestRestPatchResponseEncodesIndexAsJSON(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Parallel()
+	}
+	server := ooo.Server{
+		Storage: &quoteInjectingStorage{
+			Database: storage.New(storage.LayeredConfig{Memory: storage.NewMemoryLayer()}),
+		},
+	}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	// Seed the key so PATCH has something to merge against.
+	_, err := server.Storage.Set("k", json.RawMessage(`{"a":1}`))
+	require.NoError(t, err)
+
+	body := []byte(`{"b":2}`)
+	req := httptest.NewRequest(http.MethodPatch, "/k", bytes.NewBuffer(body))
+	w := httptest.NewRecorder()
+	server.Router.ServeHTTP(w, req)
+	resp := w.Result()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+	respBody, _ := io.ReadAll(resp.Body)
+	var parsed struct {
+		Index string `json:"index"`
+	}
+	require.NoError(t, json.Unmarshal(respBody, &parsed), "response must be valid JSON, got: %s", respBody)
+	require.Equal(t, `te"st`, parsed.Index)
+}

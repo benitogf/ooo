@@ -74,8 +74,7 @@ func (server *Server) publish(w http.ResponseWriter, r *http.Request) {
 
 	server.Console.Log("publish", _key)
 	server.filters.AfterWrite.Check(_key)
-	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"index":"` + index + `"}`))
+	writeIndexResponse(w, index)
 }
 
 func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
@@ -150,8 +149,23 @@ func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
 
 	server.Console.Log("patch", _key)
 	server.filters.AfterWrite.Check(_key)
+	writeIndexResponse(w, index)
+}
+
+// writeIndexResponse writes the canonical {"index":"..."} response body
+// using json.Marshal so JSON-significant characters in index do not
+// corrupt the response.
+func writeIndexResponse(w http.ResponseWriter, index string) {
+	body, err := json.Marshal(struct {
+		Index string `json:"index"`
+	}{Index: index})
+	if err != nil {
+		// json.Marshal of a string field cannot fail in practice; fall back
+		// to an empty object so the client still receives valid JSON.
+		body = []byte(`{}`)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Write([]byte(`{"index":"` + index + `"}`))
+	w.Write(body)
 }
 
 func (server *Server) read(w http.ResponseWriter, r *http.Request) {
