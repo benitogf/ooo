@@ -494,8 +494,8 @@ On Kubernetes, set `terminationGracePeriodSeconds` accordingly. The default of 3
 
 | Hook | When it runs | Storage / stream / HTTP state | Typical use |
 |---|---|---|---|
-| `AddPreCloseCleanup(fn)` | First, before any tear-down | All up | Flush in-memory state to storage, broadcast a "shutting down" message |
-| `AddProxyCleanup(fn)` | After preClose, before the stream closes | Stream still up | Unsubscribe from upstream proxy servers |
+| `RegisterPreClose(fn)` | First, before any tear-down | All up | Flush in-memory state to storage, broadcast a "shutting down" message |
+| `RegisterProxyCleanup(fn)` | After preClose, before the stream closes | Stream still up | Unsubscribe from upstream proxy servers |
 | `OnClose` (field) | Last, after everything else is closed | All torn down | Close user-owned resources (DB pools, log handles) |
 
 Callbacks run synchronously and `Close` blocks until each returns. Today there is **no aggregate timeout** on user callbacks — a callback that hangs hangs `Close`, which can push the orchestrator past `terminationGracePeriodSeconds` and trigger SIGKILL. Keep callbacks short, or make them respect their own timeouts.

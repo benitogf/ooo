@@ -910,12 +910,12 @@ func (server *Server) Start(address string) {
 //
 //  1. Mark the server as closing (atomic, idempotent — second concurrent
 //     call returns immediately).
-//  2. Run preClose cleanups (registered via Server.AddPreCloseCleanup).
+//  2. Run preClose cleanups (registered via Server.RegisterPreClose).
 //     Storage, stream, and HTTP are still up — callbacks may broadcast,
 //     read, or write.
 //  3. Stop the internal clock goroutine (bounded — clock selects on a
 //     stop channel).
-//  4. Run proxy cleanups (registered via Server.AddProxyCleanup).
+//  4. Run proxy cleanups (registered via Server.RegisterProxyCleanup).
 //  5. Close all WebSocket connections (bounded — per-connection TCP close).
 //  6. Stop the HTTP server: graceful shutdown with a context bounded by
 //     Server.Deadline (default 10s), then force-close to cancel any
@@ -932,8 +932,9 @@ func (server *Server) Start(address string) {
 // Bound:
 //
 //   - HTTP request drain: bounded by Server.Deadline.
-//   - Internal waitgroups (clock, listen, watch, handler-for-cooperative-handlers):
-//     bounded by their own stop signals.
+//   - Internal waitgroups (clock, listen, watch): bounded by their own
+//     stop signals. The handler waitgroup is bounded only for handlers
+//     that respect r.Context().Done(); see below.
 //   - Storage.Close: bounded for in-tree layers; depends on the bottom-layer
 //     contract for embedded storages (e.g. ko, nopog).
 //   - preClose cleanups, proxy cleanups, and OnClose: NOT bounded. They

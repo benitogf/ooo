@@ -361,9 +361,14 @@ func TestServerCloseHealthyPathReturnsPromptly(t *testing.T) {
 	server := &Server{Silence: true}
 	server.Start("localhost:0")
 
-	// Drive a couple of normal requests so the handlerWg has actually
-	// counted up and back down, exercising the full path rather than
-	// the zero-traffic shortcut.
+	// Drive a few normal requests so the storage watcher and broadcast
+	// path see real traffic before tear-down, rather than running the
+	// zero-traffic shortcut. handlerWg is only incremented by the clock
+	// and WebSocket handlers, not by REST publish, so REST traffic
+	// alone does not exercise the HTTP-handler join — but it does
+	// exercise Storage.Set, the watch goroutines, and the stream
+	// broadcast pipeline, which is the surface most likely to grow a
+	// new unbounded wait.
 	for range 3 {
 		req := httptest.NewRequest(http.MethodPost, "/k", bytes.NewBuffer([]byte(`{"v":1}`)))
 		w := httptest.NewRecorder()
