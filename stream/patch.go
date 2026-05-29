@@ -11,6 +11,12 @@ import (
 	"github.com/benitogf/ooo/meta"
 )
 
+// emptyDeleteObject is the canonical "object cleared by delete" value placed in
+// pool caches on the "del" broadcast path. It is read-only after init: callers
+// either swap the cache pointer to it or pass it to generateObjectPatch, which
+// only encodes the value. Hoisting saves one allocation per delete broadcast.
+var emptyDeleteObject = meta.Object{Data: json.RawMessage("{}")}
+
 // Pool for reusing single-operation patch slices
 var patchOpPool = sync.Pool{
 	New: func() any {
@@ -222,15 +228,14 @@ func processObjectBroadcast(cache *Cache, poolKey string, operation string, obj 
 		return BroadcastResult{Data: patch, Snapshot: false}
 
 	case "del":
-		empty := meta.Object{Data: json.RawMessage("{}")}
 		oldObj := cache.Object
-		cache.Object = &empty
+		cache.Object = &emptyDeleteObject
 
 		if noPatch {
 			return BroadcastResult{Data: meta.EmptyObject, Snapshot: true}
 		}
 
-		patch, snapshot := generateObjectPatch(oldObj, &empty)
+		patch, snapshot := generateObjectPatch(oldObj, &emptyDeleteObject)
 		if snapshot || patch == nil {
 			return BroadcastResult{Data: meta.EmptyObject, Snapshot: true}
 		}
