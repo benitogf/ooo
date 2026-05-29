@@ -348,6 +348,15 @@ func findMatch[T any](items []T, path string, getPath func(T) string) int {
 	return -1
 }
 
+// errRouteNotDefined builds the standard "no matching filter in static mode" error.
+// Returns nil when static is false so callers can branch on a single err value.
+func errRouteNotDefined(path string, static bool) error {
+	if !static {
+		return nil
+	}
+	return fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
+}
+
 // Check finds and executes the first matching watcher for the given path.
 // Only the first matching watcher is called (first-match-only behavior).
 func (r Watcher) Check(path string) {
@@ -364,12 +373,8 @@ func (r Watcher) Check(path string) {
 func (r Blocker) Check(path string, static bool) error {
 	match := findMatch(r, path, func(h block) string { return h.path })
 
-	if match == -1 && !static {
-		return nil
-	}
-
-	if match == -1 && static {
-		return fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
+	if match == -1 {
+		return errRouteNotDefined(path, static)
 	}
 
 	return r[match].apply(path)
@@ -381,12 +386,8 @@ func (r Blocker) Check(path string, static bool) error {
 func (r Filter) CheckStatic(path string, static bool) error {
 	match := findMatch(r, path, func(f filter) string { return f.path })
 
-	if match == -1 && !static {
-		return nil
-	}
-
-	if match == -1 && static {
-		return fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
+	if match == -1 {
+		return errRouteNotDefined(path, static)
 	}
 
 	return nil
@@ -418,12 +419,11 @@ func (r Filter) Apply(index int, path string, data json.RawMessage) (json.RawMes
 func (r Filter) Check(path string, data json.RawMessage, static bool) (json.RawMessage, error) {
 	match := findMatch(r, path, func(f filter) string { return f.path })
 
-	if match == -1 && !static {
+	if match == -1 {
+		if err := errRouteNotDefined(path, static); err != nil {
+			return nil, err
+		}
 		return data, nil
-	}
-
-	if match == -1 && static {
-		return nil, fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
 	}
 
 	filtered, err := r[match].apply(path, data)
@@ -449,12 +449,11 @@ func (r ObjectFilter) HasMatch(path string) int {
 func (r ObjectFilter) Check(path string, obj meta.Object, static bool) (meta.Object, error) {
 	match := findMatch(r, path, func(f objectFilter) string { return f.path })
 
-	if match == -1 && !static {
+	if match == -1 {
+		if err := errRouteNotDefined(path, static); err != nil {
+			return meta.Object{}, err
+		}
 		return obj, nil
-	}
-
-	if match == -1 && static {
-		return meta.Object{}, fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
 	}
 
 	return r[match].apply(path, obj)
@@ -476,7 +475,7 @@ func (r ObjectFilter) CheckWithListFallback(path string, obj meta.Object, static
 			// A list filter covers this path, allow the read with no transformation
 			return obj, nil
 		}
-		return meta.Object{}, fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
+		return meta.Object{}, errRouteNotDefined(path, true)
 	}
 
 	return r[match].apply(path, obj)
@@ -493,12 +492,11 @@ func (r ListFilter) HasMatch(path string) int {
 func (r ListFilter) Check(path string, objs []meta.Object, static bool) ([]meta.Object, error) {
 	match := findMatch(r, path, func(f listFilter) string { return f.path })
 
-	if match == -1 && !static {
+	if match == -1 {
+		if err := errRouteNotDefined(path, static); err != nil {
+			return nil, err
+		}
 		return objs, nil
-	}
-
-	if match == -1 && static {
-		return nil, fmt.Errorf("%w, key:%s", ErrRouteNotDefined, path)
 	}
 
 	return r[match].apply(path, objs)
