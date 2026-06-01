@@ -344,6 +344,51 @@ func TestCloseMarksServerInactive(t *testing.T) {
 	require.False(t, server.Active())
 }
 
+// TestServerCloseHealthyPathReturnsPromptly is a regression guard: on a
+// healthy path (no stuck handlers, no user callbacks registered) Close
+// must complete in well under a second. Internal teardown is sequenced
+// by clockWg / listenWg / handlerWg / watchWg, all of which become
+// signalable as soon as the listener is force-closed and the storage
+// watcher channels are closed. If a future change adds a new internal
+// wait that can stretch into the second-scale on a healthy path, this
+// test will fail.
+//
+// Out of scope here: stuck custom Endpoint handlers (covered by
+// TestServerCloseShutdownBoundedByDeadline) and user-supplied
+// preClose/proxy/OnClose callbacks, which are bounded by user contract,
+// not by Close itself.
+func TestServerCloseHealthyPathReturnsPromptly(t *testing.T) {
+	server := &Server{Silence: true}
+	server.Start("localhost:0")
+	// Defensive deferred Close so a failing require below does not leak
+	// the listener and the clock / watch / listen goroutines. The
+	// explicit Close below runs first; the deferred call is a no-op via
+	// the closing-atomic CAS in Close.
+	defer server.Close(os.Interrupt)
+
+	// Drive a few normal requests so the storage watcher and broadcast
+	// path see real traffic before tear-down, rather than running the
+	// zero-traffic shortcut. handlerWg is only incremented by the clock
+	// and WebSocket handlers, not by REST publish, so REST traffic
+	// alone does not exercise the HTTP-handler join — but it does
+	// exercise Storage.Set, the watch goroutines, and the stream
+	// broadcast pipeline, which is the surface most likely to grow a
+	// new unbounded wait.
+	for range 3 {
+		req := httptest.NewRequest(http.MethodPost, "/k", bytes.NewBuffer([]byte(`{"v":1}`)))
+		w := httptest.NewRecorder()
+		server.Router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Result().StatusCode)
+	}
+
+	start := time.Now()
+	server.Close(os.Interrupt)
+	elapsed := time.Since(start)
+
+	require.Less(t, elapsed, 500*time.Millisecond,
+		"healthy-path Close returned in %s; suspect a new unbounded step in Close()", elapsed)
+}
+
 // TestServerCloseShutdownBoundedByDeadline asserts that Server.Close does not
 // hang forever on a stuck HTTP handler. The shutdown context must be bounded
 // by server.Deadline. Pre-fix, Shutdown(context.Background()) waited for the
