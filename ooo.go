@@ -932,9 +932,15 @@ func (server *Server) Start(address string) {
 // Bound:
 //
 //   - HTTP request drain: bounded by Server.Deadline.
-//   - Internal waitgroups (clock, listen, watch): bounded by their own
-//     stop signals. The handler waitgroup is bounded only for handlers
-//     that respect r.Context().Done(); see below.
+//   - Internal waitgroups (clock, listen, watch, handler): bounded.
+//     Clock selects on clockStop, watch goroutines exit when storage
+//     closes their channels, the listen goroutine exits when the HTTP
+//     server's listener is force-closed at step 6, and the handler
+//     waitgroup only tracks the long-lived clock long-poll and
+//     WebSocket handlers — both of which exit when Stream.CloseAll
+//     closes their connections at step 5. REST publish / read / patch /
+//     unpublish and custom Endpoint handlers are not tracked by the
+//     handler waitgroup; see the next bullet for how they're bounded.
 //   - Storage.Close: bounded for in-tree layers; depends on the bottom-layer
 //     contract for embedded storages (e.g. ko, nopog).
 //   - preClose cleanups, proxy cleanups, and OnClose: NOT bounded. They

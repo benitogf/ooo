@@ -360,6 +360,11 @@ func TestCloseMarksServerInactive(t *testing.T) {
 func TestServerCloseHealthyPathReturnsPromptly(t *testing.T) {
 	server := &Server{Silence: true}
 	server.Start("localhost:0")
+	// Defensive deferred Close so a failing require below does not leak
+	// the listener and the clock / watch / listen goroutines. The
+	// explicit Close below runs first; the deferred call is a no-op via
+	// the closing-atomic CAS in Close.
+	defer server.Close(os.Interrupt)
 
 	// Drive a few normal requests so the storage watcher and broadcast
 	// path see real traffic before tear-down, rather than running the
