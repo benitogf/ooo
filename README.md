@@ -488,19 +488,21 @@ The orchestrator should send SIGTERM first and grant a grace window at least as 
 
 On Kubernetes, set `terminationGracePeriodSeconds` accordingly. The default of 30s is enough for most configurations; raise it if you've increased `Server.Deadline` or if your callbacks flush sizable state.
 
-### Teardown callbacks
+### Teardown hooks
 
-`Server` exposes three places to register teardown code, each running at a different point in `Close`:
+`Server.RegisterCloseHook(phase, fn)` registers teardown code to run at one of three points in `Close`. Multiple hooks at the same phase run in registration order; phases themselves run in declaration order.
 
-| Hook | When it runs | Storage / stream / HTTP state | Typical use |
+| Phase | When it runs | Storage / stream / HTTP state | Typical use |
 |---|---|---|---|
-| `RegisterPreClose(fn)` | First, before any tear-down | All up | Flush in-memory state to storage, broadcast a "shutting down" message |
-| `RegisterProxyCleanup(fn)` | After preClose, before the stream closes | Stream still up | Unsubscribe from upstream proxy servers |
-| `OnClose` (field) | Last, after everything else is closed | All torn down | Close user-owned resources (DB pools, log handles) |
+| `ooo.PreShutdown` | First, before any tear-down | All up | Flush in-memory state to storage, broadcast a "shutting down" message |
+| `ooo.ProxyTeardown` | After PreShutdown, before the stream closes | Stream still up | Unsubscribe from upstream proxy servers |
+| `ooo.PostShutdown` | Last, after everything else is closed | All torn down | Close user-owned resources (DB pools, log handles) |
 
-Callbacks run synchronously and `Close` blocks until each returns. By default there is **no aggregate timeout** on user callbacks — a callback that hangs hangs `Close`, which can push the orchestrator past `terminationGracePeriodSeconds` and trigger SIGKILL. Keep callbacks short, or make them respect their own timeouts.
+The earlier per-phase registrars (`RegisterPreClose`, `RegisterProxyCleanup`, and the `OnClose` field) remain available as deprecated thin shims over `RegisterCloseHook`, so existing code keeps working unchanged. New code should prefer the phased API.
 
-To opt into a hard bound on the combined runtime of `preClose`, `proxy`, and `OnClose` callbacks, set `Server.CloseCallbackBudget` to a positive `time.Duration`. Only the time spent inside callbacks counts toward this budget — the wall clock that `Close` spends in its own internal teardown (the `Deadline`-bounded HTTP drain, `Storage.Close`, waitgroup joins) is not charged against it, so a slow drain will not silently consume the budget that callbacks were meant to use. Once the cumulative callback-runtime exceeds the budget, remaining callbacks are skipped and a one-line warning is logged via `Server.Console`. A callback that is already running is not interrupted — Go cannot cancel arbitrary user code — only callbacks that have not yet started are skipped. The default (zero) preserves the existing unbounded contract.
+Hooks run synchronously and `Close` blocks until each returns. By default there is **no aggregate timeout** on user callbacks — a callback that hangs hangs `Close`, which can push the orchestrator past `terminationGracePeriodSeconds` and trigger SIGKILL. Keep callbacks short, or make them respect their own timeouts.
+
+To opt into a hard bound on the combined runtime of every registered hook, set `Server.CloseCallbackBudget` to a positive `time.Duration`. Only the time spent inside hooks counts toward this budget — the wall clock that `Close` spends in its own internal teardown (the `Deadline`-bounded HTTP drain, `Storage.Close`, waitgroup joins) is not charged against it, so a slow drain will not silently consume the budget that callbacks were meant to use. Once the cumulative callback-runtime exceeds the budget, remaining callbacks are skipped and a one-line warning is logged via `Server.Console`. A callback that is already running is not interrupted — Go cannot cancel arbitrary user code — only callbacks that have not yet started are skipped. The default (zero) preserves the existing unbounded contract.
 
 ### Custom Endpoint handlers
 

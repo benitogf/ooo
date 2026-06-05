@@ -247,22 +247,37 @@ func (server *Server) RegisterProxy(info ui.ProxyInfo) {
 	server.registryMu.Unlock()
 }
 
+// RegisterCloseHook registers fn to run during Server.Close at the
+// given teardown phase. Multiple hooks at the same phase run in
+// registration order. Phases run in CloseHookPhase declaration order
+// (PreShutdown → ProxyTeardown → PostShutdown). The aggregate
+// callback runtime is bounded by Server.CloseCallbackBudget when set.
+// Panics if phase is out of range.
+func (server *Server) RegisterCloseHook(phase CloseHookPhase, fn func()) {
+	if phase < PreShutdown || phase >= closeHookPhaseCount {
+		panic("ooo: RegisterCloseHook called with invalid CloseHookPhase")
+	}
+	server.closeHooksMu.Lock()
+	server.closeHooks[phase] = append(server.closeHooks[phase], fn)
+	server.closeHooksMu.Unlock()
+}
+
 // RegisterProxyCleanup registers a cleanup function to be called when the server closes.
 // This is used by proxy routes to clean up their remote subscriptions.
+//
+// Deprecated: use RegisterCloseHook(ProxyTeardown, cleanup) instead.
 func (server *Server) RegisterProxyCleanup(cleanup func()) {
-	server.proxyCleanupMu.Lock()
-	server.proxyCleanups = append(server.proxyCleanups, cleanup)
-	server.proxyCleanupMu.Unlock()
+	server.RegisterCloseHook(ProxyTeardown, cleanup)
 }
 
 // RegisterPreClose registers a cleanup function to be called at the very start of Close(),
 // before stream and storage cleanup. This is useful for stopping background goroutines
 // that depend on the stream being active. Multiple functions can be registered and will
 // be called in registration order.
+//
+// Deprecated: use RegisterCloseHook(PreShutdown, cleanup) instead.
 func (server *Server) RegisterPreClose(cleanup func()) {
-	server.preCloseCleanupsMu.Lock()
-	server.preCloseCleanups = append(server.preCloseCleanups, cleanup)
-	server.preCloseCleanupsMu.Unlock()
+	server.RegisterCloseHook(PreShutdown, cleanup)
 }
 
 // getEndpoints returns a snapshot of the registered endpoints. Takes
