@@ -563,11 +563,7 @@ func TestLimitFilter_CountAndMaxAge_Composition(t *testing.T) {
 		return baseTime + 100*int64(time.Minute)
 	})
 
-	// Fresh copy since ReadListFilter modifies in-place
-	copy1 := make([]meta.Object, len(allItems))
-	copy(copy1, allItems)
-
-	filtered, err := lf.ReadListFilter("combo/*", copy1)
+	filtered, err := lf.ReadListFilter("combo/*", allItems)
 	require.NoError(t, err)
 	require.Len(t, filtered, 3, "time filter keeps 3, count allows 3")
 
@@ -580,10 +576,7 @@ func TestLimitFilter_CountAndMaxAge_Composition(t *testing.T) {
 		return baseTime + 50*int64(time.Minute)
 	})
 
-	copy2 := make([]meta.Object, len(allItems))
-	copy(copy2, allItems)
-
-	filtered, err = lf.ReadListFilter("combo/*", copy2)
+	filtered, err = lf.ReadListFilter("combo/*", allItems)
 	require.NoError(t, err)
 	require.Len(t, filtered, 3, "all survive time, count caps to 3 of 5")
 }
@@ -822,4 +815,36 @@ func TestLimitFilter_Accessors(t *testing.T) {
 	require.True(t, lf3.HasMaxAge())
 	require.True(t, lf3.IsDynamic())
 	require.Equal(t, time.Hour, lf3.MaxAge())
+}
+
+// TestReadListFilter_DoesNotMutateInput asserts that calling ReadListFilter
+// does not alter the caller's slice — neither its element order nor its
+// element values. The internal pipeline (Storage.GetList → filter chain)
+// happens to pass fresh slices today, but the function is exported and
+// directly callable; callers shouldn't have to know about an implicit
+// "we'll sort + truncate your slice" contract.
+func TestReadListFilter_DoesNotMutateInput(t *testing.T) {
+	server := ooo.Server{}
+	server.Silence = true
+	server.Start("localhost:0")
+	defer server.Close(os.Interrupt)
+
+	lf, err := filters.NewLimitFilter("items/*",
+		filters.LimitFilterConfig{Limit: 2, Order: filters.OrderDesc},
+		server.Storage,
+	)
+	require.NoError(t, err)
+
+	items := []meta.Object{
+		{Created: 10, Index: "a"},
+		{Created: 30, Index: "b"},
+		{Created: 20, Index: "c"},
+	}
+	snapshot := append([]meta.Object(nil), items...)
+
+	_, err = lf.ReadListFilter("items/*", items)
+	require.NoError(t, err)
+
+	require.Equal(t, snapshot, items,
+		"caller's slice must not be mutated by ReadListFilter")
 }
