@@ -498,7 +498,9 @@ On Kubernetes, set `terminationGracePeriodSeconds` accordingly. The default of 3
 | `RegisterProxyCleanup(fn)` | After preClose, before the stream closes | Stream still up | Unsubscribe from upstream proxy servers |
 | `OnClose` (field) | Last, after everything else is closed | All torn down | Close user-owned resources (DB pools, log handles) |
 
-Callbacks run synchronously and `Close` blocks until each returns. Today there is **no aggregate timeout** on user callbacks — a callback that hangs hangs `Close`, which can push the orchestrator past `terminationGracePeriodSeconds` and trigger SIGKILL. Keep callbacks short, or make them respect their own timeouts.
+Callbacks run synchronously and `Close` blocks until each returns. By default there is **no aggregate timeout** on user callbacks — a callback that hangs hangs `Close`, which can push the orchestrator past `terminationGracePeriodSeconds` and trigger SIGKILL. Keep callbacks short, or make them respect their own timeouts.
+
+To opt into a hard bound on the combined runtime of `preClose`, `proxy`, and `OnClose` callbacks, set `Server.CloseCallbackBudget` to a positive `time.Duration`. Once the cumulative time across previously-run callbacks exceeds the budget, remaining callbacks are skipped and a one-line warning is logged via `Server.Console`. A callback that is already running is not interrupted — Go cannot cancel arbitrary user code — only callbacks that have not yet started are skipped. The default (zero) preserves the existing unbounded contract.
 
 ### Custom Endpoint handlers
 

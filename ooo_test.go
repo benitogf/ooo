@@ -802,3 +802,58 @@ func TestOnDroppedEventReceivesOffendingEvent(t *testing.T) {
 	}
 	require.Equal(t, int64(1), atomic.LoadInt64(&server.DroppedEvents))
 }
+
+// TestCloseCallbackBudgetSkipsWhenExceeded asserts that with a positive
+// CloseCallbackBudget the teardown sequence stops invoking further
+// user-supplied callbacks once the aggregate budget is exhausted, and
+// surfaces a log line reporting how many were skipped.
+//
+// The contract: a callback that is already running is not interrupted —
+// only callbacks that have not started yet are skipped. The budget
+// covers preClose, proxy, and OnClose batches in aggregate.
+func TestCloseCallbackBudgetSkipsWhenExceeded(t *testing.T) {
+	var ran atomic.Int64
+	server := &Server{Silence: true}
+	server.CloseCallbackBudget = 30 * time.Millisecond
+	server.Start("localhost:0")
+
+	// First callback consumes more than the whole budget; subsequent
+	// callbacks must be skipped.
+	server.RegisterPreClose(func() {
+		time.Sleep(100 * time.Millisecond)
+		ran.Add(1)
+	})
+	server.RegisterPreClose(func() { ran.Add(1) })
+	server.RegisterProxyCleanup(func() { ran.Add(1) })
+	server.OnClose = func() { ran.Add(1) }
+
+	server.Close(os.Interrupt)
+
+	// The first preClose runs (was in flight when budget exceeded);
+	// the remaining three must be skipped.
+	require.Equal(t, int64(1), ran.Load(),
+		"only the first callback should have executed; budget should skip the rest")
+}
+
+// TestCloseCallbackBudgetZeroPreservesUnboundedContract asserts that the
+// default (zero) budget leaves the existing contract intact: every
+// registered callback runs regardless of how long earlier ones took.
+func TestCloseCallbackBudgetZeroPreservesUnboundedContract(t *testing.T) {
+	var ran atomic.Int64
+	server := &Server{Silence: true}
+	// CloseCallbackBudget left at zero — unbounded.
+	server.Start("localhost:0")
+
+	server.RegisterPreClose(func() {
+		time.Sleep(60 * time.Millisecond)
+		ran.Add(1)
+	})
+	server.RegisterPreClose(func() { ran.Add(1) })
+	server.RegisterProxyCleanup(func() { ran.Add(1) })
+	server.OnClose = func() { ran.Add(1) }
+
+	server.Close(os.Interrupt)
+
+	require.Equal(t, int64(4), ran.Load(),
+		"with no budget set, all four callbacks should run unconditionally")
+}
