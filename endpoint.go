@@ -3,10 +3,9 @@ package ooo
 import (
 	"fmt"
 	"net/http"
-	"reflect"
 	"regexp"
-	"strings"
 
+	"github.com/benitogf/ooo/schema"
 	"github.com/benitogf/ooo/ui"
 )
 
@@ -57,121 +56,6 @@ func extractPathVars(path string) Vars {
 	return vars
 }
 
-// reflectSchema generates a schema from a Go type using reflection
-func reflectSchema(t any) map[string]any {
-	if t == nil {
-		return nil
-	}
-
-	rv := reflect.ValueOf(t)
-	rt := rv.Type()
-
-	// Handle pointer types
-	if rt.Kind() == reflect.Ptr {
-		rt = rt.Elem()
-		rv = reflect.New(rt).Elem()
-	}
-
-	if rt.Kind() != reflect.Struct {
-		return map[string]any{"type": rt.Kind().String()}
-	}
-
-	schema := make(map[string]any)
-	for i := 0; i < rt.NumField(); i++ {
-		field := rt.Field(i)
-
-		// Skip unexported fields
-		if !field.IsExported() {
-			continue
-		}
-
-		// Get JSON tag name
-		jsonTag := field.Tag.Get("json")
-		if jsonTag == "-" {
-			continue
-		}
-
-		parts := strings.Split(jsonTag, ",")
-		fieldName := field.Name
-		if parts[0] != "" {
-			fieldName = parts[0]
-		}
-
-		// Skip omitempty fields in request schema - they're optional
-		hasOmitempty := false
-		for _, opt := range parts[1:] {
-			if opt == "omitempty" {
-				hasOmitempty = true
-				break
-			}
-		}
-		if hasOmitempty {
-			continue
-		}
-
-		// Generate default value based on type
-		schema[fieldName] = defaultValue(field.Type)
-	}
-
-	return schema
-}
-
-// defaultValue returns a default value for a type
-func defaultValue(t reflect.Type) any {
-	switch t.Kind() {
-	case reflect.String:
-		return ""
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return 0
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		return 0
-	case reflect.Float32, reflect.Float64:
-		return 0.0
-	case reflect.Bool:
-		return false
-	case reflect.Slice:
-		elemDefault := defaultValue(t.Elem())
-		return []any{elemDefault}
-	case reflect.Map:
-		return map[string]any{}
-	case reflect.Struct:
-		// Recursively handle nested structs
-		nested := make(map[string]any)
-		for i := 0; i < t.NumField(); i++ {
-			field := t.Field(i)
-			if !field.IsExported() {
-				continue
-			}
-			jsonTag := field.Tag.Get("json")
-			if jsonTag == "-" {
-				continue
-			}
-			parts := strings.Split(jsonTag, ",")
-			fieldName := field.Name
-			if parts[0] != "" {
-				fieldName = parts[0]
-			}
-			// Skip omitempty fields
-			hasOmitempty := false
-			for _, opt := range parts[1:] {
-				if opt == "omitempty" {
-					hasOmitempty = true
-					break
-				}
-			}
-			if hasOmitempty {
-				continue
-			}
-			nested[fieldName] = defaultValue(field.Type)
-		}
-		return nested
-	case reflect.Ptr:
-		return defaultValue(t.Elem())
-	default:
-		return nil
-	}
-}
-
 // AuditHandler wraps next so the configured Server.Audit gate runs
 // before the handler. Returns 401 Unauthorized when Audit denies the
 // request. Used by Endpoint registration and the proxy package so
@@ -202,8 +86,8 @@ func (server *Server) Endpoint(cfg EndpointConfig) {
 
 		info := ui.MethodInfo{
 			Method:   method,
-			Request:  reflectSchema(spec.Request),
-			Response: reflectSchema(spec.Response),
+			Request:  schema.Reflect(spec.Request),
+			Response: schema.Reflect(spec.Response),
 			Params:   spec.Params,
 		}
 
