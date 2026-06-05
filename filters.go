@@ -6,6 +6,7 @@ import (
 
 	"github.com/benitogf/ooo/filters"
 	"github.com/benitogf/ooo/key"
+	"github.com/benitogf/ooo/schema"
 	"github.com/benitogf/ooo/ui"
 )
 
@@ -134,7 +135,7 @@ func (server *Server) LimitFilter(path string, cfg filters.LimitFilterConfig) {
 	if err != nil {
 		panic(err)
 	}
-	server.registerLimitFilter(path, lf, cfg.Description, reflectSchema(cfg.Schema))
+	server.registerLimitFilter(path, lf, cfg.Description, schema.Reflect(cfg.Schema))
 }
 
 func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter, description string, schema map[string]any) {
