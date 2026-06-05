@@ -14,6 +14,7 @@ import (
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/meta"
+	"github.com/benitogf/ooo/oootest"
 	"github.com/benitogf/ooo/storage"
 	"github.com/stretchr/testify/require"
 )
@@ -191,7 +192,7 @@ func TestRestDel(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 	_ = server.Storage.Del("test")
-	index, err := server.Storage.Set("test", ooo.TEST_DATA)
+	index, err := server.Storage.Set("test", oootest.TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "test", index)
 
@@ -218,10 +219,10 @@ func TestRestDel(t *testing.T) {
 	resp = w.Result()
 	require.Equal(t, http.StatusNotFound, resp.StatusCode)
 
-	index, err = server.Storage.Set("test/1", ooo.TEST_DATA)
+	index, err = server.Storage.Set("test/1", oootest.TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "1", index)
-	index, err = server.Storage.Set("test/2", ooo.TEST_DATA_UPDATE)
+	index, err = server.Storage.Set("test/2", oootest.TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.Equal(t, "2", index)
 
@@ -271,10 +272,10 @@ func TestRestGet(t *testing.T) {
 	server.Storage.Clear()
 	defer server.Close(os.Interrupt)
 	_ = server.Storage.Del("test")
-	index, err := server.Storage.Set("test", ooo.TEST_DATA)
+	index, err := server.Storage.Set("test", oootest.TEST_DATA)
 	require.NoError(t, err)
 	require.Equal(t, "test", index)
-	index, err = server.Storage.Set("sources", ooo.TEST_DATA_UPDATE)
+	index, err = server.Storage.Set("sources", oootest.TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.Equal(t, "sources", index)
 	data, _ := server.Storage.Get("test")
@@ -318,7 +319,7 @@ func TestRestStats(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	index, err := server.Storage.Set("test/1", ooo.TEST_DATA)
+	index, err := server.Storage.Set("test/1", oootest.TEST_DATA)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
@@ -356,11 +357,11 @@ func TestRestResponseCode(t *testing.T) {
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
-	index, err := server.Storage.Set("test", ooo.TEST_DATA)
+	index, err := server.Storage.Set("test", oootest.TEST_DATA)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
-	index, err = server.Storage.Set("test/1", ooo.TEST_DATA_UPDATE)
+	index, err = server.Storage.Set("test/1", oootest.TEST_DATA_UPDATE)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 

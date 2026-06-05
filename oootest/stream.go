@@ -1,4 +1,4 @@
-package ooo
+package oootest
 
 import (
 	"encoding/json"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/benitogf/jsondiff"
 	"github.com/benitogf/jsonpatch"
+	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
 	ooio "github.com/benitogf/ooo/io"
 	"github.com/benitogf/ooo/messages"
@@ -24,7 +25,7 @@ import (
 )
 
 // remoteConfig creates a RemoteConfig for the given server
-func remoteConfig(server *Server) ooio.RemoteConfig {
+func remoteConfig(server *ooo.Server) ooio.RemoteConfig {
 	return ooio.RemoteConfig{
 		Client: &http.Client{},
 		Host:   server.Address,
@@ -33,7 +34,7 @@ func remoteConfig(server *Server) ooio.RemoteConfig {
 
 // StreamBroadcastTest testing stream function
 // Note: Uses raw websocket to verify patch protocol and meta.Object structure
-func StreamBroadcastTest(t *testing.T, server *Server) {
+func StreamBroadcastTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	var postIndexResponse ooio.IndexResponse
 	var wsObject meta.Object
@@ -108,7 +109,7 @@ func StreamBroadcastTest(t *testing.T, server *Server) {
 
 // StreamItemGlobBroadcastTest testing stream function
 // Note: Uses raw websocket to verify patch protocol and meta.Object structure
-func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
+func StreamItemGlobBroadcastTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	var postIndexResponse ooio.IndexResponse
 	var wsObject meta.Object
@@ -184,7 +185,7 @@ func StreamItemGlobBroadcastTest(t *testing.T, server *Server) {
 
 // StreamGlobBroadcastTest testing stream function
 // Note: This test uses raw websocket to verify patch/snapshot protocol behavior
-func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
+func StreamGlobBroadcastTest(t *testing.T, server *ooo.Server, n int) {
 	var wg sync.WaitGroup
 	var indexResponse ooio.IndexResponse
 	var wsObjects []meta.Object
@@ -302,7 +303,7 @@ func StreamGlobBroadcastTest(t *testing.T, server *Server, n int) {
 
 // StreamBroadcastFilterTest testing stream function
 // Note: This test uses raw websocket to verify snapshot/patch protocol behavior
-func StreamBroadcastFilterTest(t *testing.T, server *Server) {
+func StreamBroadcastFilterTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	var wsExtraEvent messages.Message
 	var callCount int
@@ -352,7 +353,7 @@ func StreamBroadcastFilterTest(t *testing.T, server *Server) {
 
 // StreamBroadcastForcePatchTest testing stream function
 // Note: This test uses raw websocket to verify ForcePatch behavior (no snapshots after first)
-func StreamBroadcastForcePatchTest(t *testing.T, server *Server) {
+func StreamBroadcastForcePatchTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	var wsExtraEvent messages.Message
 	// extra route
@@ -412,7 +413,7 @@ func StreamBroadcastForcePatchTest(t *testing.T, server *Server) {
 
 // StreamBroadcastNoPatchTest testing stream function
 // Note: This test uses raw websocket to verify NoPatch behavior (all messages are snapshots)
-func StreamBroadcastNoPatchTest(t *testing.T, server *Server) {
+func StreamBroadcastNoPatchTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	var wsExtraEvent messages.Message
 	// extra route
@@ -454,7 +455,7 @@ func StreamBroadcastNoPatchTest(t *testing.T, server *Server) {
 	wg.Wait()
 }
 
-func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
+func StreamGlobBroadcastConcurrentTest(t *testing.T, server *ooo.Server, n int) {
 	type TestData struct {
 		SearchMetadata struct {
 			Count float64 `json:"count"`
@@ -551,7 +552,7 @@ func StreamGlobBroadcastConcurrentTest(t *testing.T, server *Server, n int) {
 	entriesLock.Unlock()
 }
 
-func StreamBroadcastPatchTest(t *testing.T, server *Server) {
+func StreamBroadcastPatchTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	type TestSubField struct {
 		One   string `json:"one"`
@@ -621,7 +622,7 @@ func StreamBroadcastPatchTest(t *testing.T, server *Server) {
 // when items are inserted and broadcast to subscribed clients.
 // The client should never see more than the limit number of items due to ReadListFilter.
 // Note: This test uses raw websocket to verify patch protocol and limit enforcement
-func StreamLimitFilterTest(t *testing.T, server *Server) {
+func StreamLimitFilterTest(t *testing.T, server *ooo.Server) {
 	var wg sync.WaitGroup
 	var wsObjects []meta.Object
 	var wsEvent messages.Message
@@ -631,7 +632,7 @@ func StreamLimitFilterTest(t *testing.T, server *Server) {
 	const totalInserts = limit + 5 // Insert more than the limit
 
 	// Set up limit filter - uses ReadListFilter to limit view + AfterWrite to cleanup
-	server.LimitFilter("limited/*", LimitFilterConfig{Limit: limit})
+	server.LimitFilter("limited/*", ooo.LimitFilterConfig{Limit: limit})
 	cfg := remoteConfig(server)
 
 	// Subscribe using raw websocket
@@ -701,7 +702,7 @@ func StreamLimitFilterTest(t *testing.T, server *Server) {
 // 3. Glob delete: multiple items deleted with single broadcast returning empty list
 // 4. List sort order: newest first (descending by created)
 // 5. Nested paths: box/*/things/* pattern matching
-func ClientCompatibilityTest(t *testing.T, server *Server) {
+func ClientCompatibilityTest(t *testing.T, server *ooo.Server) {
 	cfg := remoteConfig(server)
 
 	// Test 1: Object lifecycle - verify updated field behavior

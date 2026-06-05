@@ -1,4 +1,4 @@
-package ooo
+package oootest
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"github.com/benitogf/go-json"
 
 	"github.com/benitogf/jsondiff"
+	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/monotonic"
@@ -856,7 +857,7 @@ var TEST_DATA_UPDATE = json.RawMessage(`{
   }`)
 
 // StorageObjectTest testing storage function
-func StorageObjectTest(server *Server, t *testing.T) {
+func StorageObjectTest(server *ooo.Server, t *testing.T) {
 	server.Storage.Clear()
 	index, err := server.Storage.Set("test", TEST_DATA)
 	require.NoError(t, err)
@@ -880,7 +881,7 @@ func StorageObjectTest(server *Server, t *testing.T) {
 }
 
 // StorageListTest testing storage function
-func StorageListTest(server *Server, t *testing.T) {
+func StorageListTest(server *ooo.Server, t *testing.T) {
 	server.Storage.Clear()
 	key, err := server.Storage.Set("test/123", TEST_DATA)
 	require.NoError(t, err)
@@ -993,7 +994,7 @@ func StorageSetGetDelTestBenchmark(db storage.Database, b *testing.B) {
 }
 
 // StorageGetNTest testing storage GetN function
-func StorageGetNTest(server *Server, t *testing.T, n int) {
+func StorageGetNTest(server *ooo.Server, t *testing.T, n int) {
 	server.Storage.Clear()
 	for i := range n {
 		value := strconv.Itoa(i)
@@ -1029,7 +1030,7 @@ func StorageGetNTest(server *Server, t *testing.T, n int) {
 }
 
 // StorageGetNRangeTest testing storage GetN function
-func StorageGetNRangeTest(server *Server, t *testing.T, n int) {
+func StorageGetNRangeTest(server *ooo.Server, t *testing.T, n int) {
 	server.Storage.Clear()
 	for i := 1; i < n; i++ {
 		value := strconv.Itoa(i)
@@ -1051,7 +1052,7 @@ func StorageGetNRangeTest(server *Server, t *testing.T, n int) {
 }
 
 // StorageKeysRangeTest testing storage KeysRange function
-func StorageKeysRangeTest(server *Server, t *testing.T, n int) {
+func StorageKeysRangeTest(server *ooo.Server, t *testing.T, n int) {
 	server.Storage.Clear()
 	first := ""
 	firstNow := int64(0)
@@ -1228,7 +1229,7 @@ func WatchStorageNoopTest(db storage.Database, t *testing.T) {
 	db.Clear()
 }
 
-func StorageBatchSetTest(server *Server, t *testing.T, n int) {
+func StorageBatchSetTest(server *ooo.Server, t *testing.T, n int) {
 	server.Storage.Clear()
 	testData := json.RawMessage(`{"test":"123"}`)
 	for i := 1; i < n; i++ {
