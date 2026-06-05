@@ -3,6 +3,7 @@ package filters
 import (
 	"errors"
 	"log"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -190,11 +191,28 @@ func (lf *LimitFilter) ReadFilter(path string, data json.RawMessage) (json.RawMe
 	return json.Marshal(filtered)
 }
 
-// ReadListFilter returns a meta-based filter function that limits the list to the configured entries.
-// This is more efficient than ReadFilter as it avoids JSON encoding/decoding.
-// Applies time constraint first (filter by age), then count constraint (keep newest N),
-// then sorts for display based on Order setting.
+// ReadListFilter applies the configured time + count constraints to objs
+// and returns the resulting slice in the configured display order. It
+// applies the time constraint first (cheap, no sort), then truncates to
+// the count limit (sort + slice), then sorts for display.
+//
+// The input slice is treated as read-only: ReadListFilter writes into a
+// freshly-allocated slice and returns that, so the caller can keep
+// using objs unchanged afterwards. The internal Storage.GetList →
+// filter pipeline already passes fresh slices, but the method is
+// exported and directly callable, so the no-mutation contract is held
+// here rather than assumed at every call site.
+//
+// This is more efficient than ReadFilter as it avoids JSON
+// encoding/decoding.
 func (lf *LimitFilter) ReadListFilter(path string, objs []meta.Object) ([]meta.Object, error) {
+	// Defensive copy: callers keep ownership of their slice. slices.Clone
+	// preserves nil-vs-empty distinction so an empty input still
+	// serializes as `[]` (not `null`) when the result feeds the JSON
+	// broadcast. The clone is the only allocation this function makes
+	// beyond the eventual sort.Slice scratch; downstream consumers
+	// already JSON-encode the result, which dwarfs this cost.
+	objs = slices.Clone(objs)
 	// Step 1: Time constraint — filter by age (cheap comparison, no sort needed)
 	if lf.HasMaxAge() {
 		cutoff := lf.now() - lf.MaxAge().Nanoseconds()
