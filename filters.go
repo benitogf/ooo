@@ -163,9 +163,7 @@ func (server *Server) registerLimitFilter(path string, lf *filters.LimitFilter, 
 	lf.StartCleanup()
 
 	// Register stop on server close
-	server.preCloseCleanupsMu.Lock()
-	server.preCloseCleanups = append(server.preCloseCleanups, lf.StopCleanup)
-	server.preCloseCleanupsMu.Unlock()
+	server.RegisterCloseHook(PreShutdown, lf.StopCleanup)
 
 	// Register for explorer display
 	server.RegisterLimitFilter(lf, description, schema)

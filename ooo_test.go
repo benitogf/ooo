@@ -914,3 +914,83 @@ func TestCloseCallbackBudgetZeroPreservesUnboundedContract(t *testing.T) {
 	require.Equal(t, int64(4), ran.Load(),
 		"with no budget set, all four callbacks should run unconditionally")
 }
+
+// TestRegisterCloseHookOrdering asserts that hooks registered via the
+// new phased API run in phase order (PreShutdown → ProxyTeardown →
+// PostShutdown) and, within a phase, in registration order.
+func TestRegisterCloseHookOrdering(t *testing.T) {
+	var ordered []string
+	var mu sync.Mutex
+	record := func(label string) func() {
+		return func() {
+			mu.Lock()
+			ordered = append(ordered, label)
+			mu.Unlock()
+		}
+	}
+
+	server := &Server{Silence: true}
+	server.Start("localhost:0")
+
+	// Register out of phase order to prove the phase tag, not registration
+	// order, drives execution order across phases.
+	server.RegisterCloseHook(PostShutdown, record("post-1"))
+	server.RegisterCloseHook(PreShutdown, record("pre-1"))
+	server.RegisterCloseHook(ProxyTeardown, record("proxy-1"))
+	server.RegisterCloseHook(PreShutdown, record("pre-2"))
+	server.RegisterCloseHook(PostShutdown, record("post-2"))
+
+	server.Close(os.Interrupt)
+
+	require.Equal(t,
+		[]string{"pre-1", "pre-2", "proxy-1", "post-1", "post-2"},
+		ordered,
+	)
+}
+
+// TestRegisterCloseHookOldAPIsDelegateToPhases asserts that the
+// deprecated RegisterPreClose / RegisterProxyCleanup / OnClose surface
+// behaves as if it had been registered via RegisterCloseHook at the
+// corresponding phase. Mixed registration across old + new APIs still
+// produces a deterministic, phase-ordered sequence.
+func TestRegisterCloseHookOldAPIsDelegateToPhases(t *testing.T) {
+	var ordered []string
+	var mu sync.Mutex
+	record := func(label string) func() {
+		return func() {
+			mu.Lock()
+			ordered = append(ordered, label)
+			mu.Unlock()
+		}
+	}
+
+	server := &Server{Silence: true}
+	server.Start("localhost:0")
+
+	server.RegisterPreClose(record("legacy-pre"))
+	server.RegisterCloseHook(PreShutdown, record("new-pre"))
+	server.RegisterProxyCleanup(record("legacy-proxy"))
+	server.RegisterCloseHook(ProxyTeardown, record("new-proxy"))
+	server.RegisterCloseHook(PostShutdown, record("new-post"))
+	server.OnClose = record("legacy-onclose")
+
+	server.Close(os.Interrupt)
+
+	require.Equal(t,
+		[]string{"legacy-pre", "new-pre", "legacy-proxy", "new-proxy", "new-post", "legacy-onclose"},
+		ordered,
+	)
+}
+
+// TestRegisterCloseHookInvalidPhasePanics asserts that registering a
+// hook with an out-of-range phase value panics immediately (caller
+// bug), rather than silently dropping the hook at Close time.
+func TestRegisterCloseHookInvalidPhasePanics(t *testing.T) {
+	server := &Server{Silence: true}
+	require.Panics(t, func() {
+		server.RegisterCloseHook(CloseHookPhase(99), func() {})
+	})
+	require.Panics(t, func() {
+		server.RegisterCloseHook(CloseHookPhase(-1), func() {})
+	})
+}

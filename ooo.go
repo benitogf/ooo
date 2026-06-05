@@ -114,6 +114,30 @@ const DefaultMaxRequestBodyBytes = 10 * 1024 * 1024 // 10 MiB
 // false: rejects the request
 type audit func(r *http.Request) bool
 
+// CloseHookPhase identifies when a teardown hook runs during Server.Close.
+// Phases run in declaration order; multiple hooks at the same phase run
+// in registration order. See RegisterCloseHook.
+type CloseHookPhase int
+
+const (
+	// PreShutdown runs first, before any internal teardown. Storage,
+	// stream, and HTTP are still up — hooks may broadcast, read, or
+	// write. Use this to flush in-memory state or notify subscribers
+	// that the server is shutting down.
+	PreShutdown CloseHookPhase = iota
+	// ProxyTeardown runs after PreShutdown but before stream
+	// connections are closed. Use this to unsubscribe from upstream
+	// proxy servers while the stream layer is still available.
+	ProxyTeardown
+	// PostShutdown runs last, after every internal teardown step.
+	// Storage, stream, and HTTP are all torn down — use this for
+	// closing user-owned resources (DB pools, log handles). The
+	// deprecated Server.OnClose field, if set, runs after every
+	// PostShutdown hook.
+	PostShutdown
+	closeHookPhaseCount
+)
+
 // Server is the main application struct for the ooo server.
 //
 // Name: display name for the server, shown in the storage explorer title
@@ -208,25 +232,28 @@ type Server struct {
 	// waitListen takes RLock around Match, then dispatches the
 	// matched handler without the lock so long-running handlers do
 	// not block subsequent registrations.
-	routerMu           sync.RWMutex
-	routeOracle        *mux.Router  // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
-	routeOracleMu      sync.RWMutex // protects routeOracle; readers (routeOracleSkip) take RLock on the data-wildcard hot path, registrations take Lock
-	proxyCleanups      []func()     // cleanup functions for proxy subscriptions
-	proxyCleanupMu     sync.Mutex   // protects proxyCleanups
-	NoBroadcastKeys    []string
-	Audit              audit
-	Workers            int
-	ForcePatch         bool
-	NoPatch            bool
-	OnSubscribe        stream.Subscribe
-	OnUnsubscribe      stream.Unsubscribe
-	OnStart            func()
-	OnClose            func()
-	preCloseCleanups   []func() // cleanup functions called before stream/storage close
-	preCloseCleanupsMu sync.Mutex
+	routerMu        sync.RWMutex
+	routeOracle     *mux.Router                   // mirrors Endpoint/Proxy paths so the data wildcard can defer to them
+	routeOracleMu   sync.RWMutex                  // protects routeOracle; readers (routeOracleSkip) take RLock on the data-wildcard hot path, registrations take Lock
+	closeHooks      [closeHookPhaseCount][]func() // teardown hooks indexed by CloseHookPhase
+	closeHooksMu    sync.Mutex                    // protects closeHooks
+	NoBroadcastKeys []string
+	Audit           audit
+	Workers         int
+	ForcePatch      bool
+	NoPatch         bool
+	OnSubscribe     stream.Subscribe
+	OnUnsubscribe   stream.Unsubscribe
+	OnStart         func()
+	// OnClose runs as the final teardown step, after every PostShutdown
+	// hook. Deprecated: use RegisterCloseHook(PostShutdown, fn) instead;
+	// the field is kept for backwards compatibility and runs last so
+	// existing callers see no behaviour change.
+	OnClose func()
 	// CloseCallbackBudget caps the aggregate runtime of user-supplied
-	// teardown callbacks (RegisterPreClose, RegisterProxyCleanup, and
-	// OnClose) during Close. Only the time spent INSIDE callbacks
+	// teardown hooks registered via RegisterCloseHook (and the
+	// deprecated RegisterPreClose / RegisterProxyCleanup / OnClose
+	// surface) during Close. Only the time spent INSIDE hooks
 	// counts against this budget — the wall clock spent in ooo's own
 	// internal teardown (Deadline-bounded HTTP drain, Storage.Close,
 	// waitgroup joins) is not charged. A callback already running is
@@ -925,12 +952,14 @@ func (server *Server) Start(address string) {
 //
 //  1. Mark the server as closing (atomic, idempotent — second concurrent
 //     call returns immediately).
-//  2. Run preClose cleanups (registered via Server.RegisterPreClose).
-//     Storage, stream, and HTTP are still up — callbacks may broadcast,
-//     read, or write.
+//  2. Run PreShutdown hooks (registered via RegisterCloseHook;
+//     RegisterPreClose is the deprecated equivalent). Storage,
+//     stream, and HTTP are still up — hooks may broadcast, read, or
+//     write.
 //  3. Stop the internal clock goroutine (bounded — clock selects on a
 //     stop channel).
-//  4. Run proxy cleanups (registered via Server.RegisterProxyCleanup).
+//  4. Run ProxyTeardown hooks (registered via RegisterCloseHook;
+//     RegisterProxyCleanup is the deprecated equivalent).
 //  5. Close all WebSocket connections (bounded — per-connection TCP close).
 //  6. Stop the HTTP server: graceful shutdown with a context bounded by
 //     Server.Deadline (default 10s), then force-close to cancel any
@@ -941,8 +970,9 @@ func (server *Server) Start(address string) {
 //  8. Close the storage backend.
 //  9. Wait for storage-watcher goroutines (bounded — they exit when
 //     storage closes their channels).
-//  10. Run Server.OnClose. Storage, stream, and HTTP are all torn down —
-//     use this for closing user-owned resources only.
+//  10. Run PostShutdown hooks, then the deprecated Server.OnClose
+//     field if set. Storage, stream, and HTTP are all torn down — use
+//     these for closing user-owned resources only.
 //
 // Bound:
 //
@@ -999,9 +1029,13 @@ func (server *Server) Close(sig os.Signal) {
 			cb()
 			callbackElapsed += time.Since(start)
 		}
-		runCallbacks := func(name string, callbacks []func()) {
+		runPhase := func(phase CloseHookPhase, name string) {
+			server.closeHooksMu.Lock()
+			hooks := server.closeHooks[phase]
+			server.closeHooks[phase] = nil
+			server.closeHooksMu.Unlock()
 			var skipped int
-			for _, cb := range callbacks {
+			for _, cb := range hooks {
 				if budgetExceeded() {
 					skipped++
 					continue
@@ -1009,21 +1043,16 @@ func (server *Server) Close(sig os.Signal) {
 				runOne(cb)
 			}
 			if skipped > 0 {
-				server.Console.Err("close: skipped", skipped, name, "callback(s); CloseCallbackBudget exceeded")
+				server.Console.Err("close: skipped", skipped, name, "hook(s); CloseCallbackBudget exceeded")
 			}
 		}
-		// Call pre-close cleanups first, before any stream/storage cleanup
-		server.preCloseCleanupsMu.Lock()
-		runCallbacks("preClose", server.preCloseCleanups)
-		server.preCloseCleanups = nil
-		server.preCloseCleanupsMu.Unlock()
+		// PreShutdown hooks run first, before any stream/storage cleanup.
+		runPhase(PreShutdown, "PreShutdown")
 		close(server.clockStop) // Signal clock goroutine to stop immediately
 		server.clockWg.Wait()   // Wait for clock goroutine to exit before touching Stream
-		// Close proxy subscriptions first (before closing stream connections)
-		server.proxyCleanupMu.Lock()
-		runCallbacks("proxyCleanup", server.proxyCleanups)
-		server.proxyCleanups = nil
-		server.proxyCleanupMu.Unlock()
+		// ProxyTeardown hooks run before stream connections are closed
+		// so proxy subscriptions can unsubscribe cleanly.
+		runPhase(ProxyTeardown, "ProxyTeardown")
 		// Force close all stream connections first
 		server.Stream.CloseAll()
 		// Shutdown HTTP server to stop accepting new connections. Bound the
@@ -1045,6 +1074,11 @@ func (server *Server) Close(sig os.Signal) {
 		server.listenWg.Wait()  // Wait for listen goroutine to finish
 		server.Storage.Close()
 		server.watchWg.Wait() // Wait for watch goroutines to finish
+		// PostShutdown hooks run after every internal teardown step;
+		// they see storage, stream, and HTTP all torn down.
+		runPhase(PostShutdown, "PostShutdown")
+		// OnClose field is the legacy single-shot PostShutdown hook;
+		// it runs after every registered PostShutdown hook.
 		if budgetExceeded() {
 			server.Console.Err("close: skipped OnClose callback; CloseCallbackBudget exceeded")
 		} else {
