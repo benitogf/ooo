@@ -224,14 +224,29 @@ type Server struct {
 	OnClose            func()
 	preCloseCleanups   []func() // cleanup functions called before stream/storage close
 	preCloseCleanupsMu sync.Mutex
-	Deadline           time.Duration
-	AllowedOrigins     []string
-	AllowedMethods     []string
-	AllowedHeaders     []string
-	ExposedHeaders     []string
-	Storage            storage.Database
-	Address            string
-	closing            int64
+	// CloseCallbackBudget caps the aggregate runtime of user-supplied
+	// teardown callbacks (RegisterPreClose, RegisterProxyCleanup, and
+	// OnClose) during Close. Only the time spent INSIDE callbacks
+	// counts against this budget — the wall clock spent in ooo's own
+	// internal teardown (Deadline-bounded HTTP drain, Storage.Close,
+	// waitgroup joins) is not charged. A callback already running is
+	// not interrupted, but once the cumulative callback-runtime
+	// exceeds this budget, subsequent callbacks are skipped and a
+	// one-line warning is logged via the server's Console. Zero (the
+	// default) means no bound — the pre-existing contract where every
+	// callback runs to completion regardless of duration. Opt in by
+	// setting a positive value, for example to keep the
+	// SIGTERM-to-SIGKILL window from being exhausted by a single
+	// misbehaving callback.
+	CloseCallbackBudget time.Duration
+	Deadline            time.Duration
+	AllowedOrigins      []string
+	AllowedMethods      []string
+	AllowedHeaders      []string
+	ExposedHeaders      []string
+	Storage             storage.Database
+	Address             string
+	closing             int64
 	// active follows the serverInactive/serverStarting/serverActive
 	// state machine so Active() can distinguish "Start has been called
 	// but the listener has not yet bound" from "listener bound and
@@ -943,10 +958,15 @@ func (server *Server) Start(address string) {
 //     handler waitgroup; see the next bullet for how they're bounded.
 //   - Storage.Close: bounded for in-tree layers; depends on the bottom-layer
 //     contract for embedded storages (e.g. ko, nopog).
-//   - preClose cleanups, proxy cleanups, and OnClose: NOT bounded. They
-//     run synchronously and Close blocks until each returns. Keep them
-//     short — the orchestrator's SIGTERM-to-SIGKILL window has to cover
-//     Deadline plus the worst case across all of them.
+//   - preClose cleanups, proxy cleanups, and OnClose: bounded only when
+//     Server.CloseCallbackBudget is set to a positive value, which caps
+//     the aggregate runtime across all three batches. A callback already
+//     in flight is not interrupted, but once the budget is exhausted
+//     subsequent callbacks are skipped with a one-line warning. With
+//     the default (zero) budget, every callback runs to completion
+//     regardless of duration — keep them short or the orchestrator's
+//     SIGTERM-to-SIGKILL window has to cover the worst case across all
+//     of them in addition to Deadline.
 //   - HTTP handlers that ignore r.Context().Done(): NOT bounded. They
 //     can outlive Close. Custom Endpoint handlers in particular must
 //     check the context.
@@ -963,20 +983,45 @@ func (server *Server) Start(address string) {
 func (server *Server) Close(sig os.Signal) {
 	if atomic.CompareAndSwapInt64(&server.closing, 0, 1) {
 		atomic.StoreInt64(&server.active, serverInactive)
+		// callbackElapsed accumulates ONLY the runtime of user-supplied
+		// callbacks — the wall clock between batches (HTTP drain bounded
+		// by Deadline, Storage.Close, waitgroup joins) does not count
+		// against the budget. Zero CloseCallbackBudget means no bound.
+		// A callback already in flight is not interrupted; only
+		// callbacks that have not started yet are skipped once the
+		// cumulative callback time exceeds the budget.
+		var callbackElapsed time.Duration
+		budgetExceeded := func() bool {
+			return server.CloseCallbackBudget > 0 && callbackElapsed >= server.CloseCallbackBudget
+		}
+		runOne := func(cb func()) {
+			start := time.Now()
+			cb()
+			callbackElapsed += time.Since(start)
+		}
+		runCallbacks := func(name string, callbacks []func()) {
+			var skipped int
+			for _, cb := range callbacks {
+				if budgetExceeded() {
+					skipped++
+					continue
+				}
+				runOne(cb)
+			}
+			if skipped > 0 {
+				server.Console.Err("close: skipped", skipped, name, "callback(s); CloseCallbackBudget exceeded")
+			}
+		}
 		// Call pre-close cleanups first, before any stream/storage cleanup
 		server.preCloseCleanupsMu.Lock()
-		for _, cleanup := range server.preCloseCleanups {
-			cleanup()
-		}
+		runCallbacks("preClose", server.preCloseCleanups)
 		server.preCloseCleanups = nil
 		server.preCloseCleanupsMu.Unlock()
 		close(server.clockStop) // Signal clock goroutine to stop immediately
 		server.clockWg.Wait()   // Wait for clock goroutine to exit before touching Stream
 		// Close proxy subscriptions first (before closing stream connections)
 		server.proxyCleanupMu.Lock()
-		for _, cleanup := range server.proxyCleanups {
-			cleanup()
-		}
+		runCallbacks("proxyCleanup", server.proxyCleanups)
 		server.proxyCleanups = nil
 		server.proxyCleanupMu.Unlock()
 		// Force close all stream connections first
@@ -1000,7 +1045,11 @@ func (server *Server) Close(sig os.Signal) {
 		server.listenWg.Wait()  // Wait for listen goroutine to finish
 		server.Storage.Close()
 		server.watchWg.Wait() // Wait for watch goroutines to finish
-		server.OnClose()
+		if budgetExceeded() {
+			server.Console.Err("close: skipped OnClose callback; CloseCallbackBudget exceeded")
+		} else {
+			runOne(server.OnClose)
+		}
 		server.Console.Err("shutdown", sig)
 		// Do not nil out Storage / Router / Console / Stream / filters here.
 		// PR #63 made shutdown bounded by Deadline, which means a stuck
