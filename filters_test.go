@@ -68,6 +68,8 @@ func TestFilters(t *testing.T) {
 		notified = true
 	})
 
+	postBody := json.RawMessage(`{"value":"any"}`)
+
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 	_, err := server.filters.Write.Check("test/1", unacceptedData, false)
@@ -101,7 +103,7 @@ func TestFilters(t *testing.T) {
 	require.NoError(t, err)
 	_, err = server.filters.ReadList.Check("book/1", nil, true)
 	require.NoError(t, err)
-	req := httptest.NewRequest("POST", "/test/1", bytes.NewBuffer(TEST_DATA))
+	req := httptest.NewRequest("POST", "/test/1", bytes.NewBuffer(postBody))
 	w := httptest.NewRecorder()
 	server.Router.ServeHTTP(w, req)
 	resp := w.Result()
@@ -113,7 +115,7 @@ func TestFilters(t *testing.T) {
 	resp = w.Result()
 	require.Equal(t, 200, resp.StatusCode)
 
-	req = httptest.NewRequest("POST", "/flyer", bytes.NewBuffer(TEST_DATA))
+	req = httptest.NewRequest("POST", "/flyer", bytes.NewBuffer(postBody))
 	w = httptest.NewRecorder()
 	server.Router.ServeHTTP(w, req)
 	resp = w.Result()
