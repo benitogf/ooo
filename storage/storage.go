@@ -44,7 +44,15 @@ type Options struct {
 	NoBroadcastKeys []string
 	BeforeRead      func(key string)
 	AfterWrite      func(key string)
-	Workers         int
+	// AfterWriteOp is an operation-aware companion to AfterWrite, invoked after
+	// a successful write with the operation ("set" or "del"). It fires in
+	// addition to AfterWrite (both run when both are set). Consumers that must
+	// react differently to sets vs deletes — e.g. clearing per-operation
+	// bookkeeping for exactly the operation that occurred — use this instead of
+	// trying to infer the operation, which AfterWrite alone cannot convey and a
+	// storage read-back cannot determine race-free.
+	AfterWriteOp func(key string, op string)
+	Workers      int
 }
 
 // ShardedChan manages multiple channels for per-key ordering.

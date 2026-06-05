@@ -295,13 +295,14 @@ type Server struct {
 	OnDroppedEvent      func(ev storage.Event)        // optional: invoked when the sharded watcher channel drops an event after timing out
 	BeforeRead          func(key string)
 	AfterWrite          func(key string)
-	GetPivotInfo        func() *ui.PivotInfo // Optional: returns pivot status for UI
-	NoCompress          bool                 // Disable gzip compression (useful for tests)
-	WatchPanics         int64                // Atomic counter of panics recovered in watch goroutines
-	DroppedEvents       int64                // Atomic counter of events dropped by the sharded watcher on send timeout
-	startErr            chan error           // channel for startup errors
-	clockStop           chan struct{}        // channel to signal clock goroutine to stop
-	consoleAutoBuilt    bool                 // true when defaults() built Console (so post-Listen rebuild can swap address without clobbering a user-supplied Console)
+	AfterWriteOp        func(key string, op string) // optional: operation-aware companion to AfterWrite ("set"/"del")
+	GetPivotInfo        func() *ui.PivotInfo        // Optional: returns pivot status for UI
+	NoCompress          bool                        // Disable gzip compression (useful for tests)
+	WatchPanics         int64                       // Atomic counter of panics recovered in watch goroutines
+	DroppedEvents       int64                       // Atomic counter of events dropped by the sharded watcher on send timeout
+	startErr            chan error                  // channel for startup errors
+	clockStop           chan struct{}               // channel to signal clock goroutine to stop
+	consoleAutoBuilt    bool                        // true when defaults() built Console (so post-Listen rebuild can swap address without clobbering a user-supplied Console)
 }
 
 // Validate checks the server configuration for common issues.
@@ -464,6 +465,9 @@ func (server *Server) waitListen() {
 	}
 	if server.AfterWrite != nil {
 		storageOpt.AfterWrite = server.AfterWrite
+	}
+	if server.AfterWriteOp != nil {
+		storageOpt.AfterWriteOp = server.AfterWriteOp
 	}
 	err = server.Storage.Start(storageOpt)
 	if err != nil {

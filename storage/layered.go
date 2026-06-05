@@ -41,6 +41,27 @@ type Layered struct {
 	active          bool
 	beforeRead      func(key string)
 	afterWrite      func(key string)
+	afterWriteOp    func(key string, op string)
+}
+
+// fireAfterWriteOp invokes the operation-aware post-write hook. It runs BEFORE
+// the storage event is broadcast (see the call sites) so a consumer that
+// updates derived state in it — e.g. a version counter — has that state in
+// place before any event-driven reactor observes the write (a peer woken by
+// the broadcast, an async sync push, etc.). The legacy op-less AfterWrite
+// keeps its original position AFTER the broadcast (fireAfterWriteLegacy), so
+// existing consumers see no ordering change.
+func (l *Layered) fireAfterWriteOp(path string, op string) {
+	if l.afterWriteOp != nil {
+		l.afterWriteOp(path, op)
+	}
+}
+
+// fireAfterWriteLegacy invokes the op-less AfterWrite hook, after the broadcast.
+func (l *Layered) fireAfterWriteLegacy(path string) {
+	if l.afterWrite != nil {
+		l.afterWrite(path)
+	}
 }
 
 // NewLayered creates a new layered storage
@@ -92,6 +113,7 @@ func (l *Layered) Start(opt Options) error {
 	l.noBroadcastKeys = opt.NoBroadcastKeys
 	l.beforeRead = opt.BeforeRead
 	l.afterWrite = opt.AfterWrite
+	l.afterWriteOp = opt.AfterWriteOp
 
 	// Start layers from slowest to fastest
 	if l.embedded != nil {
@@ -530,12 +552,11 @@ func (l *Layered) setLocked(path string, data json.RawMessage) (string, error) {
 		return index, err
 	}
 
+	l.fireAfterWriteOp(path, "set")
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "set", Object: obj})
 	}
-	if l.afterWrite != nil {
-		l.afterWrite(path)
-	}
+	l.fireAfterWriteLegacy(path)
 
 	return index, nil
 }
@@ -661,12 +682,11 @@ func (l *Layered) Push(path string, data json.RawMessage) (string, error) {
 		return index, err
 	}
 
+	l.fireAfterWriteOp(newPath, "set")
 	if !key.Contains(l.noBroadcastKeys, newPath) && l.Active() {
 		l.sendEvent(Event{Key: newPath, Operation: "set", Object: obj})
 	}
-	if l.afterWrite != nil {
-		l.afterWrite(newPath)
-	}
+	l.fireAfterWriteLegacy(newPath)
 
 	return index, nil
 }
@@ -695,12 +715,11 @@ func (l *Layered) SetWithMeta(path string, data json.RawMessage, created, update
 		return index, err
 	}
 
+	l.fireAfterWriteOp(path, "set")
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "set", Object: obj})
 	}
-	if l.afterWrite != nil {
-		l.afterWrite(path)
-	}
+	l.fireAfterWriteLegacy(path)
 
 	return index, nil
 }
@@ -726,12 +745,11 @@ func (l *Layered) Del(path string) error {
 		return err
 	}
 
+	l.fireAfterWriteOp(path, "del")
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "del", Object: obj})
 	}
-	if l.afterWrite != nil {
-		l.afterWrite(path)
-	}
+	l.fireAfterWriteLegacy(path)
 
 	return nil
 }
@@ -748,12 +766,11 @@ func (l *Layered) delGlob(path string) error {
 		return err
 	}
 
+	l.fireAfterWriteOp(path, "del")
 	if !key.Contains(l.noBroadcastKeys, path) && l.Active() {
 		l.sendEvent(Event{Key: path, Operation: "del", Object: nil})
 	}
-	if l.afterWrite != nil {
-		l.afterWrite(path)
-	}
+	l.fireAfterWriteLegacy(path)
 
 	return nil
 }
