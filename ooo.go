@@ -226,15 +226,18 @@ type Server struct {
 	preCloseCleanupsMu sync.Mutex
 	// CloseCallbackBudget caps the aggregate runtime of user-supplied
 	// teardown callbacks (RegisterPreClose, RegisterProxyCleanup, and
-	// OnClose) during Close. A callback that is already running is not
-	// interrupted, but once the cumulative elapsed time across all
-	// previously-run callbacks exceeds this budget, subsequent
-	// callbacks are skipped and a one-line warning is logged via the
-	// server's Console. Zero (the default) means no bound — the
-	// pre-existing contract where every callback runs to completion
-	// regardless of duration. Opt in by setting a positive value, for
-	// example to keep the SIGTERM-to-SIGKILL window from being
-	// exhausted by a single misbehaving callback.
+	// OnClose) during Close. Only the time spent INSIDE callbacks
+	// counts against this budget — the wall clock spent in ooo's own
+	// internal teardown (Deadline-bounded HTTP drain, Storage.Close,
+	// waitgroup joins) is not charged. A callback already running is
+	// not interrupted, but once the cumulative callback-runtime
+	// exceeds this budget, subsequent callbacks are skipped and a
+	// one-line warning is logged via the server's Console. Zero (the
+	// default) means no bound — the pre-existing contract where every
+	// callback runs to completion regardless of duration. Opt in by
+	// setting a positive value, for example to keep the
+	// SIGTERM-to-SIGKILL window from being exhausted by a single
+	// misbehaving callback.
 	CloseCallbackBudget time.Duration
 	Deadline            time.Duration
 	AllowedOrigins      []string
@@ -980,16 +983,21 @@ func (server *Server) Start(address string) {
 func (server *Server) Close(sig os.Signal) {
 	if atomic.CompareAndSwapInt64(&server.closing, 0, 1) {
 		atomic.StoreInt64(&server.active, serverInactive)
-		// callbackDeadline tracks when the aggregate user-callback budget
-		// is exhausted. Zero means no bound — every callback runs. A
-		// callback that is already in flight is not interrupted; only
-		// callbacks that have not started yet are skipped.
-		var callbackDeadline time.Time
-		if server.CloseCallbackBudget > 0 {
-			callbackDeadline = time.Now().Add(server.CloseCallbackBudget)
-		}
+		// callbackElapsed accumulates ONLY the runtime of user-supplied
+		// callbacks — the wall clock between batches (HTTP drain bounded
+		// by Deadline, Storage.Close, waitgroup joins) does not count
+		// against the budget. Zero CloseCallbackBudget means no bound.
+		// A callback already in flight is not interrupted; only
+		// callbacks that have not started yet are skipped once the
+		// cumulative callback time exceeds the budget.
+		var callbackElapsed time.Duration
 		budgetExceeded := func() bool {
-			return !callbackDeadline.IsZero() && !time.Now().Before(callbackDeadline)
+			return server.CloseCallbackBudget > 0 && callbackElapsed >= server.CloseCallbackBudget
+		}
+		runOne := func(cb func()) {
+			start := time.Now()
+			cb()
+			callbackElapsed += time.Since(start)
 		}
 		runCallbacks := func(name string, callbacks []func()) {
 			var skipped int
@@ -998,7 +1006,7 @@ func (server *Server) Close(sig os.Signal) {
 					skipped++
 					continue
 				}
-				cb()
+				runOne(cb)
 			}
 			if skipped > 0 {
 				server.Console.Err("close: skipped", skipped, name, "callback(s); CloseCallbackBudget exceeded")
@@ -1040,7 +1048,7 @@ func (server *Server) Close(sig os.Signal) {
 		if budgetExceeded() {
 			server.Console.Err("close: skipped OnClose callback; CloseCallbackBudget exceeded")
 		} else {
-			server.OnClose()
+			runOne(server.OnClose)
 		}
 		server.Console.Err("shutdown", sig)
 		// Do not nil out Storage / Router / Console / Stream / filters here.

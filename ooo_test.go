@@ -835,6 +835,63 @@ func TestCloseCallbackBudgetSkipsWhenExceeded(t *testing.T) {
 		"only the first callback should have executed; budget should skip the rest")
 }
 
+// TestCloseCallbackBudgetMeasuresOnlyCallbackTime asserts that the budget
+// charges ONLY the runtime of user-supplied callbacks. The wall clock
+// spent inside ooo's own teardown — the Deadline-bounded HTTP drain,
+// Storage.Close, waitgroup joins — does not count against the budget.
+// A naive wall-clock-from-Close-start anchor would skip OnClose here
+// because the 500ms drain alone exceeds the 20ms budget despite every
+// callback running in microseconds.
+func TestCloseCallbackBudgetMeasuresOnlyCallbackTime(t *testing.T) {
+	var ran atomic.Int64
+	server := &Server{
+		Silence:             true,
+		Deadline:            500 * time.Millisecond,
+		CloseCallbackBudget: 20 * time.Millisecond,
+	}
+	server.Start("localhost:0")
+
+	// Stuck handler forces Close's HTTP drain to wait the full Deadline.
+	var entered sync.WaitGroup
+	entered.Add(1)
+	var enteredOnce sync.Once
+	unblock := make(chan struct{})
+	server.Endpoint(EndpointConfig{
+		Path:    "/blocker",
+		Methods: Methods{http.MethodGet: {Response: nil}},
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			enteredOnce.Do(entered.Done)
+			<-unblock
+		},
+	})
+
+	var requestExited sync.WaitGroup
+	requestExited.Add(1)
+	go func() {
+		defer requestExited.Done()
+		client := &http.Client{Timeout: 30 * time.Second}
+		req, _ := http.NewRequest(http.MethodGet, "http://"+server.Address+"/blocker", nil)
+		resp, err := client.Do(req)
+		if err == nil && resp != nil {
+			resp.Body.Close()
+		}
+	}()
+	entered.Wait()
+
+	// All callbacks are fast — none alone or together approaches the 20ms
+	// budget. The 500ms Deadline drain happens between batches.
+	server.RegisterPreClose(func() { ran.Add(1) })
+	server.RegisterProxyCleanup(func() { ran.Add(1) })
+	server.OnClose = func() { ran.Add(1) }
+
+	server.Close(os.Interrupt)
+	require.Equal(t, int64(3), ran.Load(),
+		"all three fast callbacks should run; budget should not be charged for the HTTP drain")
+
+	close(unblock)
+	requestExited.Wait()
+}
+
 // TestCloseCallbackBudgetZeroPreservesUnboundedContract asserts that the
 // default (zero) budget leaves the existing contract intact: every
 // registered callback runs regardless of how long earlier ones took.
