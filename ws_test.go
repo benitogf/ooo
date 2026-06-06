@@ -685,24 +685,22 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 		Silence: true,
 	}
 
-	// One initial snapshot expected per subscription. sync.Once gates
-	// wg.Done so any extra OnMessage replays (reconnect, etc.) cannot
-	// drive the counter negative. If a subscription never delivers, the
-	// package-level `go test -timeout` catches it — that is the right
-	// escape for a permanent failure under WaitGroup semantics.
+	// Exactly one OnMessage expected per subscription: the initial
+	// snapshot for the item that was set above. Nothing else writes
+	// during the test, so no further callbacks should fire. If a
+	// duplicate ever appears, wg.Done() drives the counter negative
+	// and the panic surfaces the real bug instead of being papered
+	// over by a sync.Once guard.
 	var wg sync.WaitGroup
 	wg.Add(2)
-	var listOnce, itemOnce sync.Once
 
 	var listReceived, itemReceived atomic.Bool
 
 	go client.SubscribeList(cfg, "logs/*", client.SubscribeListEvents[LogEntry]{
 		OnMessage: func(items []client.Meta[LogEntry]) {
 			if len(items) > 0 && items[0].Data.Message == "test log" {
-				listOnce.Do(func() {
-					listReceived.Store(true)
-					wg.Done()
-				})
+				listReceived.Store(true)
+				wg.Done()
 			}
 		},
 	})
@@ -710,10 +708,8 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 	go client.Subscribe(cfg, "logs/testitem", client.SubscribeEvents[LogEntry]{
 		OnMessage: func(item client.Meta[LogEntry]) {
 			if item.Data.Message == "test log" {
-				itemOnce.Do(func() {
-					itemReceived.Store(true)
-					wg.Done()
-				})
+				itemReceived.Store(true)
+				wg.Done()
 			}
 		},
 	})
