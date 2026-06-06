@@ -205,6 +205,12 @@ const (
 // AfterWrite: callback function triggered after a successful write
 // (Set / Push / Patch / Del). Wired once at Start; further changes
 // have no effect.
+//
+// AfterWriteOp: operation-aware companion to AfterWrite, triggered with
+// the operation ("set" / "del") and, unlike AfterWrite, BEFORE the change
+// is broadcast to watchers — so a consumer can update derived per-key
+// state in place before any event-driven reactor observes the write. Also
+// wired once at Start; further changes have no effect.
 type Server struct {
 	wg           sync.WaitGroup
 	watchWg      sync.WaitGroup
