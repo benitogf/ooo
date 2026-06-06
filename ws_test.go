@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -684,45 +685,57 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 		Silence: true,
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	// Each subscription gets its own done channel — closed exactly once
+	// regardless of which callback (OnMessage success or OnError) fires
+	// first. This avoids the original test's race where OnMessage and
+	// OnError could both wg.Done() and assertions ran against booleans
+	// written from goroutines without synchronization.
+	listDone := make(chan struct{})
+	itemDone := make(chan struct{})
+	var listOnce, itemOnce sync.Once
 
-	// Subscribe to the list - should work
-	var listReceived bool
+	listReceived := atomic.Bool{}
+	itemReceived := atomic.Bool{}
+
 	go client.SubscribeList(cfg, "logs/*", client.SubscribeListEvents[LogEntry]{
 		OnMessage: func(items []client.Meta[LogEntry]) {
 			if len(items) > 0 && items[0].Data.Message == "test log" {
-				listReceived = true
-				wg.Done()
+				listReceived.Store(true)
+				listOnce.Do(func() { close(listDone) })
 			}
 		},
-		OnError: func(err error) {
-			if !listReceived {
-				t.Errorf("list subscription error: %v", err)
-				wg.Done()
-			}
+		OnError: func(error) {
+			listOnce.Do(func() { close(listDone) })
 		},
 	})
 
-	// Subscribe to the individual item - this was the bug, should now work
-	var itemReceived bool
 	go client.Subscribe(cfg, "logs/testitem", client.SubscribeEvents[LogEntry]{
 		OnMessage: func(item client.Meta[LogEntry]) {
 			if item.Data.Message == "test log" {
-				itemReceived = true
-				wg.Done()
+				itemReceived.Store(true)
+				itemOnce.Do(func() { close(itemDone) })
 			}
 		},
-		OnError: func(err error) {
-			if !itemReceived {
-				t.Errorf("individual subscription error (ReadListFilter must allow individual subscriptions): %v", err)
-				wg.Done()
-			}
+		OnError: func(error) {
+			itemOnce.Do(func() { close(itemDone) })
 		},
 	})
 
-	wg.Wait()
+	// Bounded waits so a stuck subscription surfaces as a test failure
+	// rather than a hang. 5s is generous relative to the ~10ms each
+	// subscription takes in practice; CI runners under heavy parallel
+	// load still complete well inside it.
+	waitDone := func(t *testing.T, ch <-chan struct{}, name string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s subscription did not signal within 5s", name)
+		}
+	}
+	waitDone(t, listDone, "list")
+	waitDone(t, itemDone, "item")
 
-	require.True(t, listReceived, "list subscription should receive the item")
-	require.True(t, itemReceived, "individual subscription should receive the item - ReadListFilter must also allow individual subscriptions")
+	require.True(t, listReceived.Load(), "list subscription should receive the item")
+	require.True(t, itemReceived.Load(), "individual subscription should receive the item - ReadListFilter must also allow individual subscriptions")
 }
