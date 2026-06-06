@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net/http"
 	"net/url"
@@ -68,15 +69,20 @@ type RetryConfig struct {
 
 // SubscribeConfig holds connection configuration for Subscribe.
 // Required fields: Ctx, Server.
-// Optional fields: Header, HandshakeTimeout, Retry, Silence.
+// Optional fields: Header, HandshakeTimeout, Retry, Silence, TLSConfig.
 type SubscribeConfig struct {
 	Ctx              context.Context
 	Server           Server
 	Header           http.Header
 	HandshakeTimeout time.Duration
 	Retry            RetryConfig
-	Silence          bool          // if true, suppresses log output
-	console          *coat.Console // internal console for logging
+	Silence          bool // if true, suppresses log output
+	// TLSConfig, when set, is used for the "wss" websocket handshake. Leave
+	// nil to use the system cert pool (the default). Set RootCAs to trust an
+	// internal/self-signed CA (e.g. via x509.SystemCertPool + AppendCertsFromPEM,
+	// or a test CA) when the peer serves TLS with a non-public certificate.
+	TLSConfig *tls.Config
+	console   *coat.Console // internal console for logging
 }
 
 // Validate checks that required fields are set and applies defaults.
@@ -171,6 +177,7 @@ func (s *subscribeState[T]) connect() bool {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: s.cfg.HandshakeTimeout,
+		TLSClientConfig:  s.cfg.TLSConfig,
 	}
 
 	s.muClient.Lock()
@@ -357,6 +364,7 @@ func (s *subscribeListState[T]) connect() bool {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: s.cfg.HandshakeTimeout,
+		TLSClientConfig:  s.cfg.TLSConfig,
 	}
 
 	s.muClient.Lock()
