@@ -268,9 +268,17 @@ func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
 // real-server subtests cover the readLoop() guard. Both are needed
 // because a future refactor that removes one of the two guards
 // would otherwise still pass the regression suite.
+//
+// All four subtests count post-cancel OnError invocations by reading
+// ctx.Err() inside OnError. That is the same signal the production
+// isClosing() guard reads — so the test asserts the exact contract
+// the production fix promises (no OnError fires once the ctx has
+// transitioned to cancelled) rather than asserting an adjacent
+// main-side flag.
 func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 	t.Run("Subscribe", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		var firstErr sync.WaitGroup
 		firstErr.Add(1)
@@ -278,7 +286,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		var exited sync.WaitGroup
 		exited.Add(1)
 
-		var cancelled atomic.Bool
 		var errsAfterCancel atomic.Int32
 
 		go func() {
@@ -291,7 +298,8 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 			}, "device", client.SubscribeEvents[Device]{
 				OnMessage: func(client.Meta[Device]) {},
 				OnError: func(error) {
-					if cancelled.Load() {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
 						errsAfterCancel.Add(1)
 					}
 					firstErrOnce.Do(firstErr.Done)
@@ -300,7 +308,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		}()
 
 		firstErr.Wait()
-		cancelled.Store(true)
 		cancel()
 		exited.Wait()
 
@@ -310,6 +317,7 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 
 	t.Run("SubscribeList", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		var firstErr sync.WaitGroup
 		firstErr.Add(1)
@@ -317,7 +325,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		var exited sync.WaitGroup
 		exited.Add(1)
 
-		var cancelled atomic.Bool
 		var errsAfterCancel atomic.Int32
 
 		go func() {
@@ -330,7 +337,8 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 			}, "devices/*", client.SubscribeListEvents[Device]{
 				OnMessage: func([]client.Meta[Device]) {},
 				OnError: func(error) {
-					if cancelled.Load() {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
 						errsAfterCancel.Add(1)
 					}
 					firstErrOnce.Do(firstErr.Done)
@@ -339,7 +347,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		}()
 
 		firstErr.Wait()
-		cancelled.Store(true)
 		cancel()
 		exited.Wait()
 
@@ -364,6 +371,7 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		var connected sync.WaitGroup
 		connected.Add(1)
@@ -371,7 +379,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		var exited sync.WaitGroup
 		exited.Add(1)
 
-		var cancelled atomic.Bool
 		var errsAfterCancel atomic.Int32
 
 		go func() {
@@ -385,7 +392,8 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 					connectedOnce.Do(connected.Done)
 				},
 				OnError: func(error) {
-					if cancelled.Load() {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
 						errsAfterCancel.Add(1)
 					}
 				},
@@ -393,7 +401,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		}()
 
 		connected.Wait()
-		cancelled.Store(true)
 		cancel()
 		exited.Wait()
 
@@ -411,6 +418,7 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		require.NoError(t, err)
 
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
 		var connected sync.WaitGroup
 		connected.Add(1)
@@ -418,7 +426,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		var exited sync.WaitGroup
 		exited.Add(1)
 
-		var cancelled atomic.Bool
 		var errsAfterCancel atomic.Int32
 
 		go func() {
@@ -432,7 +439,8 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 					connectedOnce.Do(connected.Done)
 				},
 				OnError: func(error) {
-					if cancelled.Load() {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
 						errsAfterCancel.Add(1)
 					}
 				},
@@ -440,7 +448,6 @@ func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
 		}()
 
 		connected.Wait()
-		cancelled.Store(true)
 		cancel()
 		exited.Wait()
 

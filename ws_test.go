@@ -765,9 +765,18 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 	require.Equal(t, wantData, itemSnapshot.Data, "individual snapshot Data must match what was set")
 	require.NotZero(t, itemSnapshot.Created, "individual snapshot must carry a Created timestamp")
 
-	// Both reads of the same item agree on lifecycle metadata
+	// Both reads of the same item agree on Created — they pull the
+	// same meta.Object from storage, so a divergence would indicate
+	// a regression in one of the two read paths.
 	require.Equal(t, listSnapshot[0].Created, itemSnapshot.Created, "list and individual must agree on Created")
-	require.Equal(t, listSnapshot[0].Updated, itemSnapshot.Updated, "list and individual must agree on Updated")
+	// Updated == 0 is the storage contract for freshly Set items
+	// (storage.peek returns now, 0 when the key did not pre-exist);
+	// assert it explicitly on both sides rather than cross-checking
+	// "they agree" — agreement is trivially 0 == 0 here and would
+	// not detect a regression that broke the Updated propagation
+	// the same way on both paths.
+	require.Zero(t, listSnapshot[0].Updated, "freshly Set items must have Updated == 0 on the list path")
+	require.Zero(t, itemSnapshot.Updated, "freshly Set items must have Updated == 0 on the individual path")
 
 	// Cancel + wait for subscribe goroutines to exit, then verify
 	// the lifecycle produced zero OnError invocations on either
