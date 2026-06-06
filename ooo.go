@@ -2,6 +2,7 @@ package ooo
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
@@ -278,13 +279,25 @@ type Server struct {
 	// state machine so Active() can distinguish "Start has been called
 	// but the listener has not yet bound" from "listener bound and
 	// serving". See StartWithError for the CAS that claims the slot.
-	active              int64
-	Silence             bool
-	Static              bool
-	Tick                time.Duration
-	Console             *coat.Console
-	Signal              chan os.Signal
-	Client              *http.Client
+	active  int64
+	Silence bool
+	Static  bool
+	Tick    time.Duration
+	Console *coat.Console
+	Signal  chan os.Signal
+	Client  *http.Client
+	// CertFile and KeyFile, when both non-empty, switch the listener
+	// from plaintext HTTP to HTTPS. The keypair is loaded once at Start;
+	// a load failure aborts startup with an error rather than serving
+	// plaintext. Leave both empty to serve plain HTTP (the default).
+	CertFile string
+	KeyFile  string
+	// TLSConfig, when non-nil, is the base TLS configuration for the
+	// HTTPS listener (min version, cipher suites, client-auth, ...). The
+	// keypair loaded from CertFile/KeyFile is appended to its
+	// Certificates. When nil a minimal modern default (TLS 1.2 floor) is
+	// used. Ignored when CertFile/KeyFile are empty.
+	TLSConfig           *tls.Config
 	ReadTimeout         time.Duration
 	WriteTimeout        time.Duration
 	ReadHeaderTimeout   time.Duration
@@ -493,6 +506,30 @@ func (server *Server) waitListen() {
 			// AllowCredentials: true,
 			// Debug:          true,
 		}).Handler(handler)}
+	// When a keypair is configured the server serves HTTPS. Load it
+	// before binding so a bad cert/key aborts startup with an error
+	// instead of falling through to a plaintext listener.
+	tlsEnabled := server.CertFile != "" && server.KeyFile != ""
+	if tlsEnabled {
+		cert, certErr := tls.LoadX509KeyPair(server.CertFile, server.KeyFile)
+		if certErr != nil {
+			atomic.StoreInt64(&server.active, serverInactive)
+			server.startErr <- fmt.Errorf("ooo: failed to load TLS keypair: %w", certErr)
+			server.wg.Done()
+			return
+		}
+		tlsConf := server.TLSConfig
+		if tlsConf == nil {
+			tlsConf = &tls.Config{}
+		} else {
+			tlsConf = tlsConf.Clone()
+		}
+		if tlsConf.MinVersion == 0 {
+			tlsConf.MinVersion = tls.VersionTLS12
+		}
+		tlsConf.Certificates = append(tlsConf.Certificates, cert)
+		server.server.TLSConfig = tlsConf
+	}
 	ln, err := net.Listen("tcp4", server.Address)
 	if err != nil {
 		// Roll the CAS claim back so a retry (or Start-after-Close)
@@ -507,7 +544,14 @@ func (server *Server) waitListen() {
 	server.Address = ln.Addr().String()
 	atomic.StoreInt64(&server.active, serverActive)
 	server.wg.Done()
-	err = server.server.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+	keepAliveLn := tcpKeepAliveListener{ln.(*net.TCPListener)}
+	if tlsEnabled {
+		// Cert/key already loaded into server.server.TLSConfig above, so
+		// pass empty filenames — ServeTLS uses the configured keypair.
+		err = server.server.ServeTLS(keepAliveLn, "", "")
+	} else {
+		err = server.server.Serve(keepAliveLn)
+	}
 	if atomic.LoadInt64(&server.closing) != 1 && err != nil {
 		server.Console.Err("server error", err)
 	}
@@ -732,22 +776,29 @@ func (server *Server) defaultCallbacks() {
 }
 
 // defaultClient sets up the default HTTP client.
+// defaultTransport builds the http.Transport used by the server's
+// outbound Client. Shared by defaultClient and NewClient so connection
+// tuning stays consistent whether or not a custom TLS root pool is set.
+func defaultTransport() *http.Transport {
+	return &http.Transport{
+		Dial: (&net.Dialer{
+			Timeout:   1 * time.Second,
+			KeepAlive: 10 * time.Second,
+		}).Dial,
+		IdleConnTimeout:       10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		MaxConnsPerHost:       3000,
+		MaxIdleConns:          10000,
+		MaxIdleConnsPerHost:   1000,
+		DisableKeepAlives:     false,
+	}
+}
+
 func (server *Server) defaultClient() {
 	if server.Client == nil {
 		server.Client = &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				Dial: (&net.Dialer{
-					Timeout:   1 * time.Second,
-					KeepAlive: 10 * time.Second,
-				}).Dial,
-				IdleConnTimeout:       10 * time.Second,
-				ResponseHeaderTimeout: 10 * time.Second,
-				MaxConnsPerHost:       3000,
-				MaxIdleConns:          10000,
-				MaxIdleConnsPerHost:   1000,
-				DisableKeepAlives:     false,
-			},
+			Timeout:   10 * time.Second,
+			Transport: defaultTransport(),
 		}
 	}
 }
