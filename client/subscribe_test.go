@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -241,4 +242,216 @@ func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
 	exited.Wait()
 	require.Less(t, time.Since(cancelAt), 500*time.Millisecond,
 		"Subscribe should exit within 500ms of context cancellation")
+}
+
+// TestSubscribeSuppressesOnErrorAfterCancel asserts that once the
+// subscription context is cancelled, neither Subscribe nor
+// SubscribeList may fire OnError again.
+//
+// Background: ctx cancellation is the caller's explicit "stop." The
+// retry loop checks an atomic `closing` flag set by a separate
+// close-watcher goroutine. Between ctx.Done firing and the watcher
+// flipping that flag, the retry loop's waitRetry returns and the loop
+// top may still observe closing=false — at which point it dials again,
+// the dial fails against the dead server, and OnError fires.
+//
+// Without this guard, that spurious OnError reaches user code after
+// the caller has torn down its assertion scaffolding — producing
+// "panic: Fail in goroutine after test has completed" when callers
+// (including the ooo test suite itself, ws_test.go) call t.Errorf from
+// OnError. The contract under test: after cancel(), zero OnError
+// invocations may follow.
+//
+// The fix has two independent guard sites — one in connect() for
+// dial-failure-after-cancel, one in readLoop() for read-error-after-
+// cancel. The dead-port subtests cover the connect() guard; the
+// real-server subtests cover the readLoop() guard. Both are needed
+// because a future refactor that removes one of the two guards
+// would otherwise still pass the regression suite.
+//
+// All four subtests count post-cancel OnError invocations by reading
+// ctx.Err() inside OnError. That is the same signal the production
+// isClosing() guard reads — so the test asserts the exact contract
+// the production fix promises (no OnError fires once the ctx has
+// transitioned to cancelled) rather than asserting an adjacent
+// main-side flag.
+func TestSubscribeSuppressesOnErrorAfterCancel(t *testing.T) {
+	t.Run("Subscribe", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var firstErr sync.WaitGroup
+		firstErr.Add(1)
+		var firstErrOnce sync.Once
+		var exited sync.WaitGroup
+		exited.Add(1)
+
+		var errsAfterCancel atomic.Int32
+
+		go func() {
+			defer exited.Done()
+			_ = client.Subscribe(client.SubscribeConfig{
+				Ctx:              ctx,
+				Server:           client.Server{Protocol: "ws", Host: "127.0.0.1:1"},
+				HandshakeTimeout: 10 * time.Millisecond,
+				Silence:          true,
+			}, "device", client.SubscribeEvents[Device]{
+				OnMessage: func(client.Meta[Device]) {},
+				OnError: func(error) {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
+						errsAfterCancel.Add(1)
+					}
+					firstErrOnce.Do(firstErr.Done)
+				},
+			})
+		}()
+
+		firstErr.Wait()
+		cancel()
+		exited.Wait()
+
+		require.Zero(t, errsAfterCancel.Load(),
+			"Subscribe must not fire OnError once ctx has been cancelled")
+	})
+
+	t.Run("SubscribeList", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var firstErr sync.WaitGroup
+		firstErr.Add(1)
+		var firstErrOnce sync.Once
+		var exited sync.WaitGroup
+		exited.Add(1)
+
+		var errsAfterCancel atomic.Int32
+
+		go func() {
+			defer exited.Done()
+			_ = client.SubscribeList(client.SubscribeConfig{
+				Ctx:              ctx,
+				Server:           client.Server{Protocol: "ws", Host: "127.0.0.1:1"},
+				HandshakeTimeout: 10 * time.Millisecond,
+				Silence:          true,
+			}, "devices/*", client.SubscribeListEvents[Device]{
+				OnMessage: func([]client.Meta[Device]) {},
+				OnError: func(error) {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
+						errsAfterCancel.Add(1)
+					}
+					firstErrOnce.Do(firstErr.Done)
+				},
+			})
+		}()
+
+		firstErr.Wait()
+		cancel()
+		exited.Wait()
+
+		require.Zero(t, errsAfterCancel.Load(),
+			"SubscribeList must not fire OnError once ctx has been cancelled")
+	})
+
+	// The two real-server subtests below cover the readLoop() guard:
+	// they let the subscription connect successfully, deliver one
+	// snapshot, then cancel — driving the close-watcher → ReadMessage
+	// error path that the dead-port subtests cannot reach.
+
+	t.Run("Subscribe/RealServerReadLoop", func(t *testing.T) {
+		server := ooo.Server{}
+		server.Silence = true
+		server.Start("localhost:0")
+		defer server.Close(os.Interrupt)
+
+		// Seed a value so the individual Subscribe gets a non-empty
+		// initial snapshot and reaches readLoop.
+		_, err := server.Storage.Set("devices/d0", json.RawMessage(`{"name":"d0"}`))
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var connected sync.WaitGroup
+		connected.Add(1)
+		var connectedOnce sync.Once
+		var exited sync.WaitGroup
+		exited.Add(1)
+
+		var errsAfterCancel atomic.Int32
+
+		go func() {
+			defer exited.Done()
+			_ = client.Subscribe(client.SubscribeConfig{
+				Ctx:     ctx,
+				Server:  client.Server{Protocol: "ws", Host: server.Address},
+				Silence: true,
+			}, "devices/d0", client.SubscribeEvents[Device]{
+				OnMessage: func(client.Meta[Device]) {
+					connectedOnce.Do(connected.Done)
+				},
+				OnError: func(error) {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
+						errsAfterCancel.Add(1)
+					}
+				},
+			})
+		}()
+
+		connected.Wait()
+		cancel()
+		exited.Wait()
+
+		require.Zero(t, errsAfterCancel.Load(),
+			"Subscribe must not fire OnError on the readLoop teardown path after cancel")
+	})
+
+	t.Run("SubscribeList/RealServerReadLoop", func(t *testing.T) {
+		server := ooo.Server{}
+		server.Silence = true
+		server.Start("localhost:0")
+		defer server.Close(os.Interrupt)
+
+		_, err := server.Storage.Set("devices/d0", json.RawMessage(`{"name":"d0"}`))
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		var connected sync.WaitGroup
+		connected.Add(1)
+		var connectedOnce sync.Once
+		var exited sync.WaitGroup
+		exited.Add(1)
+
+		var errsAfterCancel atomic.Int32
+
+		go func() {
+			defer exited.Done()
+			_ = client.SubscribeList(client.SubscribeConfig{
+				Ctx:     ctx,
+				Server:  client.Server{Protocol: "ws", Host: server.Address},
+				Silence: true,
+			}, "devices/*", client.SubscribeListEvents[Device]{
+				OnMessage: func([]client.Meta[Device]) {
+					connectedOnce.Do(connected.Done)
+				},
+				OnError: func(error) {
+					// ctx.Err(): see test doc — canonical cancel-observed signal.
+					if ctx.Err() != nil {
+						errsAfterCancel.Add(1)
+					}
+				},
+			})
+		}()
+
+		connected.Wait()
+		cancel()
+		exited.Wait()
+
+		require.Zero(t, errsAfterCancel.Load(),
+			"SubscribeList must not fire OnError on the readLoop teardown path after cancel")
+	})
 }

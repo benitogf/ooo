@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -669,9 +670,11 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 		Level   string `json:"level"`
 		Message string `json:"message"`
 	}
+	payload := json.RawMessage(`{"level":"info","message":"test log"}`)
+	wantData := LogEntry{Level: "info", Message: "test log"}
 
 	// Create an item directly in storage
-	index, err := server.Storage.Set("logs/testitem", json.RawMessage(`{"level":"info","message":"test log"}`))
+	index, err := server.Storage.Set("logs/testitem", payload)
 	require.NoError(t, err)
 	require.NotEmpty(t, index)
 
@@ -684,45 +687,107 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 		Silence: true,
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(2)
+	// Per /testing-go-backend-async: every callback edge has a known
+	// count. Initial snapshot — exactly one OnMessage per subscription
+	// — is tracked by gotInitial (wg.Add(2)). A duplicate OnMessage
+	// (reconnect replay, stray broadcast) would drive the counter
+	// negative and panic, surfacing the bug instead of hiding it.
+	//
+	// OnError is counted separately: in a healthy lifecycle nothing
+	// drives it (no reconnects, no writes after subscribe, and the
+	// cancel-time read/dial errors are suppressed by the isClosing
+	// guard in client/subscribe.go that this PR introduces). If
+	// anything does fire, errCount surfaces it in the final assert.
+	//
+	// exited tracks subscribe-goroutine completion so the error-count
+	// assertions run only after the close path has fully drained.
+	var gotInitial sync.WaitGroup
+	gotInitial.Add(2)
 
-	// Subscribe to the list - should work
-	var listReceived bool
-	go client.SubscribeList(cfg, "logs/*", client.SubscribeListEvents[LogEntry]{
-		OnMessage: func(items []client.Meta[LogEntry]) {
-			if len(items) > 0 && items[0].Data.Message == "test log" {
-				listReceived = true
-				wg.Done()
-			}
-		},
-		OnError: func(err error) {
-			if !listReceived {
-				t.Errorf("list subscription error: %v", err)
-				wg.Done()
-			}
-		},
-	})
+	var exited sync.WaitGroup
+	exited.Add(2)
 
-	// Subscribe to the individual item - this was the bug, should now work
-	var itemReceived bool
-	go client.Subscribe(cfg, "logs/testitem", client.SubscribeEvents[LogEntry]{
-		OnMessage: func(item client.Meta[LogEntry]) {
-			if item.Data.Message == "test log" {
-				itemReceived = true
-				wg.Done()
-			}
-		},
-		OnError: func(err error) {
-			if !itemReceived {
-				t.Errorf("individual subscription error (ReadListFilter must allow individual subscriptions): %v", err)
-				wg.Done()
-			}
-		},
-	})
+	// The captures below are written by the OnMessage callbacks and
+	// read by the main goroutine after gotInitial.Wait(). They are
+	// plain variables because exactly one snapshot is broadcast for
+	// this lifecycle — server.Stream.New emits the initial snapshot
+	// once, joins the pool, and nothing writes to logs/* afterwards,
+	// so no second OnMessage occurs to race the reader. If that ever
+	// changed, the duplicate Done would panic AFTER the duplicate
+	// write — the race detector would still fire first, which is the
+	// desired signal: surface the regression rather than hide it.
+	var listSnapshot []client.Meta[LogEntry]
+	var itemSnapshot client.Meta[LogEntry]
+	// Per-subscription counters so a regression in just one of the
+	// two suppression paths (subscribeState vs subscribeListState)
+	// names the offending side in the assertion message.
+	var listErrCount, itemErrCount atomic.Int32
 
-	wg.Wait()
+	go func() {
+		defer exited.Done()
+		client.SubscribeList(cfg, "logs/*", client.SubscribeListEvents[LogEntry]{
+			OnMessage: func(items []client.Meta[LogEntry]) {
+				listSnapshot = items
+				gotInitial.Done()
+			},
+			OnError: func(err error) {
+				listErrCount.Add(1)
+				t.Logf("list OnError observed: %v", err)
+			},
+		})
+	}()
 
-	require.True(t, listReceived, "list subscription should receive the item")
-	require.True(t, itemReceived, "individual subscription should receive the item - ReadListFilter must also allow individual subscriptions")
+	go func() {
+		defer exited.Done()
+		client.Subscribe(cfg, "logs/testitem", client.SubscribeEvents[LogEntry]{
+			OnMessage: func(item client.Meta[LogEntry]) {
+				itemSnapshot = item
+				gotInitial.Done()
+			},
+			OnError: func(err error) {
+				itemErrCount.Add(1)
+				t.Logf("item OnError observed: %v", err)
+			},
+		})
+	}()
+
+	gotInitial.Wait()
+
+	// List snapshot mirrors what Storage.Set produced
+	require.Len(t, listSnapshot, 1, "list snapshot should contain exactly the one item we set")
+	require.Equal(t, index, listSnapshot[0].Index, "list item Index must match Storage.Set return")
+	require.Equal(t, wantData, listSnapshot[0].Data, "list item Data must match what was set")
+	require.NotZero(t, listSnapshot[0].Created, "list item must carry a Created timestamp")
+
+	// Individual snapshot mirrors the same item — this is the
+	// ReadListFilter-allows-individual-subscribe contract under test
+	require.Equal(t, index, itemSnapshot.Index, "individual snapshot Index must match Storage.Set return")
+	require.Equal(t, wantData, itemSnapshot.Data, "individual snapshot Data must match what was set")
+	require.NotZero(t, itemSnapshot.Created, "individual snapshot must carry a Created timestamp")
+
+	// Both reads of the same item agree on Created — they pull the
+	// same meta.Object from storage, so a divergence would indicate
+	// a regression in one of the two read paths.
+	require.Equal(t, listSnapshot[0].Created, itemSnapshot.Created, "list and individual must agree on Created")
+	// Updated == 0 is the storage contract for freshly Set items
+	// (storage.peek returns now, 0 when the key did not pre-exist);
+	// assert it explicitly on both sides rather than cross-checking
+	// "they agree" — agreement is trivially 0 == 0 here and would
+	// not detect a regression that broke the Updated propagation
+	// the same way on both paths.
+	require.Zero(t, listSnapshot[0].Updated, "freshly Set items must have Updated == 0 on the list path")
+	require.Zero(t, itemSnapshot.Updated, "freshly Set items must have Updated == 0 on the individual path")
+
+	// Cancel + wait for subscribe goroutines to exit, then verify
+	// the lifecycle produced zero OnError invocations on either
+	// path. This is the regression assertion for the bug this PR
+	// fixes: cancel must not surface a spurious "subscription
+	// error" to user code, on either the list or the individual
+	// subscription branch.
+	cancel()
+	exited.Wait()
+	require.Zero(t, listErrCount.Load(),
+		"SubscribeList OnError must not fire during the subscription lifecycle, including cancel teardown")
+	require.Zero(t, itemErrCount.Load(),
+		"Subscribe OnError must not fire during the subscription lifecycle, including cancel teardown")
 }

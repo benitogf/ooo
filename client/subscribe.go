@@ -186,7 +186,14 @@ func (s *subscribeState[T]) connect() bool {
 	if s.wsClient == nil || err != nil {
 		s.muClient.Unlock()
 		s.cfg.console.Err(s.logPrefix()+": failed websocket dial", err)
-		if s.events.OnError != nil {
+		// Suppress OnError when the subscription is being torn down: a
+		// cancelled ctx (whether observed by us or by the dialer) means
+		// the caller asked us to stop, so the dial failure is expected
+		// and not actionable. Firing OnError here races with test
+		// cleanup — callbacks see a "fail in goroutine after test has
+		// completed" panic when the retry loop dials a server that the
+		// caller has already begun shutting down.
+		if !s.isClosing() && s.events.OnError != nil {
 			s.events.OnError(err)
 		}
 		return false
@@ -195,6 +202,17 @@ func (s *subscribeState[T]) connect() bool {
 
 	s.cfg.console.Log(s.logPrefix() + ": connection established")
 	return true
+}
+
+// isClosing reports whether the subscription is being torn down. The
+// startCloseWatcher goroutine flips closing on ctx.Done, but it is a
+// separate goroutine — between ctx cancellation and the watcher running,
+// the retry loop could observe closing=false and dial again. Falling back
+// to ctx.Err() closes that window: the context has happens-before with
+// itself, so any goroutine that reads ctx.Err() after cancel sees the
+// non-nil error immediately.
+func (s *subscribeState[T]) isClosing() bool {
+	return s.closing.Load() || s.cfg.Ctx.Err() != nil
 }
 
 // handleMessage processes a single WebSocket message.
@@ -236,7 +254,11 @@ func (s *subscribeState[T]) readLoop() {
 		_, message, err := s.wsClient.ReadMessage()
 		if err != nil || message == nil {
 			s.cfg.console.Err(s.logPrefix()+": read error", err)
-			if s.events.OnError != nil {
+			// Same rationale as connect(): a read error during teardown
+			// is the expected consequence of the caller cancelling ctx
+			// (the close watcher closes the conn), not something the
+			// caller wants to hear about.
+			if !s.isClosing() && s.events.OnError != nil {
 				s.events.OnError(err)
 			}
 			s.wsClient.Close()
@@ -317,7 +339,7 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 	state.startCloseWatcher()
 
 	for {
-		if state.closing.Load() {
+		if state.isClosing() {
 			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
 			break
 		}
@@ -329,7 +351,7 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 
 		state.readLoop()
 
-		if state.closing.Load() {
+		if state.isClosing() {
 			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
 			break
 		}
@@ -373,7 +395,7 @@ func (s *subscribeListState[T]) connect() bool {
 	if s.wsClient == nil || err != nil {
 		s.muClient.Unlock()
 		s.cfg.console.Err(s.logPrefix()+": failed websocket dial", err)
-		if s.events.OnError != nil {
+		if !s.isClosing() && s.events.OnError != nil {
 			s.events.OnError(err)
 		}
 		return false
@@ -382,6 +404,12 @@ func (s *subscribeListState[T]) connect() bool {
 
 	s.cfg.console.Log(s.logPrefix() + ": connection established")
 	return true
+}
+
+// isClosing mirrors subscribeState.isClosing — see that method's comment
+// for why ctx.Err() is the durable signal rather than closing.Load().
+func (s *subscribeListState[T]) isClosing() bool {
+	return s.closing.Load() || s.cfg.Ctx.Err() != nil
 }
 
 // handleMessage processes a single WebSocket message.
@@ -428,7 +456,7 @@ func (s *subscribeListState[T]) readLoop() {
 		_, message, err := s.wsClient.ReadMessage()
 		if err != nil || message == nil {
 			s.cfg.console.Err(s.logPrefix()+": read error", err)
-			if s.events.OnError != nil {
+			if !s.isClosing() && s.events.OnError != nil {
 				s.events.OnError(err)
 			}
 			s.wsClient.Close()
@@ -509,7 +537,7 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 	state.startCloseWatcher()
 
 	for {
-		if state.closing.Load() {
+		if state.isClosing() {
 			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
 			break
 		}
@@ -521,7 +549,7 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 
 		state.readLoop()
 
-		if state.closing.Load() {
+		if state.isClosing() {
 			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
 			break
 		}
