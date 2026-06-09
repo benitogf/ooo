@@ -262,12 +262,22 @@ func TestSubscribeCancelExitsPromptlyOnDialFailure(t *testing.T) {
 // OnError. The contract under test: after cancel(), zero OnError
 // invocations may follow.
 //
-// The fix has two independent guard sites — one in connect() for
-// dial-failure-after-cancel, one in readLoop() for read-error-after-
-// cancel. The dead-port subtests cover the connect() guard; the
-// real-server subtests cover the readLoop() guard. Both are needed
-// because a future refactor that removes one of the two guards
-// would otherwise still pass the regression suite.
+// The fix has two independent guard sites in the shared
+// subscribeCore — one in connect() for dial-failure-after-cancel,
+// one in readLoop() for read-error-after-cancel. The dead-port
+// subtests cover the connect() guard; the real-server subtests
+// cover the readLoop() guard. The connect/readLoop axis is what
+// gates regression detection: removing either guard would fail at
+// least one subtest on that axis.
+//
+// Each axis runs through both Subscribe and SubscribeList. Post-
+// consolidation, both entry points share the same connect()/
+// readLoop() in subscribeCore — so the Subscribe-vs-SubscribeList
+// pairing no longer exercises independent guard code. It still
+// proves the generic Subscribe[T] and SubscribeList[T] entry
+// points both wire into the core correctly (a regression that
+// broke one wrapper's plumbing while leaving the other intact
+// would still surface), at the cost of a couple of cheap subtests.
 //
 // All four subtests count post-cancel OnError invocations by reading
 // ctx.Err() inside OnError. That is the same signal the production

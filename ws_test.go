@@ -718,9 +718,12 @@ func TestWebSocketReadListFilterAllowsIndividualSubscribe(t *testing.T) {
 	// desired signal: surface the regression rather than hide it.
 	var listSnapshot []client.Meta[LogEntry]
 	var itemSnapshot client.Meta[LogEntry]
-	// Per-subscription counters so a regression in just one of the
-	// two suppression paths (subscribeState vs subscribeListState)
-	// names the offending side in the assertion message.
+	// Per-entry-point counters so a regression in just one of the
+	// two handle closures (SubscribeList vs Subscribe over the
+	// shared subscribeCore) names the offending side in the
+	// assertion message. The shared connect/readLoop suppression
+	// path will fail both counters together; an entry-point-
+	// specific regression splits them.
 	var listErrCount, itemErrCount atomic.Int32
 
 	go func() {

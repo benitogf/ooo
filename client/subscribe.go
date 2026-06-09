@@ -14,7 +14,6 @@ import (
 	"github.com/benitogf/go-json"
 	"github.com/benitogf/ooo/key"
 	"github.com/benitogf/ooo/messages"
-	"github.com/benitogf/ooo/meta"
 	"github.com/gorilla/websocket"
 )
 
@@ -152,28 +151,55 @@ func (e *SubscribeListEvents[T]) Validate() error {
 	return nil
 }
 
-// subscribeState holds the mutable state for a single object subscription.
-type subscribeState[T any] struct {
+// subscribeCore holds the mutable state shared between Subscribe and
+// SubscribeList. Everything that varies between the two entry points —
+// wire decode, per-item unmarshal policy, OnMessage signature — is
+// injected via the handle closure. The connect/read/retry/close
+// machinery is identical for both variants and lives here in one
+// place. No type parameters are needed on the core itself: the
+// payload type T is captured inside each entry point's handle
+// closure (for the var item T, json.Unmarshal, and typed
+// OnMessage(Meta[T]) call), which is sufficient for type-safe
+// delivery. onError is a plain func(error) and needs no T.
+type subscribeCore struct {
 	cfg        SubscribeConfig
 	path       string
-	events     SubscribeEvents[T]
+	label      string // "subscribe" or "subscribeList" — feeds logPrefix
 	wsURL      url.URL
 	cache      json.RawMessage
 	retryCount int
 	closing    atomic.Bool
 	muClient   sync.Mutex
 	wsClient   *websocket.Conn
+
+	onError func(error)
+	// handle decodes one wire message + delivers it to OnMessage,
+	// firing onError per the variant's contract (fatal-on-error for
+	// single, fire-and-continue per item for list). Returns false to
+	// break the read loop (catastrophic decode), true to continue.
+	handle func(message []byte) bool
 }
 
 // logPrefix returns a consistent log prefix for this subscription.
-func (s *subscribeState[T]) logPrefix() string {
-	return "subscribe[" + s.cfg.Server.Host + "/" + s.path + "]"
+func (s *subscribeCore) logPrefix() string {
+	return s.label + "[" + s.cfg.Server.Host + "/" + s.path + "]"
+}
+
+// isClosing reports whether the subscription is being torn down. The
+// startCloseWatcher goroutine flips closing on ctx.Done, but it is a
+// separate goroutine — between ctx cancellation and the watcher running,
+// the retry loop could observe closing=false and dial again. Falling back
+// to ctx.Err() closes that window: the context has happens-before with
+// itself, so any goroutine that reads ctx.Err() after cancel sees the
+// non-nil error immediately.
+func (s *subscribeCore) isClosing() bool {
+	return s.closing.Load() || s.cfg.Ctx.Err() != nil
 }
 
 // connect establishes a WebSocket connection.
 // Returns true if connection was successful, false otherwise.
 // Backoff on failure is the caller's responsibility (see waitRetry).
-func (s *subscribeState[T]) connect() bool {
+func (s *subscribeCore) connect() bool {
 	dialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: s.cfg.HandshakeTimeout,
@@ -193,8 +219,8 @@ func (s *subscribeState[T]) connect() bool {
 		// cleanup — callbacks see a "fail in goroutine after test has
 		// completed" panic when the retry loop dials a server that the
 		// caller has already begun shutting down.
-		if !s.isClosing() && s.events.OnError != nil {
-			s.events.OnError(err)
+		if !s.isClosing() && s.onError != nil {
+			s.onError(err)
 		}
 		return false
 	}
@@ -204,52 +230,8 @@ func (s *subscribeState[T]) connect() bool {
 	return true
 }
 
-// isClosing reports whether the subscription is being torn down. The
-// startCloseWatcher goroutine flips closing on ctx.Done, but it is a
-// separate goroutine — between ctx cancellation and the watcher running,
-// the retry loop could observe closing=false and dial again. Falling back
-// to ctx.Err() closes that window: the context has happens-before with
-// itself, so any goroutine that reads ctx.Err() after cancel sees the
-// non-nil error immediately.
-func (s *subscribeState[T]) isClosing() bool {
-	return s.closing.Load() || s.cfg.Ctx.Err() != nil
-}
-
-// handleMessage processes a single WebSocket message.
-// Returns false if the read loop should break.
-func (s *subscribeState[T]) handleMessage(message []byte) bool {
-	var err error
-	var obj meta.Object
-	s.cache, obj, err = messages.Patch(message, s.cache)
-	if err != nil {
-		s.cfg.console.Err(s.logPrefix()+": failed to parse message", err)
-		if s.events.OnError != nil {
-			s.events.OnError(err)
-		}
-		return false
-	}
-	var item T
-	err = json.Unmarshal(obj.Data, &item)
-	if err != nil {
-		s.cfg.console.Err(s.logPrefix()+": failed to unmarshal item", err)
-		if s.events.OnError != nil {
-			s.events.OnError(err)
-		}
-		return false
-	}
-
-	s.retryCount = 0
-	s.events.OnMessage(Meta[T]{
-		Created: obj.Created,
-		Updated: obj.Updated,
-		Index:   obj.Index,
-		Data:    item,
-	})
-	return true
-}
-
 // readLoop reads messages from the WebSocket until an error occurs.
-func (s *subscribeState[T]) readLoop() {
+func (s *subscribeCore) readLoop() {
 	for {
 		_, message, err := s.wsClient.ReadMessage()
 		if err != nil || message == nil {
@@ -258,13 +240,13 @@ func (s *subscribeState[T]) readLoop() {
 			// is the expected consequence of the caller cancelling ctx
 			// (the close watcher closes the conn), not something the
 			// caller wants to hear about.
-			if !s.isClosing() && s.events.OnError != nil {
-				s.events.OnError(err)
+			if !s.isClosing() && s.onError != nil {
+				s.onError(err)
 			}
 			s.wsClient.Close()
 			return
 		}
-		if !s.handleMessage(message) {
+		if !s.handle(message) {
 			s.wsClient.Close()
 			return
 		}
@@ -273,7 +255,7 @@ func (s *subscribeState[T]) readLoop() {
 
 // waitRetry waits before reconnecting based on retry count.
 // Returns immediately if the subscription context is cancelled.
-func (s *subscribeState[T]) waitRetry() {
+func (s *subscribeCore) waitRetry() {
 	s.retryCount++
 	var delay time.Duration
 	switch {
@@ -294,7 +276,7 @@ func (s *subscribeState[T]) waitRetry() {
 }
 
 // startCloseWatcher starts a goroutine that closes the connection when context is done.
-func (s *subscribeState[T]) startCloseWatcher() {
+func (s *subscribeCore) startCloseWatcher() {
 	go func() {
 		<-s.cfg.Ctx.Done()
 		s.closing.Store(true)
@@ -309,13 +291,34 @@ func (s *subscribeState[T]) startCloseWatcher() {
 	}()
 }
 
+// run drives the connect/read/retry loop until the context is cancelled.
+func (s *subscribeCore) run() error {
+	s.startCloseWatcher()
+	for {
+		if s.isClosing() {
+			s.cfg.console.Log(s.logPrefix() + ": skip reconnection, closing...")
+			break
+		}
+		if !s.connect() {
+			s.waitRetry()
+			continue
+		}
+		s.readLoop()
+		if s.isClosing() {
+			s.cfg.console.Log(s.logPrefix() + ": skip reconnection, closing...")
+			break
+		}
+		s.waitRetry()
+	}
+	return nil
+}
+
 // Subscribe establishes a WebSocket subscription to a single object path (non-glob).
 // It automatically reconnects on connection loss with exponential backoff.
 // The subscription runs until the context is cancelled.
 // For glob patterns (lists), use SubscribeList instead.
 func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T]) error {
-	err := cfg.Validate()
-	if err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	if path == "" {
@@ -324,187 +327,48 @@ func Subscribe[T any](cfg SubscribeConfig, path string, events SubscribeEvents[T
 	if key.IsGlob(path) {
 		return ErrGlobNotAllowed
 	}
-	err = events.Validate()
-	if err != nil {
+	if err := events.Validate(); err != nil {
 		return err
 	}
 
-	state := &subscribeState[T]{
-		cfg:    cfg,
-		path:   path,
-		events: events,
-		wsURL:  url.URL{Scheme: cfg.Server.Protocol, Host: cfg.Server.Host, Path: path},
+	core := &subscribeCore{
+		cfg:     cfg,
+		path:    path,
+		label:   "subscribe",
+		wsURL:   url.URL{Scheme: cfg.Server.Protocol, Host: cfg.Server.Host, Path: path},
+		onError: events.OnError,
 	}
-
-	state.startCloseWatcher()
-
-	for {
-		if state.isClosing() {
-			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
-			break
-		}
-
-		if !state.connect() {
-			state.waitRetry()
-			continue
-		}
-
-		state.readLoop()
-
-		if state.isClosing() {
-			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
-			break
-		}
-
-		state.waitRetry()
-	}
-	return nil
-}
-
-// subscribeListState holds the mutable state for a list subscription.
-type subscribeListState[T any] struct {
-	cfg        SubscribeConfig
-	path       string
-	events     SubscribeListEvents[T]
-	wsURL      url.URL
-	cache      json.RawMessage
-	retryCount int
-	closing    atomic.Bool
-	muClient   sync.Mutex
-	wsClient   *websocket.Conn
-}
-
-// logPrefix returns a consistent log prefix for this subscription.
-func (s *subscribeListState[T]) logPrefix() string {
-	return "subscribeList[" + s.cfg.Server.Host + "/" + s.path + "]"
-}
-
-// connect establishes a WebSocket connection.
-// Returns true if connection was successful, false otherwise.
-// Backoff on failure is the caller's responsibility (see waitRetry).
-func (s *subscribeListState[T]) connect() bool {
-	dialer := &websocket.Dialer{
-		Proxy:            http.ProxyFromEnvironment,
-		HandshakeTimeout: s.cfg.HandshakeTimeout,
-		TLSClientConfig:  s.cfg.TLSConfig,
-	}
-
-	s.muClient.Lock()
-	var err error
-	s.wsClient, _, err = dialer.DialContext(s.cfg.Ctx, s.wsURL.String(), s.cfg.Header)
-	if s.wsClient == nil || err != nil {
-		s.muClient.Unlock()
-		s.cfg.console.Err(s.logPrefix()+": failed websocket dial", err)
-		if !s.isClosing() && s.events.OnError != nil {
-			s.events.OnError(err)
-		}
-		return false
-	}
-	s.muClient.Unlock()
-
-	s.cfg.console.Log(s.logPrefix() + ": connection established")
-	return true
-}
-
-// isClosing mirrors subscribeState.isClosing — see that method's comment
-// for why ctx.Err() is the durable signal rather than closing.Load().
-func (s *subscribeListState[T]) isClosing() bool {
-	return s.closing.Load() || s.cfg.Ctx.Err() != nil
-}
-
-// handleMessage processes a single WebSocket message.
-// Returns false if the read loop should break.
-func (s *subscribeListState[T]) handleMessage(message []byte) bool {
-	var err error
-	var objs []meta.Object
-	s.cache, objs, err = messages.PatchList(message, s.cache)
-	if err != nil {
-		s.cfg.console.Err(s.logPrefix()+": failed to parse list message", err)
-		if s.events.OnError != nil {
-			s.events.OnError(err)
-		}
-		return false
-	}
-
-	result := make([]Meta[T], 0, len(objs))
-	for _, obj := range objs {
-		var item T
-		err = json.Unmarshal(obj.Data, &item)
+	// Single-object decode: any error is fatal (terminates the read
+	// loop and triggers a reconnect after backoff). Mirrors the
+	// pre-consolidation Subscribe semantics exactly.
+	core.handle = func(message []byte) bool {
+		next, obj, err := messages.Patch(message, core.cache)
+		core.cache = next
 		if err != nil {
-			s.cfg.console.Err(s.logPrefix()+": failed to unmarshal list item", err)
-			if s.events.OnError != nil {
-				s.events.OnError(err)
+			core.cfg.console.Err(core.logPrefix()+": failed to parse message", err)
+			if core.onError != nil {
+				core.onError(err)
 			}
-			continue
+			return false
 		}
-		result = append(result, Meta[T]{
+		var item T
+		if err := json.Unmarshal(obj.Data, &item); err != nil {
+			core.cfg.console.Err(core.logPrefix()+": failed to unmarshal item", err)
+			if core.onError != nil {
+				core.onError(err)
+			}
+			return false
+		}
+		core.retryCount = 0
+		events.OnMessage(Meta[T]{
 			Created: obj.Created,
 			Updated: obj.Updated,
 			Index:   obj.Index,
 			Data:    item,
 		})
+		return true
 	}
-
-	s.retryCount = 0
-	s.events.OnMessage(result)
-	return true
-}
-
-// readLoop reads messages from the WebSocket until an error occurs.
-func (s *subscribeListState[T]) readLoop() {
-	for {
-		_, message, err := s.wsClient.ReadMessage()
-		if err != nil || message == nil {
-			s.cfg.console.Err(s.logPrefix()+": read error", err)
-			if !s.isClosing() && s.events.OnError != nil {
-				s.events.OnError(err)
-			}
-			s.wsClient.Close()
-			return
-		}
-		if !s.handleMessage(message) {
-			s.wsClient.Close()
-			return
-		}
-	}
-}
-
-// waitRetry waits before reconnecting based on retry count.
-// Returns immediately if the subscription context is cancelled.
-func (s *subscribeListState[T]) waitRetry() {
-	s.retryCount++
-	var delay time.Duration
-	switch {
-	case s.retryCount < s.cfg.Retry.MediumThreshold:
-		s.cfg.console.Log(s.logPrefix() + ": reconnecting...")
-		delay = s.cfg.Retry.InitialDelay
-	case s.retryCount < s.cfg.Retry.MaxThreshold:
-		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MediumDelay)
-		delay = s.cfg.Retry.MediumDelay
-	default:
-		s.cfg.console.Log(s.logPrefix()+": reconnecting in", s.cfg.Retry.MaxDelay)
-		delay = s.cfg.Retry.MaxDelay
-	}
-	select {
-	case <-time.After(delay):
-	case <-s.cfg.Ctx.Done():
-	}
-}
-
-// startCloseWatcher starts a goroutine that closes the connection when context is done.
-func (s *subscribeListState[T]) startCloseWatcher() {
-	go func() {
-		<-s.cfg.Ctx.Done()
-		s.closing.Store(true)
-		s.muClient.Lock()
-		defer s.muClient.Unlock()
-		if s.wsClient == nil {
-			s.cfg.console.Log(s.logPrefix() + ": closing but no connection")
-			return
-		}
-		s.cfg.console.Err(s.logPrefix()+": closing", s.cfg.Ctx.Err())
-		s.wsClient.Close()
-	}()
+	return core.run()
 }
 
 // SubscribeList establishes a WebSocket subscription to a glob pattern path (list).
@@ -512,8 +376,7 @@ func (s *subscribeListState[T]) startCloseWatcher() {
 // The subscription runs until the context is cancelled.
 // For single object paths (non-glob), use Subscribe instead.
 func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeListEvents[T]) error {
-	err := cfg.Validate()
-	if err != nil {
+	if err := cfg.Validate(); err != nil {
 		return err
 	}
 	if path == "" {
@@ -522,39 +385,51 @@ func SubscribeList[T any](cfg SubscribeConfig, path string, events SubscribeList
 	if !key.IsGlob(path) {
 		return ErrGlobRequired
 	}
-	err = events.Validate()
-	if err != nil {
+	if err := events.Validate(); err != nil {
 		return err
 	}
 
-	state := &subscribeListState[T]{
-		cfg:    cfg,
-		path:   path,
-		events: events,
-		wsURL:  url.URL{Scheme: cfg.Server.Protocol, Host: cfg.Server.Host, Path: path},
+	core := &subscribeCore{
+		cfg:     cfg,
+		path:    path,
+		label:   "subscribeList",
+		wsURL:   url.URL{Scheme: cfg.Server.Protocol, Host: cfg.Server.Host, Path: path},
+		onError: events.OnError,
 	}
-
-	state.startCloseWatcher()
-
-	for {
-		if state.isClosing() {
-			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
-			break
+	// List decode: a wire-level (PatchList) failure terminates the
+	// read loop, but per-item unmarshal failures fire OnError and
+	// continue so a single bad item does not kill the subscription.
+	// Mirrors the pre-consolidation SubscribeList semantics exactly.
+	core.handle = func(message []byte) bool {
+		next, objs, err := messages.PatchList(message, core.cache)
+		core.cache = next
+		if err != nil {
+			core.cfg.console.Err(core.logPrefix()+": failed to parse list message", err)
+			if core.onError != nil {
+				core.onError(err)
+			}
+			return false
 		}
-
-		if !state.connect() {
-			state.waitRetry()
-			continue
+		result := make([]Meta[T], 0, len(objs))
+		for _, obj := range objs {
+			var item T
+			if err := json.Unmarshal(obj.Data, &item); err != nil {
+				core.cfg.console.Err(core.logPrefix()+": failed to unmarshal list item", err)
+				if core.onError != nil {
+					core.onError(err)
+				}
+				continue
+			}
+			result = append(result, Meta[T]{
+				Created: obj.Created,
+				Updated: obj.Updated,
+				Index:   obj.Index,
+				Data:    item,
+			})
 		}
-
-		state.readLoop()
-
-		if state.isClosing() {
-			state.cfg.console.Log(state.logPrefix() + ": skip reconnection, closing...")
-			break
-		}
-
-		state.waitRetry()
+		core.retryCount = 0
+		events.OnMessage(result)
+		return true
 	}
-	return nil
+	return core.run()
 }
