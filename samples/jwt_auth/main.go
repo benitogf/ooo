@@ -6,7 +6,7 @@
 
 // Package main demonstrates JWT authentication with auth package.
 // This example shows how to:
-// - Add JWT authentication to ooo server
+// - Add JWT authentication to ooo server via Router.Use() middleware
 // - Protect routes with token verification
 // - Handle user registration and login
 // - Use layered storage with ko for persistent user data
@@ -44,21 +44,32 @@ func main() {
 	// Create server with static mode
 	server := ooo.Server{Static: true}
 
-	// Audit middleware - check JWT for protected routes
-	server.Audit = func(r *http.Request) bool {
-		// Public routes
-		if r.URL.Path == "/register" || r.URL.Path == "/authorize" {
-			return true
-		}
-		// Protected routes require valid token
-		return tokenAuth.Verify(r)
-	}
+	// Initialize router so we can attach middleware and the auth routes
+	// before Start. Router.Use() is the documented gate — middleware
+	// fans out to every matched request via gorilla/mux's Match.
+	server.Router = mux.NewRouter()
+
+	// Auth middleware: allow login/register without a token; everything
+	// else requires a valid JWT.
+	server.Router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/register" || r.URL.Path == "/authorize" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if !tokenAuth.Verify(r) {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("not authorized"))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Enable data routes
 	server.OpenFilter("data/*")
 
 	// Add auth routes (/register, /authorize, /verify)
-	server.Router = mux.NewRouter()
 	tokenAuth.Routes(&server)
 
 	server.Start("0.0.0.0:8800")

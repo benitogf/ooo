@@ -43,14 +43,20 @@ const deadlineMsg = "ooo: server deadline reached"
 // use mux.CurrentRoute, which gorilla/mux does not expose a public
 // setter for.
 //
+// Router.Use() middlewares fan out automatically: gorilla/mux's
+// Router.Match builds the middleware chain into match.Handler before
+// returning, so the dispatched handler is already wrapped. Consumers
+// gate requests by registering middleware via server.Router.Use(...);
+// no per-handler hook is needed. Unmatched paths (404 / 405) skip
+// the chain — matching gorilla/mux's own ServeHTTP behavior — so
+// observability middleware will not see those responses; wrap from
+// outside Server.Router if you need to.
+//
 // Known deviations from mux.Router.ServeHTTP:
 //   - No path cleaning + 301 redirect for non-canonical paths
 //     (mux does this when SkipClean(true) has NOT been set). The
 //     codebase does not depend on it. Add a port of mux's cleanPath
 //     here if a future consumer needs it.
-//   - mux Router.Use() middlewares are not fanned out. The codebase
-//     does not register any. If middleware support is added later,
-//     this wrapper must chain them onto the matched handler.
 type syncRouter struct {
 	router *mux.Router
 	mu     *sync.RWMutex
@@ -107,14 +113,6 @@ const (
 // negative value to disable the cap.
 const DefaultMaxRequestBodyBytes = 10 * 1024 * 1024 // 10 MiB
 
-// audit requests function
-// will define approval or denial by the return value
-// r: the request to be audited
-// returns
-// true: approve the request
-// false: rejects the request
-type audit func(r *http.Request) bool
-
 // CloseHookPhase identifies when a teardown hook runs during Server.Close.
 // Phases run in declaration order; multiple hooks at the same phase run
 // in registration order. See RegisterCloseHook.
@@ -148,8 +146,6 @@ const (
 // Stream: manages WebSocket connections and broadcasts
 //
 // NoBroadcastKeys: array of keys that should not broadcast on changes
-//
-// Audit: function to audit requests, returns true to approve, false to deny
 //
 // Workers: number of workers to use as readers of the storage->broadcast channel
 //
@@ -245,7 +241,6 @@ type Server struct {
 	closeHooks      [closeHookPhaseCount][]func() // teardown hooks indexed by CloseHookPhase
 	closeHooksMu    sync.Mutex                    // protects closeHooks
 	NoBroadcastKeys []string
-	Audit           audit
 	Workers         int
 	ForcePatch      bool
 	NoPatch         bool
@@ -774,9 +769,6 @@ func (server *Server) defaultCallbacks() {
 	if server.OnClose == nil {
 		server.OnClose = func() {}
 	}
-	if server.Audit == nil {
-		server.Audit = func(r *http.Request) bool { return true }
-	}
 	if server.OnSubscribe == nil {
 		server.OnSubscribe = func(key string) error { return nil }
 	}
@@ -885,7 +877,6 @@ func (server *Server) setupRoutes() {
 		GetEndpoints:   server.getEndpoints,
 		GetProxies:     server.getProxies,
 		GetOrphanKeys:  server.getOrphanKeys,
-		AuditFunc:      server.Audit,
 		ClockFunc:      server.clock,
 	}
 	server.Router.Handle("/", explorerHandler).Methods("GET")

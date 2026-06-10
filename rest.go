@@ -19,12 +19,6 @@ import (
 )
 
 func (server *Server) publish(w http.ResponseWriter, r *http.Request) {
-	if !server.Audit(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", ErrNotAuthorized)
-		return
-	}
-
 	_key := mux.Vars(r)["key"]
 	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -78,12 +72,6 @@ func (server *Server) publish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (server *Server) patch(w http.ResponseWriter, r *http.Request) {
-	if !server.Audit(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", ErrNotAuthorized)
-		return
-	}
-
 	_key := mux.Vars(r)["key"]
 	if !key.IsValid(_key) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -176,12 +164,6 @@ func (server *Server) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !server.Audit(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", ErrNotAuthorized)
-		return
-	}
-
 	if r.Header.Get("Upgrade") == "websocket" {
 		err := server.ws(w, r)
 		if err != nil {
@@ -220,12 +202,6 @@ func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !server.Audit(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", ErrNotAuthorized)
-		return
-	}
-
 	err := server.filters.Delete.Check(_key, server.Static)
 	if err != nil {
 		server.Console.Err("detError["+_key+"]", err)
@@ -260,9 +236,12 @@ func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 // signals the response writer side-channel to suppress connection keep-alive
 // once the cap trips, and that side-channel is a no-op after the header has
 // been committed. Today both REST callers (publish, patch) short-circuit on
-// auth and key checks without writing to w first, so the invariant holds —
-// refactor that path with care. Same constraint applies to any other caller
-// (proxy handlers, custom Endpoints).
+// key checks without writing to w first, so the invariant holds — refactor
+// that path with care. Same constraint applies to any other caller (proxy
+// handlers, custom Endpoints). Router.Use() middleware that denies a request
+// must short-circuit (not call next) — once next runs, the handler may
+// invoke LimitBody, and any subsequent write to w from a deferred middleware
+// closure would arrive too late.
 //
 // The returned ReadErrorProbe (non-nil only when the cap is active) records
 // the most recent error returned by Read. benitogf/go-json is known to

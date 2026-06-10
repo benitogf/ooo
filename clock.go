@@ -1,7 +1,6 @@
 package ooo
 
 import (
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -38,13 +37,6 @@ func (server *Server) startClock() {
 }
 
 func (server *Server) clock(w http.ResponseWriter, r *http.Request) {
-	if !server.Audit(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		fmt.Fprintf(w, "%s", ErrNotAuthorized)
-		server.Console.Err("socketConnectionUnauthorized time")
-		return
-	}
-
 	server.handlerWg.Add(1)
 	defer server.handlerWg.Done()
 

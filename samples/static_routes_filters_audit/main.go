@@ -1,7 +1,7 @@
-// Package main demonstrates static routes, filters, and audit middleware.
-// This example shows how to:
+// Package main demonstrates static routes, filters, and request gating
+// via Router.Use() middleware. This example shows how to:
 // - Enable static mode (only filtered routes available)
-// - Add API key authentication via Audit
+// - Add API key authentication via Router.Use() middleware
 // - Use write filters for validation
 // - Use read filters to hide sensitive data
 // - Use delete filters to protect resources
@@ -15,6 +15,7 @@ import (
 
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/meta"
+	"github.com/gorilla/mux"
 )
 
 type Book struct {
@@ -26,10 +27,23 @@ type Book struct {
 func main() {
 	server := ooo.Server{Static: true}
 
-	// Only allow requests that carry a valid API key
-	server.Audit = func(r *http.Request) bool {
-		return r.Header.Get("X-API-Key") == "secret"
-	}
+	// Initialize router so we can attach middleware before Start.
+	server.Router = mux.NewRouter()
+
+	// Only allow requests that carry a valid API key. Router.Use()
+	// middleware fans out to every matched request via gorilla/mux's
+	// Match — REST handlers, WebSocket upgrades, custom endpoints,
+	// proxy routes, and the explorer UI all run after the chain.
+	server.Router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("X-API-Key") != "secret" {
+				w.WriteHeader(http.StatusUnauthorized)
+				w.Write([]byte("not authorized"))
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
 
 	// Make the list route available while Static mode is enabled
 	server.OpenFilter("books/*")

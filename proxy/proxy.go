@@ -606,12 +606,13 @@ func Route(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Register the route and mirror onto the route oracle so the data
 	// wildcard defers to this proxy regardless of registration order.
-	// AuditHandler runs Server.Audit before the proxy handler so
-	// proxied paths participate in the same auth gate as built-in
-	// REST handlers. RouterMutate serializes this with the
-	// syncRouter wrapper's Match.
+	// Auth gating is handled by middleware registered via
+	// server.Router.Use(...); gorilla/mux's Match applies the chain
+	// before dispatch, so the proxy handler runs after middleware just
+	// like built-in REST handlers. RouterMutate serializes this with
+	// the syncRouter wrapper's Match.
 	server.RouterMutate(func() {
-		server.Router.HandleFunc("/"+muxPattern, server.AuditHandler(handler))
+		server.Router.HandleFunc("/"+muxPattern, handler)
 	})
 	server.RegisterOracleRoute("/"+muxPattern, nil)
 
@@ -707,13 +708,14 @@ func RouteList(server *ooo.Server, localPath string, cfg Config) error {
 
 	// Register routes - specific path first, then base. Mirror both onto
 	// the route oracle so the data wildcard defers to them regardless of
-	// registration order. AuditHandler wraps each so Server.Audit gates
-	// proxied requests the same way it gates built-in REST handlers.
-	// RouterMutate serializes both mutations with the syncRouter
-	// wrapper's Match.
+	// registration order. Auth gating is handled by middleware registered
+	// via server.Router.Use(...); gorilla/mux's Match applies the chain
+	// before dispatch, so proxy handlers run after middleware like
+	// built-in REST handlers. RouterMutate serializes both mutations
+	// with the syncRouter wrapper's Match.
 	server.RouterMutate(func() {
-		server.Router.HandleFunc("/"+muxPattern, server.AuditHandler(itemHandler))
-		server.Router.HandleFunc("/"+basePath, server.AuditHandler(listHandler))
+		server.Router.HandleFunc("/"+muxPattern, itemHandler)
+		server.Router.HandleFunc("/"+basePath, listHandler)
 	})
 	server.RegisterOracleRoute("/"+muxPattern, nil)
 	server.RegisterOracleRoute("/"+basePath, nil)
@@ -989,8 +991,12 @@ func RouteWithVars(server *ooo.Server, localPath string, cfg Config) error {
 		handleHTTPProxy(server, w, r, address, remotePath, cfg.Subscribe)
 	}
 
+	// Auth gating is handled by middleware registered via
+	// server.Router.Use(...); gorilla/mux's Match applies the chain
+	// before dispatch, so this proxy handler runs after middleware
+	// like built-in REST handlers.
 	server.RouterMutate(func() {
-		server.Router.HandleFunc("/"+localPath, server.AuditHandler(handler))
+		server.Router.HandleFunc("/"+localPath, handler)
 	})
 	server.RegisterOracleRoute("/"+localPath, nil)
 
