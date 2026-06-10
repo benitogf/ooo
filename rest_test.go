@@ -16,8 +16,23 @@ import (
 	"github.com/benitogf/ooo/meta"
 	"github.com/benitogf/ooo/oootest"
 	"github.com/benitogf/ooo/storage"
+	"github.com/gorilla/mux"
 	"github.com/stretchr/testify/require"
 )
+
+// denyMethodMiddleware rejects requests whose HTTP method matches
+// `method` with 401 Unauthorized; everything else passes through.
+func denyMethodMiddleware(method string) mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == method {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 // maskedNotFound wraps storage.ErrNotFound but its Error() text omits
 // the literal "not found" substring. Used to exercise unpublish's
@@ -608,9 +623,8 @@ func TestRestPatchUnauthorized(t *testing.T) {
 	}
 	server := ooo.Server{}
 	server.Silence = true
-	server.Audit = func(r *http.Request) bool {
-		return r.Method != "PATCH"
-	}
+	server.Router = mux.NewRouter()
+	server.Router.Use(denyMethodMiddleware("PATCH"))
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
@@ -684,9 +698,8 @@ func TestRestReadUnauthorized(t *testing.T) {
 	}
 	server := ooo.Server{}
 	server.Silence = true
-	server.Audit = func(r *http.Request) bool {
-		return r.Method != "GET"
-	}
+	server.Router = mux.NewRouter()
+	server.Router.Use(denyMethodMiddleware("GET"))
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 
@@ -728,9 +741,8 @@ func TestRestUnpublishUnauthorized(t *testing.T) {
 	}
 	server := ooo.Server{}
 	server.Silence = true
-	server.Audit = func(r *http.Request) bool {
-		return r.Method != "DELETE"
-	}
+	server.Router = mux.NewRouter()
+	server.Router.Use(denyMethodMiddleware("DELETE"))
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 

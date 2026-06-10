@@ -21,6 +21,7 @@ import (
 	"github.com/benitogf/ooo"
 	"github.com/benitogf/ooo/client"
 	"github.com/benitogf/ooo/proxy"
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -863,15 +864,18 @@ func TestProxyWebSocketWithBearerTokenAuthRequired(t *testing.T) {
 	remote.Silence = true
 	remote.Static = true
 	remote.OpenFilter("settings")
-	remote.Audit = func(r *http.Request) bool {
-		// Check for bearer token in Sec-Websocket-Protocol header
-		protocols := r.Header.Get("Sec-Websocket-Protocol")
-		if protocols == "" {
-			return false
-		}
-		// Protocol format: "bearer, <token>" - verify token is present
-		return strings.Contains(protocols, testToken)
-	}
+	remote.Router = mux.NewRouter()
+	remote.Router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Check for bearer token in Sec-Websocket-Protocol header
+			protocols := r.Header.Get("Sec-Websocket-Protocol")
+			if protocols == "" || !strings.Contains(protocols, testToken) {
+				w.WriteHeader(http.StatusUnauthorized)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	})
 	remote.Start("localhost:0")
 	defer remote.Close(os.Interrupt)
 
@@ -1594,12 +1598,24 @@ func TestProxyCapabilitiesEnforcedViaNodeListFilter(t *testing.T) {
 	require.False(t, upstreamHit, "upstream must not see denied requests via NodeListFilter")
 }
 
-// TestProxyAuditGatesRoute asserts that a proxied request through
-// Route honors Server.Audit. Pre-fix proxy handlers were registered
-// directly on Router with no Audit wrapping, so a deny-everything
-// Audit had no effect — custom proxy paths silently bypassed
-// auth/rate-limiting/observability gates.
-func TestProxyAuditGatesRoute(t *testing.T) {
+// denyAllMiddleware rejects every request with 401 Unauthorized.
+// Used by the proxy gating tests below to assert middleware fans
+// out across every shape of proxy registration.
+func denyAllMiddleware() mux.MiddlewareFunc {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		})
+	}
+}
+
+// TestProxyMiddlewareGatesRoute asserts that a proxied request
+// through Route runs inside the middleware chain registered via
+// Router.Use(). Pre-refactor proxy handlers were wrapped in an
+// opinionated AuditHandler; now the gorilla/mux middleware chain is
+// the single extension point and the proxy handler is registered
+// naked.
+func TestProxyMiddlewareGatesRoute(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
@@ -1613,7 +1629,8 @@ func TestProxyAuditGatesRoute(t *testing.T) {
 
 	proxyServer := &ooo.Server{}
 	proxyServer.Silence = true
-	proxyServer.Audit = func(r *http.Request) bool { return false }
+	proxyServer.Router = mux.NewRouter()
+	proxyServer.Router.Use(denyAllMiddleware())
 
 	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
 		Resolve: func(_ string) (string, string, error) {
@@ -1628,17 +1645,18 @@ func TestProxyAuditGatesRoute(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
-		"Audit returning false must reject proxied Route requests")
-	require.False(t, upstreamHit.Load(), "upstream must not be contacted when Audit denies")
+		"middleware returning 401 must reject proxied Route requests")
+	require.False(t, upstreamHit.Load(), "upstream must not be contacted when middleware denies")
 }
 
-// TestProxyAuditGatesRouteList asserts the same for the list-shaped
-// registrar — exercises BOTH closures it installs: itemHandler at the
-// glob-expanded path and listHandler at the trimmed base path. A
-// glob-suffix localPath ("items/*") is required so basePath strips to
-// "items" and the request to /items actually matches the listHandler
-// route instead of falling through to the data wildcard.
-func TestProxyAuditGatesRouteList(t *testing.T) {
+// TestProxyMiddlewareGatesRouteList asserts the same for the
+// list-shaped registrar — exercises BOTH closures it installs:
+// itemHandler at the glob-expanded path and listHandler at the
+// trimmed base path. A glob-suffix localPath ("items/*") is required
+// so basePath strips to "items" and the request to /items actually
+// matches the listHandler route instead of falling through to the
+// data wildcard.
+func TestProxyMiddlewareGatesRouteList(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
@@ -1652,7 +1670,8 @@ func TestProxyAuditGatesRouteList(t *testing.T) {
 
 	proxyServer := &ooo.Server{}
 	proxyServer.Silence = true
-	proxyServer.Audit = func(r *http.Request) bool { return false }
+	proxyServer.Router = mux.NewRouter()
+	proxyServer.Router.Use(denyAllMiddleware())
 
 	err := proxy.RouteList(proxyServer, "items/*", proxy.Config{
 		Resolve: func(_ string) (string, string, error) {
@@ -1668,29 +1687,29 @@ func TestProxyAuditGatesRouteList(t *testing.T) {
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
-		"itemHandler must be gated by Audit")
+		"itemHandler must be gated by middleware")
 
 	// listHandler — registered at /items (basePath). This request
 	// matches the registered route directly (not the data wildcard),
-	// so the 401 must come from the listHandler's AuditHandler wrap.
+	// so the 401 must come from the middleware chain.
 	resp, err = http.Get("http://" + proxyServer.Address + "/items")
 	require.NoError(t, err)
 	resp.Body.Close()
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode,
-		"listHandler must be gated by Audit")
+		"listHandler must be gated by middleware")
 
-	require.False(t, upstreamHit.Load(), "upstream must not be contacted when Audit denies")
+	require.False(t, upstreamHit.Load(), "upstream must not be contacted when middleware denies")
 }
 
-// TestProxyAuditGatesWebSocketUpgrade asserts that the AuditHandler
-// wrap runs BEFORE the proxy closure's websocket.IsWebSocketUpgrade
-// branch. A WebSocket dial against a deny-everything Audit must
-// receive a clean HTTP 401 before any upgrade is attempted, so the
-// client never enters a half-upgraded state. The structural
-// guarantee comes from AuditHandler being the outer wrapper; this
-// test locks that ordering against future refactors that might move
-// the gate inside the inner closure.
-func TestProxyAuditGatesWebSocketUpgrade(t *testing.T) {
+// TestProxyMiddlewareGatesWebSocketUpgrade asserts that the
+// Router.Use() middleware chain runs BEFORE the proxy closure's
+// websocket.IsWebSocketUpgrade branch. A WebSocket dial against a
+// deny-all middleware must receive a clean HTTP 401 before any
+// upgrade is attempted, so the client never enters a half-upgraded
+// state. gorilla/mux's Match builds the middleware chain into the
+// matched handler, so this ordering is structural; this test locks
+// it against future refactors.
+func TestProxyMiddlewareGatesWebSocketUpgrade(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
@@ -1704,7 +1723,8 @@ func TestProxyAuditGatesWebSocketUpgrade(t *testing.T) {
 
 	proxyServer := &ooo.Server{}
 	proxyServer.Silence = true
-	proxyServer.Audit = func(r *http.Request) bool { return false }
+	proxyServer.Router = mux.NewRouter()
+	proxyServer.Router.Use(denyAllMiddleware())
 
 	err := proxy.Route(proxyServer, "settings/{deviceID}", proxy.Config{
 		Resolve: func(_ string) (string, string, error) {
@@ -1717,7 +1737,7 @@ func TestProxyAuditGatesWebSocketUpgrade(t *testing.T) {
 
 	u := url.URL{Scheme: "ws", Host: proxyServer.Address, Path: "/settings/device1"}
 	c, resp, err := websocket.DefaultDialer.Dial(u.String(), nil)
-	require.Error(t, err, "deny-everything Audit must reject the upgrade")
+	require.Error(t, err, "deny-all middleware must reject the upgrade")
 	if c != nil {
 		c.Close()
 	}
@@ -1727,8 +1747,9 @@ func TestProxyAuditGatesWebSocketUpgrade(t *testing.T) {
 	require.False(t, upstreamHit.Load())
 }
 
-// TestProxyAuditGatesRouteWithVars asserts the same for RouteWithVars.
-func TestProxyAuditGatesRouteWithVars(t *testing.T) {
+// TestProxyMiddlewareGatesRouteWithVars asserts the same for
+// RouteWithVars.
+func TestProxyMiddlewareGatesRouteWithVars(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Parallel()
 	}
@@ -1742,7 +1763,8 @@ func TestProxyAuditGatesRouteWithVars(t *testing.T) {
 
 	proxyServer := &ooo.Server{}
 	proxyServer.Silence = true
-	proxyServer.Audit = func(r *http.Request) bool { return false }
+	proxyServer.Router = mux.NewRouter()
+	proxyServer.Router.Use(denyAllMiddleware())
 	// RouteWithVars assumes Router is initialized.
 	proxyServer.Start("localhost:0")
 	defer proxyServer.Close(os.Interrupt)

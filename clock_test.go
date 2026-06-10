@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 )
@@ -67,9 +68,12 @@ func TestClockWebsocketUnauthorized(t *testing.T) {
 	}
 	server := Server{}
 	server.Silence = true
-	server.Audit = func(r *http.Request) bool {
-		return false // Deny all requests
-	}
+	server.Router = mux.NewRouter()
+	server.Router.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+		})
+	})
 	server.Start("localhost:0")
 	defer server.Close(os.Interrupt)
 

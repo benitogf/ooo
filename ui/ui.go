@@ -149,7 +149,6 @@ type Handler struct {
 	GetEndpoints   func() []EndpointInfo
 	GetProxies     func() []ProxyInfo
 	GetOrphanKeys  func() []string
-	AuditFunc      func(r *http.Request) bool
 	ClockFunc      func(w http.ResponseWriter, r *http.Request)
 }
 
@@ -160,13 +159,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.ClockFunc != nil {
 			h.ClockFunc(w, r)
 		}
-		return
-	}
-
-	// Check authorization
-	if h.AuditFunc != nil && !h.AuditFunc(r) {
-		w.WriteHeader(http.StatusUnauthorized)
-		w.Write([]byte("not authorized"))
 		return
 	}
 
