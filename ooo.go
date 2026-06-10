@@ -47,7 +47,10 @@ const deadlineMsg = "ooo: server deadline reached"
 // Router.Match builds the middleware chain into match.Handler before
 // returning, so the dispatched handler is already wrapped. Consumers
 // gate requests by registering middleware via server.Router.Use(...);
-// no per-handler hook is needed.
+// no per-handler hook is needed. Unmatched paths (404 / 405) skip
+// the chain — matching gorilla/mux's own ServeHTTP behavior — so
+// observability middleware will not see those responses; wrap from
+// outside Server.Router if you need to.
 //
 // Known deviations from mux.Router.ServeHTTP:
 //   - No path cleaning + 301 redirect for non-canonical paths
@@ -143,8 +146,6 @@ const (
 // Stream: manages WebSocket connections and broadcasts
 //
 // NoBroadcastKeys: array of keys that should not broadcast on changes
-//
-// Audit: function to audit requests, returns true to approve, false to deny
 //
 // Workers: number of workers to use as readers of the storage->broadcast channel
 //

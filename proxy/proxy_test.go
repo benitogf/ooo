@@ -879,7 +879,7 @@ func TestProxyWebSocketWithBearerTokenAuthRequired(t *testing.T) {
 	remote.Start("localhost:0")
 	defer remote.Close(os.Interrupt)
 
-	// Set initial data on remote (direct storage access bypasses Audit)
+	// Set initial data on remote (direct storage access bypasses middleware)
 	data, _ := json.Marshal(Settings{Name: "protected", Value: 42})
 	_, err := remote.Storage.Set("settings", data)
 	require.NoError(t, err)

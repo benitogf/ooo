@@ -43,7 +43,7 @@ For large-scale data storage (millions of records, complex queries), use a dedic
 - [JSON Patch](http://jsonpatch.com) updates for efficient sync
 - Version checking (no data sent on version match while reconnecting)
 - RESTful CRUD reflected to subscribers
-- Filtering and audit middleware
+- Filtering and Router.Use() middleware
 - Auto-managed timestamps (created, updated) with a monotonic clock for consistency on ntp/ptp synchronizations
 - Built-in web UI for data management
 
@@ -249,13 +249,29 @@ server.LimitFilter("telemetry/*", ooo.LimitFilterConfig{
 - `Description` - Human-readable description for the explorer UI
 - `Schema` - JSON schema struct for UI display
 
-### Audit
+### Middleware
+
+Gate requests by registering standard `http.Handler` middleware via
+`server.Router.Use(...)`. The chain is built into the matched handler
+by gorilla/mux, so it runs for every matched request — REST handlers,
+WebSocket upgrades, custom endpoints, proxy routes, and the explorer
+UI all dispatch through the chain. Unmatched paths (404/405) skip
+the chain, matching gorilla/mux's own behavior. Subrouters work as
+expected for per-prefix chains.
 
 ```go
-server.Audit = func(r *http.Request) bool {
-    // return true to allow, false to deny (401)
-    return r.Header.Get("X-API-Key") == "secret"
-}
+import "github.com/gorilla/mux"
+
+server.Router = mux.NewRouter()
+server.Router.Use(func(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        if r.Header.Get("X-API-Key") != "secret" {
+            w.WriteHeader(http.StatusUnauthorized)
+            return
+        }
+        next.ServeHTTP(w, r)
+    })
+})
 ```
 
 ### Custom Endpoints

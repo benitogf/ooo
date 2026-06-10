@@ -238,9 +238,10 @@ func (server *Server) unpublish(w http.ResponseWriter, r *http.Request) {
 // been committed. Today both REST callers (publish, patch) short-circuit on
 // key checks without writing to w first, so the invariant holds — refactor
 // that path with care. Same constraint applies to any other caller (proxy
-// handlers, custom Endpoints). Auth gating via Router.Use() middleware also
-// runs before LimitBody is reached, but middleware that writes a denial
-// response into w must do so before any caller invokes LimitBody.
+// handlers, custom Endpoints). Router.Use() middleware that denies a request
+// must short-circuit (not call next) — once next runs, the handler may
+// invoke LimitBody, and any subsequent write to w from a deferred middleware
+// closure would arrive too late.
 //
 // The returned ReadErrorProbe (non-nil only when the cap is active) records
 // the most recent error returned by Read. benitogf/go-json is known to
