@@ -244,9 +244,15 @@ type Server struct {
 	Workers         int
 	ForcePatch      bool
 	NoPatch         bool
-	OnSubscribe     stream.Subscribe
-	OnUnsubscribe   stream.Unsubscribe
-	OnStart         func()
+	// LosslessWatch makes storage→broadcast event delivery block instead of
+	// dropping after SEND_TIMEOUT when a consumer stalls (see
+	// storage.Options.LosslessWatch). Default false keeps production drop
+	// resilience; set true for deterministic tests where a dropped broadcast
+	// would desync a subscriber.
+	LosslessWatch bool
+	OnSubscribe   stream.Subscribe
+	OnUnsubscribe stream.Unsubscribe
+	OnStart       func()
 	// OnClose runs as the final teardown step, after every PostShutdown
 	// hook. Deprecated: use RegisterCloseHook(PostShutdown, fn) instead;
 	// the field is kept for backwards compatibility and runs last so
@@ -472,6 +478,7 @@ func (server *Server) waitListen() {
 	storageOpt := storage.Options{
 		NoBroadcastKeys: server.NoBroadcastKeys,
 		Workers:         server.Workers,
+		LosslessWatch:   server.LosslessWatch,
 	}
 
 	if server.BeforeRead != nil {
