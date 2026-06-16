@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -114,7 +115,7 @@ func TestAfterWriteOpFiresBeforeEvent(t *testing.T) {
 	defer st.Close()
 
 	events := make(chan Event, 1)
-	WatchWithCallback(st, func(ev Event) {
+	WatchWithCallback(context.Background(), st, func(ev Event) {
 		select {
 		case events <- ev:
 		default:

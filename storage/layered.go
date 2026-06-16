@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"sort"
 	"sync"
 
@@ -110,6 +111,7 @@ func (l *Layered) Start(opt Options) error {
 		workers = 6
 	}
 	l.watcher = NewShardedChan(workers)
+	l.watcher.SetBlocking(opt.LosslessWatch)
 	l.noBroadcastKeys = opt.NoBroadcastKeys
 	l.beforeRead = opt.BeforeRead
 	l.afterWrite = opt.AfterWrite
@@ -834,7 +836,16 @@ func (l *Layered) sendEvent(event Event) {
 // WatchWithCallback starts goroutines that watch all sharded channels and call
 // the provided callback for each event. Use this for external storages that need
 // to trigger sync on storage events.
-func WatchWithCallback(dataStore Database, callback func(Event)) {
+//
+// The goroutines exit when any of: ctx is cancelled, the watch channel is closed
+// (storage Close), or the storage goes inactive. Passing a cancellable ctx lets
+// a caller stop the watchers without closing a storage it does not own — without
+// it the goroutines block on the channel receive until process exit, leaking one
+// per shard per call (which accumulates fast under repeated attach/detach).
+func WatchWithCallback(ctx context.Context, dataStore Database, callback func(Event)) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	shardedWatcher := dataStore.WatchSharded()
 	if shardedWatcher == nil {
 		return
@@ -842,11 +853,15 @@ func WatchWithCallback(dataStore Database, callback func(Event)) {
 	for i := 0; i < shardedWatcher.Count(); i++ {
 		go func(ch StorageChan) {
 			for {
-				event, ok := <-ch
-				if !ok || !dataStore.Active() {
+				select {
+				case <-ctx.Done():
 					return
+				case event, ok := <-ch:
+					if !ok || !dataStore.Active() {
+						return
+					}
+					callback(event)
 				}
-				callback(event)
 			}
 		}(shardedWatcher.Shard(i))
 	}

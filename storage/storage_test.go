@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -380,7 +382,7 @@ func TestWatchWithCallback(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Start watching with callback
-	WatchWithCallback(storage, func(event Event) {
+	WatchWithCallback(context.Background(), storage, func(event Event) {
 		mu.Lock()
 		events = append(events, event)
 		mu.Unlock()
@@ -421,6 +423,147 @@ func TestWatchWithCallback(t *testing.T) {
 	require.Equal(t, 2, setCount, "should have 2 set events")
 	require.Equal(t, 1, delCount, "should have 1 delete event")
 	mu.Unlock()
+}
+
+// fillShard sends n events keyed to the same shard (so they all land in one
+// 100-deep buffer) on a non-blocking, generous-timeout channel — used to fill
+// the buffer before exercising the full-buffer behavior.
+func fillShard(s *ShardedChan, n int) {
+	for range n {
+		s.Send(Event{Key: "k", Operation: "set"})
+	}
+}
+
+// TestShardedChanBlockingSendBlocksInsteadOfDropping is the direct proof of the
+// lossless feature: with blocking set, a Send into a full shard buffer BLOCKS
+// until the consumer drains, rather than dropping after the timeout. Delete the
+// blocking branch in Send and this test fails — the send would drop and the
+// drained-and-unblocked assertions would not hold. No consumer goroutine and no
+// real timeout wait: the buffer is filled directly and the full-buffer Send is
+// observed to block, then to complete after a single receive.
+func TestShardedChanBlockingSendBlocksInsteadOfDropping(t *testing.T) {
+	t.Parallel()
+
+	s := NewShardedChan(1)
+	s.SetBlocking(true)
+	// A short drop-mode timeout would make a *non*-blocking Send drop almost
+	// immediately — so if blocking were not in effect, `done` would close fast.
+	s.sendTimeout.Store(int64(50 * time.Millisecond))
+
+	fillShard(s, 100) // buffer (cap 100) now full, nothing dropped
+	require.Equal(t, int64(0), s.Dropped())
+
+	done := make(chan struct{})
+	go func() {
+		s.Send(Event{Key: "k", Operation: "set"}) // full buffer → must block
+		close(done)
+	}()
+
+	// It must still be blocked well past the drop-mode timeout (negative
+	// assertion: a dropping Send would have returned by now).
+	select {
+	case <-done:
+		t.Fatal("blocking Send returned while buffer full — it dropped instead of blocking")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	<-s.Shard(0) // drain one slot
+	select {
+	case <-done: // blocked Send now completes
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocking Send did not complete after the buffer drained")
+	}
+	require.Equal(t, int64(0), s.Dropped(), "blocking mode must never drop")
+}
+
+// TestShardedChanDropModeDropsWhenFull is the contrast that proves the above
+// setup genuinely overflows the buffer: in the default (non-blocking) mode a
+// Send into a full buffer drops after the (here shortened) timeout.
+func TestShardedChanDropModeDropsWhenFull(t *testing.T) {
+	t.Parallel()
+
+	s := NewShardedChan(1) // blocking defaults to false
+	s.sendTimeout.Store(int64(20 * time.Millisecond))
+
+	fillShard(s, 100) // fill the buffer
+	require.Equal(t, int64(0), s.Dropped())
+
+	s.Send(Event{Key: "k", Operation: "set"}) // full → drops after the timeout
+	require.Equal(t, int64(1), s.Dropped(), "drop mode must drop into a full buffer")
+}
+
+// TestLosslessWatchDeliversAllEvents is the integration-level check: through the
+// server-facing path (Options.LosslessWatch → Layered → watcher), every produced
+// event reaches the WatchWithCallback consumer. wg.Add(n) is the exact-count
+// barrier; a dropped event would leave it short and hang under -timeout.
+func TestLosslessWatchDeliversAllEvents(t *testing.T) {
+	t.Parallel()
+
+	st := New(LayeredConfig{Memory: NewMemoryLayer()})
+	require.NoError(t, st.Start(Options{LosslessWatch: true, Workers: 1}))
+	defer st.Close()
+
+	const n = 300
+	var wg sync.WaitGroup
+	wg.Add(n)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	WatchWithCallback(ctx, st, func(Event) { wg.Done() })
+
+	for i := range n {
+		_, err := st.Set(fmt.Sprintf("test/%d", i), testData)
+		require.NoError(t, err)
+	}
+	wg.Wait() // every write delivered
+	require.Equal(t, int64(0), st.watcher.Dropped())
+}
+
+// TestWatchWithCallbackContextCancelStopsGoroutines verifies the leak fix: the
+// watcher goroutines exit when the context is cancelled, even though the storage
+// is never closed (the caller may not own it). Without the ctx, each goroutine
+// blocks on its channel receive until process exit — leaking one per shard.
+// This is goroutine-leak accounting (runtime state), not async-event sync.
+func TestWatchWithCallbackContextCancelStopsGoroutines(t *testing.T) {
+	st := New(LayeredConfig{Memory: NewMemoryLayer()})
+	require.NoError(t, st.Start(Options{Workers: 8}))
+	defer st.Close()
+
+	runtime.GC()
+	base := runtime.NumGoroutine()
+	ctx, cancel := context.WithCancel(context.Background())
+	WatchWithCallback(ctx, st, func(Event) {})
+	require.Greater(t, runtime.NumGoroutine(), base, "watchers should have started")
+
+	cancel()
+	// Goroutine teardown is asynchronous; allow a bounded settle for the parked
+	// receivers to observe ctx.Done and return. This is the only sound way to
+	// observe goroutine cleanup and is not gating any business-logic event.
+	deadline := time.Now().Add(2 * time.Second)
+	for runtime.NumGoroutine() > base && time.Now().Before(deadline) {
+		runtime.Gosched()
+	}
+	require.LessOrEqual(t, runtime.NumGoroutine(), base,
+		"watcher goroutines must exit after ctx cancel (no leak)")
+}
+
+// TestWatchWithCallbackNilContext verifies a nil context is tolerated (treated
+// as never-cancel) rather than panicking on ctx.Done() — callers that construct
+// a watcher without a lifetime context still get delivery.
+func TestWatchWithCallbackNilContext(t *testing.T) {
+	t.Parallel()
+
+	st := New(LayeredConfig{Memory: NewMemoryLayer()})
+	require.NoError(t, st.Start(Options{}))
+	defer st.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	require.NotPanics(t, func() {
+		WatchWithCallback(nil, st, func(Event) { wg.Done() })
+	})
+	_, err := st.Set("test/nilctx", testData)
+	require.NoError(t, err)
+	wg.Wait() // delivery still works with a nil context
 }
 
 func TestWatchStorageNoop(t *testing.T) {

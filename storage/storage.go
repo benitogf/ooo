@@ -53,14 +53,40 @@ type Options struct {
 	// storage read-back cannot determine race-free.
 	AfterWriteOp func(key string, op string)
 	Workers      int
+	// LosslessWatch makes watch-event sends block until the consumer accepts
+	// them instead of dropping after SEND_TIMEOUT. Default false keeps the
+	// production behavior (drop a stuck/dead consumer's event to prevent a
+	// permanent write hang).
+	//
+	// Enable it only where lossless delivery is required AND the consumer cannot
+	// stall indefinitely. The tradeoff is real and wider than "the writer
+	// blocks": the watch send runs while the storage holds its internal lock, so
+	// a permanently stuck consumer wedges the whole storage instance — every
+	// mutex-guarded operation, Close included, blocks behind it. The default
+	// drop mode bounds that to SEND_TIMEOUT. Typical use is deterministic tests,
+	// where a dropped broadcast would desync a subscriber and surface as a flaky
+	// hang, and the consumer is the test's own live subscriber.
+	LosslessWatch bool
 }
 
 // ShardedChan manages multiple channels for per-key ordering.
 type ShardedChan struct {
-	shards  []StorageChan
-	count   int
-	dropped atomic.Int64
-	onDrop  atomic.Pointer[func(Event)]
+	shards   []StorageChan
+	count    int
+	dropped  atomic.Int64
+	onDrop   atomic.Pointer[func(Event)]
+	blocking atomic.Bool
+	// sendTimeout is the drop-mode send deadline in nanoseconds; defaults to
+	// SEND_TIMEOUT. Configurable so tests can force the drop path quickly
+	// instead of waiting out the production timeout.
+	sendTimeout atomic.Int64
+}
+
+// SetBlocking switches the channel between drop-on-timeout (false, default) and
+// lossless blocking send (true). In blocking mode Send waits for the consumer
+// instead of dropping after SEND_TIMEOUT — see Options.LosslessWatch.
+func (s *ShardedChan) SetBlocking(blocking bool) {
+	s.blocking.Store(blocking)
 }
 
 // NewShardedChan creates a new sharded storage channel with the given number of shards.
@@ -72,10 +98,12 @@ func NewShardedChan(shardCount int) *ShardedChan {
 	for i := range shards {
 		shards[i] = make(StorageChan, 100)
 	}
-	return &ShardedChan{
+	sc := &ShardedChan{
 		shards: shards,
 		count:  shardCount,
 	}
+	sc.sendTimeout.Store(int64(SEND_TIMEOUT))
+	return sc
 }
 
 // Dropped returns the total number of events the sharded channel has dropped
@@ -124,9 +152,15 @@ func (s *ShardedChan) SendWithTimeout(event Event, timeout time.Duration) bool {
 }
 
 // Send routes an event to the appropriate shard based on key hash.
-// Uses SEND_TIMEOUT to prevent permanent blocking if the shard consumer is stuck.
+// Uses SEND_TIMEOUT to prevent permanent blocking if the shard consumer is
+// stuck — unless blocking mode is set (SetBlocking), in which case it sends
+// losslessly, waiting for the consumer rather than dropping the event.
 func (s *ShardedChan) Send(event Event) {
-	s.SendWithTimeout(event, SEND_TIMEOUT)
+	if s.blocking.Load() {
+		s.shards[s.ShardFor(event.Key)] <- event
+		return
+	}
+	s.SendWithTimeout(event, time.Duration(s.sendTimeout.Load()))
 }
 
 // ShardFor returns the shard index for a given key using FNV-1a hash.
